@@ -8,32 +8,84 @@
 -- matches any single path segment and stores the captured value in conn
 -- assigns under the segment name (without the ":").
 --
+-- Handlers can return either Conn directly (plug-style) or
+-- Controller.ActionResult (controller-style). For ActionResult handlers,
+-- the router applies the fallback on Error automatically.
+--
+-- Use Router.get/post/... for plain Conn -> Conn handlers (plugs),
+-- and Router.action for handlers that return Controller.ActionResult.
+-- The router's fallback handles ActionResult errors and unmatched routes.
+--
 -- Example:
 --
 --   let router =
 --     Router.new()
---     |> Router.get("/", home)
---     |> Router.get("/users/:id", show_user)
---     |> Router.post("/users", create_user)
---     |> Router.scope("/api", api_sub_router)
+--     |> Router.fallback(fn conn -> fn result ->
+--       match result do
+--       Controller.Ok(c) -> c
+--       Controller.Error(status, msg) ->
+--         HttpServer.json(conn, status, "{\"error\":\"" ++ msg ++ "\"}")
+--       end
+--     )
+--     |> Router.action(Get, "/",          fn conn -> PageController.home(conn))
+--     |> Router.action(Get, "/users/:id", fn conn -> UserController.show(conn))
+--     |> Router.get("/health",            fn conn -> health_check(conn))
 --
--- Inside show_user, retrieve :id with HttpServer.get_assign(conn, "id").
+-- Inside show, retrieve :id with HttpServer.get_assign(conn, "id").
 
 mod Router do
 
   import HttpServer
   import ErrorView
+  import Controller
 
   -- A single registered route.
   type Route = Route(Method, List(String), Conn -> Conn)
 
-  -- A Router is an ordered list of routes.
-  -- Routes are checked in registration order; the first match wins.
-  type Router = Router(List(Route))
+  -- Fallback handler: receives conn + ActionResult, returns Conn.
+  -- Default renders ErrorView HTML pages.
+  type Fallback = Fallback(Conn -> Controller.ActionResult -> Conn)
 
-  doc "Create a new empty router."
+  -- A Router is an ordered list of routes plus a fallback handler.
+  type Router = Router(List(Route), Fallback)
+
+  -- Default fallback: render ErrorView HTML error pages.
+  pfn default_fallback() : Fallback do
+    Fallback(fn conn -> fn result ->
+      match result do
+      Controller.Ok(c) -> c
+      Controller.Error(status, message) ->
+        HttpServer.html(conn, status, ErrorView.render(status, message))
+      end
+    )
+  end
+
+  doc "Create a new empty router with the default HTML error fallback."
   fn new() : Router do
-    Router(Nil)
+    Router(Nil, default_fallback())
+  end
+
+  doc """
+  Set the fallback handler for this router.
+
+  The fallback is called when a controller action returns Controller.Error,
+  and also when no route matches (as a 404 error).
+
+  Example:
+    -- For an API router that returns JSON errors:
+    Router.new()
+    |> Router.fallback(fn conn -> fn result ->
+      match result do
+      Controller.Ok(c) -> c
+      Controller.Error(status, msg) ->
+        HttpServer.json(conn, status, "{\"error\":\"" ++ msg ++ "\"}")
+      end
+    )
+  """
+  fn fallback(router : Router, handler : Conn -> Controller.ActionResult -> Conn) : Router do
+    match router do
+    Router(routes, _) -> Router(routes, Fallback(handler))
+    end
   end
 
   -- ── Route registration ────────────────────────────────────────────
@@ -71,6 +123,27 @@ mod Router do
   end
 
   doc """
+  Register a route whose handler returns Controller.ActionResult.
+
+  On Ok(conn), the conn is returned as-is.  On Error(status, message),
+  the router's fallback handler renders the error response.  This is the
+  recommended way to wire controller actions — the fallback is applied
+  once at the router level rather than repeated in every handler.
+
+  Example:
+    Router.action(router, Get, "/users/:id", fn conn -> UserController.show(conn))
+  """
+  fn action(router : Router, method : Method, pattern : String, handler : Conn -> Controller.ActionResult) : Router do
+    match router do
+    Router(routes, fb) -> do
+      let segs = split_path(pattern)
+      let wrapped = wrap_action(fb, handler)
+      Router(List.append(routes, Cons(Route(method, segs, wrapped), Nil)), fb)
+    end
+    end
+  end
+
+  doc """
   Mount a sub-router under a path prefix.
 
   All routes in sub_router have the prefix prepended to their patterns.
@@ -81,11 +154,11 @@ mod Router do
   fn scope(router : Router, prefix : String, sub_router : Router) : Router do
     let prefix_segs = split_path(prefix)
     match sub_router do
-    Router(routes) -> do
-      let prefixed = prefix_routes(routes, prefix_segs)
+    Router(sub_routes, _) -> do
+      let prefixed = prefix_routes(sub_routes, prefix_segs)
       match router do
-      Router(existing) ->
-        Router(List.append(existing, prefixed))
+      Router(existing, fb) ->
+        Router(List.append(existing, prefixed), fb)
       end
     end
     end
@@ -97,14 +170,15 @@ mod Router do
   Dispatch an incoming conn to the first matching route.
 
   Extracts path parameters and stores them in conn assigns before calling
-  the handler. Returns a 404 response if no route matches.
+  the handler. If no route matches, the router's fallback is invoked with
+  a 404 error — so the fallback acts as the last arm of the match.
   """
   fn dispatch(router : Router, conn : Conn) : Conn do
     match router do
-    Router(routes) -> do
+    Router(routes, fb) -> do
       let meth      = HttpServer.method(conn)
       let path_segs = HttpServer.path_info(conn)
-      find_and_call(routes, meth, path_segs, conn)
+      find_and_call(routes, meth, path_segs, conn, fb)
     end
     end
   end
@@ -122,8 +196,16 @@ mod Router do
   pfn add_route(router : Router, method : Method, pattern : String, handler : Conn -> Conn) : Router do
     let segs = split_path(pattern)
     match router do
-    Router(routes) ->
-      Router(List.append(routes, Cons(Route(method, segs, handler), Nil)))
+    Router(routes, fb) ->
+      Router(List.append(routes, Cons(Route(method, segs, handler), Nil)), fb)
+    end
+  end
+
+  -- Wrap an ActionResult-returning handler by applying the fallback.
+  pfn wrap_action(fb : Fallback, handler : Conn -> Controller.ActionResult) : Conn -> Conn do
+    match fb do
+    Fallback(apply_fb) ->
+      fn conn -> apply_fb(conn)(handler(conn))
     end
   end
 
@@ -141,34 +223,43 @@ mod Router do
   end
 
   -- Walk the route list and dispatch to the first match.
-  pfn find_and_call(routes : List(Route), method : Method, path_segs : List(String), conn : Conn) : Conn do
+  -- On no match, apply the fallback with a 404 error — the fallback is
+  -- the last arm of the match.
+  pfn find_and_call(routes : List(Route), method : Method, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
     match routes do
     Nil ->
-      HttpServer.html(conn, 404, ErrorView.render_default(404))
+      apply_fallback(fb, conn, Controller.Error(404, "Not Found"))
     Cons(Route(m, pattern, handler), rest) ->
-      try_route(m, pattern, handler, rest, method, path_segs, conn)
+      try_route(m, pattern, handler, rest, method, path_segs, conn, fb)
+    end
+  end
+
+  -- Apply the fallback handler to an ActionResult.
+  pfn apply_fallback(fb : Fallback, conn : Conn, result : Controller.ActionResult) : Conn do
+    match fb do
+    Fallback(handler) -> handler(conn)(result)
     end
   end
 
   -- Check if this route's method matches, then try its path pattern.
-  pfn try_route(m : Method, pattern : List(String), handler : Conn -> Conn, rest : List(Route), method : Method, path_segs : List(String), conn : Conn) : Conn do
+  pfn try_route(m : Method, pattern : List(String), handler : Conn -> Conn, rest : List(Route), method : Method, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
     match Http.method_to_string(m) == Http.method_to_string(method) do
     true ->
-      dispatch_result(match_path(pattern, path_segs), handler, rest, method, path_segs, conn)
+      dispatch_result(match_path(pattern, path_segs), handler, rest, method, path_segs, conn, fb)
     false ->
-      find_and_call(rest, method, path_segs, conn)
+      find_and_call(rest, method, path_segs, conn, fb)
     end
   end
 
   -- Handle the result of path matching: bind params and call handler, or try next route.
-  pfn dispatch_result(result : Option(List((String, String))), handler : Conn -> Conn, rest : List(Route), method : Method, path_segs : List(String), conn : Conn) : Conn do
+  pfn dispatch_result(result : Option(List((String, String))), handler : Conn -> Conn, rest : List(Route), method : Method, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
     match result do
     Some(params) -> do
       let bound = bind_params(conn, params)
       handler(bound)
     end
     None ->
-      find_and_call(rest, method, path_segs, conn)
+      find_and_call(rest, method, path_segs, conn, fb)
     end
   end
 

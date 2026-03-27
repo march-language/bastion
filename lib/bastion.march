@@ -247,7 +247,6 @@ mod Bastion do
     "  import Router\n" ++
     "  import Middleware\n" ++
     "  import Controller\n" ++
-    "  import FallbackController\n" ++
     "  import IslandSocket\n" ++
     "  import IslandAssets\n" ++
     "  import Static\n" ++
@@ -255,8 +254,8 @@ mod Bastion do
     "  import Counter\n\n" ++
     "  pfn build_router() : Router do\n" ++
     "    Router.new()\n" ++
-    "    |> Router.get(\"/\",       fn conn -> PageController.home(conn))\n" ++
-    "    |> Router.get(\"/about\",  fn conn -> PageController.about(conn))\n" ++
+    "    |> Router.action(Get, \"/\",       fn conn -> PageController.home(conn))\n" ++
+    "    |> Router.action(Get, \"/about\",  fn conn -> PageController.about(conn))\n" ++
     "    |> Router.get(\"/health\", fn conn -> health(conn))\n" ++
     "  end\n\n" ++
     "  pfn health(conn : Conn) : Conn do\n" ++
@@ -310,12 +309,11 @@ mod Bastion do
     "mod PageController do\n\n" ++
     "  import HttpServer\n" ++
     "  import Controller\n" ++
-    "  import FallbackController\n" ++
     "  import Response\n\n" ++
     "  -- ── Actions ────────────────────────────────────────────────────────\n" ++
-    "  -- Actions return Controller.ActionResult so errors are handled\n" ++
-    "  -- uniformly by FallbackController.\n\n" ++
-    "  pfn home_action(conn : Conn) : Controller.ActionResult do\n" ++
+    "  -- Actions return Controller.ActionResult.  The router's fallback\n" ++
+    "  -- handles Error results automatically — no per-handler wiring needed.\n\n" ++
+    "  fn home(conn : Conn) : Controller.ActionResult do\n" ++
     "    let html = layout(\"Home\",\n" ++
     "      \"<h1>Welcome to " ++ pascal ++ "!</h1>\\n\" ++\n" ++
     "      \"<p>Edit <code>lib/page_controller.march</code> to get started.</p>\\n\" ++\n" ++
@@ -325,21 +323,12 @@ mod Bastion do
     "    )\n" ++
     "    Controller.Ok(Response.html(conn, 200, html))\n" ++
     "  end\n\n" ++
-    "  pfn about_action(conn : Conn) : Controller.ActionResult do\n" ++
+    "  fn about(conn : Conn) : Controller.ActionResult do\n" ++
     "    let html = layout(\"About\",\n" ++
     "      \"<h1>About</h1>\\n\" ++\n" ++
     "      \"<p>Built with <a href=\\\"https://github.com/march-lang/bastion\\\">Bastion</a>.</p>\"\n" ++
     "    )\n" ++
     "    Controller.Ok(Response.html(conn, 200, html))\n" ++
-    "  end\n\n" ++
-    "  -- ── Public handlers (used in Router) ───────────────────────────────\n" ++
-    "  -- Each handler delegates to an action and passes the result through\n" ++
-    "  -- FallbackController.call for automatic error rendering.\n\n" ++
-    "  fn home(conn : Conn) : Conn do\n" ++
-    "    FallbackController.call(conn, home_action(conn))\n" ++
-    "  end\n\n" ++
-    "  fn about(conn : Conn) : Conn do\n" ++
-    "    FallbackController.call(conn, about_action(conn))\n" ++
     "  end\n\n" ++
     "  -- ── Templates ──────────────────────────────────────────────────────\n\n" ++
     "  pfn layout(title : String, body : String) : String do\n" ++
