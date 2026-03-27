@@ -361,7 +361,9 @@
         try {
           msg = JSON.parse(msg);
         } catch (_) {
-          // Leave as string
+          // Simple string like "Increment" → wrap as derive Json variant
+          // format: {"tag":"Increment"} so the server's from_json can dispatch.
+          msg = { tag: msg };
         }
 
         const instance = this._findIslandForElement(target);
