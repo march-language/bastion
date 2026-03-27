@@ -1,7 +1,7 @@
 [package]
 name = "bastion"
 version = "0.1.0"
-type = "lib+tool"
+type = "lib"
 description = ""
 author = ""
 
