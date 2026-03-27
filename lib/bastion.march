@@ -248,6 +248,9 @@ mod Bastion do
     "  import Middleware\n" ++
     "  import Controller\n" ++
     "  import FallbackController\n" ++
+    "  import IslandSocket\n" ++
+    "  import IslandAssets\n" ++
+    "  import Static\n" ++
     "  import PageController\n\n" ++
     "  pfn build_router() : Router do\n" ++
     "    Router.new()\n" ++
@@ -255,25 +258,39 @@ mod Bastion do
     "    |> Router.get(\"/about\",  fn conn -> PageController.about(conn))\n" ++
     "    |> Router.get(\"/health\", fn conn -> health(conn))\n" ++
     "  end\n\n" ++
-    "  -- Health check using Controller.json for consistency\n" ++
     "  pfn health(conn : Conn) : Conn do\n" ++
     "    Controller.json(conn, 200, \"{\\\"status\\\":\\\"ok\\\"}\")\n" ++
     "  end\n\n" ++
     "  fn main() : Unit do\n" ++
     "    let router  = build_router()\n" ++
-    "    let plug    = Router.to_plug(router)\n" ++
-    "    let wrapped = fn conn -> do\n" ++
-    "      let c1 = Middleware.logger(conn)\n" ++
-    "      let c2 = Middleware.request_id(c1)\n" ++
-    "      let c3 = Middleware.cors(c2)\n" ++
-    "      match HttpServer.halted(c3) do\n" ++
-    "      true  -> c3\n" ++
-    "      false -> plug(c3)\n" ++
+    "    let plug    = Router.to_plug(router)\n\n" ++
+    "    -- Island infrastructure\n" ++
+    "    let island_ws     = IslandSocket.plug(IslandSocket.default_config())\n" ++
+    "    let island_assets = IslandAssets.plug(IslandAssets.default_config())\n" ++
+    "    let static_files  = Static.serve(\"public\")\n\n" ++
+    "    let app = fn conn -> do\n" ++
+    "      -- 1. Island WebSocket upgrade (must be first)\n" ++
+    "      let c = island_ws(conn)\n" ++
+    "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
+    "      -- 2. Island JS assets\n" ++
+    "      let c = island_assets(c)\n" ++
+    "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
+    "      -- 3. Static files\n" ++
+    "      let c = static_files(c)\n" ++
+    "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
+    "      -- 4. Middleware + router\n" ++
+    "      let c = Middleware.logger(c)\n" ++
+    "      let c = Middleware.request_id(c)\n" ++
+    "      let c = Middleware.cors(c)\n" ++
+    "      match HttpServer.halted(c) do\n" ++
+    "      true  -> c\n" ++
+    "      false -> plug(c)\n" ++
     "      end\n" ++
-    "    end\n" ++
+    "      end end end\n" ++
+    "    end\n\n" ++
     "    println(\"" ++ pascal ++ " listening on http://localhost:4000\")\n" ++
     "    HttpServer.new(4000)\n" ++
-    "    |> HttpServer.plug(wrapped)\n" ++
+    "    |> HttpServer.plug(app)\n" ++
     "    |> HttpServer.listen()\n" ++
     "  end\n\n" ++
     "end\n"
@@ -292,7 +309,9 @@ mod Bastion do
     "    let html = layout(\"Home\",\n" ++
     "      \"<h1>Welcome to " ++ pascal ++ "!</h1>\\n\" ++\n" ++
     "      \"<p>Edit <code>lib/page_controller.march</code> to get started.</p>\\n\" ++\n" ++
-    "      \"<p><a href=\\\"/about\\\">About</a></p>\"\n" ++
+    "      \"<p><a href=\\\"/about\\\">About</a></p>\\n\" ++\n" ++
+    "      \"<h2>Interactive Counter (Island)</h2>\\n\" ++\n" ++
+    "      \"<div data-march-island=\\\"Counter\\\" data-march-state='{\\\"count\\\":0}'></div>\"\n" ++
     "    )\n" ++
     "    Controller.Ok(Response.html(conn, 200, html))\n" ++
     "  end\n\n" ++
@@ -325,6 +344,7 @@ mod Bastion do
     "    \"<body>\\n\" ++\n" ++
     "    \"  <nav><a href=\\\"/\\\">Home</a> <a href=\\\"/about\\\">About</a></nav>\\n\" ++\n" ++
     "    \"  <main>\\n\" ++ body ++ \"\\n  </main>\\n\" ++\n" ++
+    "    \"  <script src=\\\"/_bastion/islands.js\\\"></script>\\n\" ++\n" ++
     "    \"</body>\\n\" ++\n" ++
     "    \"</html>\\n\"\n" ++
     "  end\n\n" ++
@@ -334,44 +354,33 @@ mod Bastion do
   pfn counter_island(_pascal : String) : String do
     "-- Counter — example island component.\n" ++
     "--\n" ++
-    "-- Compile to WASM:\n" ++
-    "--   march --compile --target wasm32-unknown-unknown lib/counter.march -o islands/Counter.wasm\n\n" ++
+    "-- Islands follow the init/update/render protocol.\n" ++
+    "-- State is synced between client and server via CRDT merge.\n\n" ++
     "mod Counter do\n\n" ++
-    "  type State = { count : Int }\n\n" ++
-    "  fn render(state_json : String) : String do\n" ++
-    "    let count = parse_count(state_json)\n" ++
-    "    \"<div class=\\\"counter\\\">\\n\" ++\n" ++
-    "    \"  <button data-on-click=\\\"Decrement\\\">−</button>\\n\" ++\n" ++
-    "    \"  <span class=\\\"count\\\">\" ++ int_to_string(count) ++ \"</span>\\n\" ++\n" ++
-    "    \"  <button data-on-click=\\\"Increment\\\">+</button>\\n\" ++\n" ++
+    "  type Props = { initial : Int }\n" ++
+    "  type State = { count : Int }\n" ++
+    "  type Msg = Increment | Decrement | Reset\n\n" ++
+    "  fn init(props : Props) : State do\n" ++
+    "    { count = props.initial }\n" ++
+    "  end\n\n" ++
+    "  fn update(state : State, msg : Msg) : State do\n" ++
+    "    match msg do\n" ++
+    "    Increment -> { count = state.count + 1 }\n" ++
+    "    Decrement -> { count = state.count - 1 }\n" ++
+    "    Reset     -> { count = 0 }\n" ++
+    "    end\n" ++
+    "  end\n\n" ++
+    "  fn render(state : State) : String do\n" ++
+    "    \"<div id=\\\"counter\\\" class=\\\"counter\\\">\\n\" ++\n" ++
+    "    \"  <button data-msg=\\\"Decrement\\\">−</button>\\n\" ++\n" ++
+    "    \"  <span class=\\\"count\\\">\" ++ int_to_string(state.count) ++ \"</span>\\n\" ++\n" ++
+    "    \"  <button data-msg=\\\"Increment\\\">+</button>\\n\" ++\n" ++
     "    \"</div>\"\n" ++
     "  end\n\n" ++
-    "  fn update(state_json : String, msg_json : String) : String do\n" ++
-    "    let count = parse_count(state_json)\n" ++
-    "    let new_count = match msg_json do\n" ++
-    "      \"\\\"Increment\\\"\" -> count + 1\n" ++
-    "      \"\\\"Decrement\\\"\" -> count - 1\n" ++
-    "      _              -> count\n" ++
-    "      end\n" ++
-    "    \"{\\\"count\\\":\" ++ int_to_string(new_count) ++ \"}\"\n" ++
-    "  end\n\n" ++
-    "  pfn parse_count(state_json : String) : Int do\n" ++
-    "    match Json.parse(state_json) do\n" ++
-    "    Ok(v) -> do\n" ++
-    "      match Json.get(v, \"count\") do\n" ++
-    "      Some(n) -> json_to_int(n)\n" ++
-    "      None    -> 0\n" ++
-    "      end\n" ++
-    "    end\n" ++
-    "    Err(_) -> 0\n" ++
-    "    end\n" ++
-    "  end\n\n" ++
-    "  pfn json_to_int(v : JsonValue) : Int do\n" ++
-    "    match v do\n" ++
-    "    Number(f) -> float_to_int(f)\n" ++
-    "    _         -> 0\n" ++
-    "    end\n" ++
-    "  end\n\n" ++
+    "  -- Default merge: server wins (omit for custom CRDT logic)\n" ++
+    "  -- fn merge(local : State, remote : State) : State do\n" ++
+    "  --   remote\n" ++
+    "  -- end\n\n" ++
     "end\n"
   end
 

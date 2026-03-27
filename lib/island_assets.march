@@ -94,29 +94,27 @@ mod IslandAssets do
     |> HttpServer.send_resp(200, client_ws_js())
   end
 
-  -- ── Embedded JS ─────────────────────────────────────────────────────────
-  -- Placeholder JS for Phase 1.  The real runtime will be injected later by
-  -- the client-side agent.
+  -- ── JS file loading ────────────────────────────────────────────────────
+  -- Reads the JS runtime from priv/js/ files on disk.
+  -- Falls back to a minimal placeholder if the files aren't found.
 
   pfn client_runtime_js() : String do
-    "// Bastion Islands Runtime (placeholder)\n" ++
-    "// This will be replaced with the real island runtime.\n" ++
-    "console.log('[bastion] islands runtime loaded (placeholder)');\n" ++
-    "\n" ++
-    "// Discover island elements and log them\n" ++
-    "(function() {\n" ++
-    "  var islands = document.querySelectorAll('[data-march-island]');\n" ++
-    "  console.log('[bastion] found ' + islands.length + ' island(s)');\n" ++
-    "  islands.forEach(function(el) {\n" ++
-    "    console.log('[bastion] island: ' + el.getAttribute('data-march-island'));\n" ++
-    "  });\n" ++
-    "})();\n"
+    -- idiomorph + islands runtime + wasm bridge, concatenated
+    let idiomorph = read_js_file("priv/js/idiomorph.js")
+    let islands   = read_js_file("priv/js/march-islands.js")
+    let wasm      = read_js_file("priv/js/wasm-bridge.js")
+    idiomorph ++ "\n" ++ islands ++ "\n" ++ wasm
   end
 
   pfn client_ws_js() : String do
-    "// Bastion Islands WebSocket (placeholder)\n" ++
-    "// This will be replaced with the real WS connection script.\n" ++
-    "console.log('[bastion] islands WebSocket script loaded (placeholder)');\n"
+    read_js_file("priv/js/march-islands.js")
+  end
+
+  pfn read_js_file(path : String) : String do
+    match File.read(path) do
+    Ok(content) -> content
+    Err(_) -> "console.warn('[bastion] could not load " ++ path ++ "');\n"
+    end
   end
 
 end
