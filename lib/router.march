@@ -1,0 +1,213 @@
+-- Bastion.Router — declarative, pattern-matched HTTP routing.
+--
+-- Routes are registered with method-specific helpers (get, post, put, patch,
+-- delete) and dispatched via Router.to_plug/1, which converts the Router into
+-- a plain HttpServer plug (Conn -> Conn).
+--
+-- Path parameter syntax: a segment starting with ":" is a wildcard that
+-- matches any single path segment and stores the captured value in conn
+-- assigns under the segment name (without the ":").
+--
+-- Example:
+--
+--   let router =
+--     Router.new()
+--     |> Router.get("/", home)
+--     |> Router.get("/users/:id", show_user)
+--     |> Router.post("/users", create_user)
+--     |> Router.scope("/api", api_sub_router)
+--
+-- Inside show_user, retrieve :id with HttpServer.get_assign(conn, "id").
+
+mod Router do
+
+  import HttpServer
+
+  -- A single registered route.
+  type Route = Route(Method, List(String), Conn -> Conn)
+
+  -- A Router is an ordered list of routes.
+  -- Routes are checked in registration order; the first match wins.
+  type Router = Router(List(Route))
+
+  doc "Create a new empty router."
+  fn new() : Router do
+    Router(Nil)
+  end
+
+  -- ── Route registration ────────────────────────────────────────────
+
+  doc """
+  Register a GET handler for the given path pattern.
+
+  Segments starting with ":" are captured as path parameters.
+
+  Example:
+    Router.get(router, "/users/:id", show_user)
+  """
+  fn get(router : Router, pattern : String, handler : Conn -> Conn) : Router do
+    add_route(router, Get, pattern, handler)
+  end
+
+  doc "Register a POST handler for the given path pattern."
+  fn post(router : Router, pattern : String, handler : Conn -> Conn) : Router do
+    add_route(router, Post, pattern, handler)
+  end
+
+  doc "Register a PUT handler for the given path pattern."
+  fn put(router : Router, pattern : String, handler : Conn -> Conn) : Router do
+    add_route(router, Put, pattern, handler)
+  end
+
+  doc "Register a PATCH handler for the given path pattern."
+  fn patch(router : Router, pattern : String, handler : Conn -> Conn) : Router do
+    add_route(router, Patch, pattern, handler)
+  end
+
+  doc "Register a DELETE handler for the given path pattern."
+  fn delete(router : Router, pattern : String, handler : Conn -> Conn) : Router do
+    add_route(router, Delete, pattern, handler)
+  end
+
+  doc """
+  Mount a sub-router under a path prefix.
+
+  All routes in sub_router have the prefix prepended to their patterns.
+
+  Example:
+    Router.scope(router, "/api", api_sub_router)
+  """
+  fn scope(router : Router, prefix : String, sub_router : Router) : Router do
+    let prefix_segs = split_path(prefix)
+    match sub_router do
+    Router(routes) -> do
+      let prefixed = prefix_routes(routes, prefix_segs)
+      match router do
+      Router(existing) ->
+        Router(List.append(existing, prefixed))
+      end
+    end
+    end
+  end
+
+  -- ── Dispatch ──────────────────────────────────────────────────────
+
+  doc """
+  Dispatch an incoming conn to the first matching route.
+
+  Extracts path parameters and stores them in conn assigns before calling
+  the handler. Returns a 404 response if no route matches.
+  """
+  fn dispatch(router : Router, conn : Conn) : Conn do
+    match router do
+    Router(routes) -> do
+      let meth      = HttpServer.method(conn)
+      let path_segs = HttpServer.path_info(conn)
+      find_and_call(routes, meth, path_segs, conn)
+    end
+    end
+  end
+
+  doc """
+  Convert a Router into a plug function (Conn -> Conn).
+  Pass the result to HttpServer.plug/2 or Bastion.start/2.
+  """
+  fn to_plug(router : Router) : Conn -> Conn do
+    fn conn -> dispatch(router, conn)
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────
+
+  pfn add_route(router : Router, method : Method, pattern : String, handler : Conn -> Conn) : Router do
+    let segs = split_path(pattern)
+    match router do
+    Router(routes) ->
+      Router(List.append(routes, Cons(Route(method, segs, handler), Nil)))
+    end
+  end
+
+  pfn split_path(path : String) : List(String) do
+    let parts = String.split(path, "/")
+    List.filter(parts, fn s -> !String.is_empty(s))
+  end
+
+  pfn prefix_routes(routes : List(Route), prefix : List(String)) : List(Route) do
+    match routes do
+    Nil -> Nil
+    Cons(Route(m, segs, h), rest) ->
+      Cons(Route(m, List.append(prefix, segs), h), prefix_routes(rest, prefix))
+    end
+  end
+
+  -- Walk the route list and dispatch to the first match.
+  pfn find_and_call(routes : List(Route), method : Method, path_segs : List(String), conn : Conn) : Conn do
+    match routes do
+    Nil ->
+      HttpServer.text(conn, 404, "Not Found")
+    Cons(Route(m, pattern, handler), rest) ->
+      try_route(m, pattern, handler, rest, method, path_segs, conn)
+    end
+  end
+
+  -- Check if this route's method matches, then try its path pattern.
+  pfn try_route(m : Method, pattern : List(String), handler : Conn -> Conn, rest : List(Route), method : Method, path_segs : List(String), conn : Conn) : Conn do
+    match Http.method_to_string(m) == Http.method_to_string(method) do
+    true ->
+      dispatch_result(match_path(pattern, path_segs), handler, rest, method, path_segs, conn)
+    false ->
+      find_and_call(rest, method, path_segs, conn)
+    end
+  end
+
+  -- Handle the result of path matching: bind params and call handler, or try next route.
+  pfn dispatch_result(result : Option(List((String, String))), handler : Conn -> Conn, rest : List(Route), method : Method, path_segs : List(String), conn : Conn) : Conn do
+    match result do
+    Some(params) -> do
+      let bound = bind_params(conn, params)
+      handler(bound)
+    end
+    None ->
+      find_and_call(rest, method, path_segs, conn)
+    end
+  end
+
+  -- Try to match a path against a pattern, collecting param bindings.
+  pfn match_path(pattern : List(String), path : List(String)) : Option(List((String, String))) do
+    match_path_acc(pattern, path, Nil)
+  end
+
+  pfn match_path_acc(pattern : List(String), path : List(String), acc : List((String, String))) : Option(List((String, String))) do
+    match (pattern, path) do
+    (Nil, Nil) ->
+      Some(List.reverse(acc))
+    (Cons(seg, prest), Cons(part, rest)) ->
+      match_segment(seg, part, prest, rest, acc)
+    (_, _) ->
+      None
+    end
+  end
+
+  -- Match a single path segment: wildcard param or literal equality.
+  pfn match_segment(seg : String, part : String, prest : List(String), rest : List(String), acc : List((String, String))) : Option(List((String, String))) do
+    match String.starts_with(seg, ":") do
+    true -> do
+      let name = String.slice_bytes(seg, 1, String.byte_size(seg) - 1)
+      match_path_acc(prest, rest, Cons((name, part), acc))
+    end
+    false ->
+      match seg == part do
+      true  -> match_path_acc(prest, rest, acc)
+      false -> None
+      end
+    end
+  end
+
+  pfn bind_params(conn : Conn, params : List((String, String))) : Conn do
+    match params do
+    Nil -> conn
+    Cons((k, v), rest) ->
+      bind_params(HttpServer.assign(conn, k, v), rest)
+    end
+  end
+
+end

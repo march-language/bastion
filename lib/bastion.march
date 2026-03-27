@@ -1,0 +1,112 @@
+-- Bastion — a plug-style HTTP web framework for March.
+--
+-- Bastion wraps HttpServer with ergonomic higher-level abstractions:
+-- a declarative router, typed middleware pipeline, static file serving,
+-- and structured request/response helpers.
+--
+-- Usage:
+--
+--   fn main() do
+--     let router =
+--       Router.new()
+--       |> Router.get("/", home_handler)
+--       |> Router.get("/users/:id", user_handler)
+--       |> Router.post("/users", create_user_handler)
+--
+--     Bastion.start(router, Bastion.default_opts(4000))
+--   end
+
+mod Bastion do
+
+  -- Server configuration options.
+  --
+  -- Fields (positional):
+  --   port            — TCP port to listen on
+  --   max_connections — maximum number of concurrent connections
+  --   idle_timeout    — seconds before an idle connection is closed
+  type Opts = Opts(Int, Int, Int)
+
+  doc "Returns a default Opts with the given port, 1000 max connections, and 60s idle timeout."
+  fn default_opts(port : Int) : Opts do
+    Opts(port, 1000, 60)
+  end
+
+  doc "Returns the port from an Opts value."
+  fn opts_port(opts : Opts) : Int do
+    match opts do
+    Opts(port, _, _) -> port
+    end
+  end
+
+  doc "Alias for opts_port. Returns the port from an Opts value."
+  fn port(opts : Opts) : Int do
+    opts_port(opts)
+  end
+
+  doc "Returns a new Opts with the port replaced."
+  fn with_port(opts : Opts, port : Int) : Opts do
+    match opts do
+    Opts(_, mc, it) -> Opts(port, mc, it)
+    end
+  end
+
+  doc "Returns a new Opts with max_connections replaced."
+  fn with_max_connections(opts : Opts, n : Int) : Opts do
+    match opts do
+    Opts(port, _, it) -> Opts(port, n, it)
+    end
+  end
+
+  doc "Returns a new Opts with idle_timeout (in seconds) replaced."
+  fn with_idle_timeout(opts : Opts, secs : Int) : Opts do
+    match opts do
+    Opts(port, mc, _) -> Opts(port, mc, secs)
+    end
+  end
+
+  doc """
+  Start the Bastion server with the given router and options.
+
+  Converts the Router into an HttpServer plug and calls HttpServer.listen/1.
+  Blocks the calling process until the server exits.
+
+  Example:
+    Bastion.start(router, Bastion.default_opts(4000))
+  """
+  fn start(router : Router, opts : Opts) : Unit do
+    match opts do
+    Opts(port, mc, it) -> do
+      let plug = Router.to_plug(router)
+      HttpServer.new(port)
+      |> HttpServer.max_connections(mc)
+      |> HttpServer.idle_timeout(it)
+      |> HttpServer.plug(plug)
+      |> HttpServer.listen()
+    end
+    end
+  end
+
+  doc """
+  Start the server in a subprocess that handles exactly n requests, then exits.
+  Returns an integer handle that can be passed to Bastion.wait_for/1.
+  Useful for integration tests — lets the test drive request count.
+  """
+  fn spawn_n(router : Router, opts : Opts, n : Int) : Int do
+    match opts do
+    Opts(port, mc, it) -> do
+      let plug = Router.to_plug(router)
+      HttpServer.new(port)
+      |> HttpServer.max_connections(mc)
+      |> HttpServer.idle_timeout(it)
+      |> HttpServer.plug(plug)
+      |> HttpServer.spawn_n(n)
+    end
+    end
+  end
+
+  doc "Wait for a server subprocess returned by spawn_n to exit."
+  fn wait_for(handle : Int) : Unit do
+    HttpServer.wait_for(handle)
+  end
+
+end

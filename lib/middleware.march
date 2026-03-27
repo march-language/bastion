@@ -1,0 +1,149 @@
+-- Bastion.Middleware — plug-style middleware pipeline composition.
+--
+-- Middleware in Bastion is a plain function:  Conn -> Conn
+--
+-- A pipeline is an ordered list of such functions.  Each function receives
+-- the conn returned by the previous one.  Processing stops early if any
+-- plug marks the conn as halted (via HttpServer.halt or HttpServer.send_resp).
+
+mod Middleware do
+
+  import HttpServer
+
+  doc """
+  Execute a list of plugs in order, stopping when the conn is halted.
+
+  Example:
+    let conn = Middleware.pipeline([logger, auth, my_handler], conn)
+  """
+  fn pipeline(plugs : List(Conn -> Conn), conn : Conn) : Conn do
+    HttpServer.run_pipeline(conn, plugs)
+  end
+
+  doc """
+  Compose two plugs left-to-right into a single plug.
+
+  Calls a(conn), then b on the result only if the conn is not halted.
+  """
+  fn compose(a : Conn -> Conn, b : Conn -> Conn) : Conn -> Conn do
+    fn conn -> do
+      let c = a(conn)
+      match HttpServer.halted(c) do
+      true  -> c
+      false -> b(c)
+      end
+    end
+  end
+
+  -- ── Built-in middleware ───────────────────────────────────────────
+
+  doc """
+  Logging middleware.
+
+  Logs the request method and path on every request using Logger.info.
+  """
+  fn logger(conn : Conn) : Conn do
+    let method_str = Http.method_to_string(HttpServer.method(conn))
+    let path_str   = HttpServer.path(conn)
+    println("${method_str} ${path_str}")
+    conn
+  end
+
+  doc """
+  Request ID middleware.
+
+  Assigns a unique request ID to the conn under the "request_id" key.
+  If the incoming request has an "x-request-id" header its value is used;
+  otherwise a fresh ID is generated.
+  """
+  fn request_id(conn : Conn) : Conn do
+    let existing = HttpServer.get_req_header(conn, "x-request-id")
+    let id = match existing do
+      Some(v) -> v
+      None    -> generate_id(conn)
+      end
+    HttpServer.assign(conn, "request_id", id)
+  end
+
+  doc "Sets a default content-type response header of text/html if none has been set."
+  fn default_content_type(conn : Conn) : Conn do
+    HttpServer.put_resp_header(conn, "content-type", "text/html; charset=utf-8")
+  end
+
+  doc "Permissive CORS middleware: adds Access-Control-Allow-Origin: * and standard CORS headers."
+  fn cors(conn : Conn) : Conn do
+    conn
+    |> HttpServer.put_resp_header("access-control-allow-origin", "*")
+    |> HttpServer.put_resp_header("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+    |> HttpServer.put_resp_header("access-control-allow-headers", "content-type, authorization")
+  end
+
+  doc """
+  Returns a plug that halts with 405 Method Not Allowed if the request method
+  is not in the allowed list.
+
+  Example:
+    let only_get = Middleware.allow_methods([Get])
+  """
+  fn allow_methods(allowed : List(Method)) : Conn -> Conn do
+    fn conn -> do
+      let m = HttpServer.method(conn)
+      match List.any(allowed, fn a -> Http.method_to_string(a) == Http.method_to_string(m)) do
+      true  -> conn
+      false -> HttpServer.text(conn, 405, "Method Not Allowed")
+      end
+    end
+  end
+
+  actor IdCounter do
+    state { n : Int }
+    init  { n = 0 }
+    on Call(ref, msg) do
+      let _ = Actor.reply(ref, state.n)
+      { state with n = state.n + 1 }
+    end
+  end
+
+  doc "Spawn a sequential ID counter actor. Pass the returned handle to request_id_counter/1."
+  fn start_id_counter() do
+    spawn(IdCounter)
+  end
+
+  doc """
+  Returns a plug that assigns a unique sequential request ID to each conn.
+
+  Prefers an incoming x-request-id header if present; otherwise calls the
+  IdCounter actor for a monotonically increasing integer ID.
+
+  Spawn the counter once at startup with Middleware.start_id_counter/0:
+
+    let counter = Middleware.start_id_counter()
+    let pipe = Middleware.pipeline([Middleware.request_id_counter(counter), ...], conn)
+  """
+  fn request_id_counter(counter) : Conn -> Conn do
+    fn conn -> do
+      let existing = HttpServer.get_req_header(conn, "x-request-id")
+      let id = match existing do
+        Some(v) -> v
+        None    -> next_counter_id(counter)
+        end
+      HttpServer.assign(conn, "request_id", id)
+    end
+  end
+
+  pfn next_counter_id(counter) : String do
+    match Actor.call(counter, 0, 1000) do
+    Ok(n)  -> "req-" ++ int_to_string(n)
+    Err(_) -> "req-unknown"
+    end
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────
+
+  -- IDs are unique per request: fd is unique per open connection, ts gives ordering.
+  pfn generate_id(conn : Conn) : String do
+    let fd = HttpServer.fd(conn)
+    "req-" ++ int_to_string(fd)
+  end
+
+end

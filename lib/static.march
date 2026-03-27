@@ -1,0 +1,131 @@
+-- Bastion.Static — static file serving middleware.
+--
+-- Serves files from a directory on disk.  Designed to be inserted into a
+-- Bastion pipeline before the router so that asset requests are handled
+-- without hitting application code.
+--
+-- Usage:
+--
+--   HttpServer.new(4000)
+--   |> HttpServer.plug(Static.serve("priv/static"))
+--   |> HttpServer.plug(Router.to_plug(router))
+--   |> HttpServer.listen()
+
+mod Static do
+
+  import HttpServer
+
+  -- Configuration for the static file server.
+  type Config = Config(String, String)
+
+  doc "Create a Config that serves files from root with no URL prefix."
+  fn config(root : String) : Config do
+    Config(root, "")
+  end
+
+  doc "Create a Config that serves files from root, stripping the given URL prefix."
+  fn config_with_prefix(root : String, prefix : String) : Config do
+    Config(root, prefix)
+  end
+
+  doc """
+  Return a plug that serves static files from the given directory.
+
+  Requests that resolve to a readable file are served and the conn is halted.
+  Unmatched requests are passed through unchanged.
+
+  Example:
+    HttpServer.plug(server, Static.serve("priv/static"))
+  """
+  fn serve(root : String) : Conn -> Conn do
+    serve_with_config(Config(root, ""))
+  end
+
+  doc """
+  Return a plug that serves static files from root, stripping prefix from the URL.
+
+  Example:
+    Static.serve_with_prefix("priv/static", "/static")
+    -- A request for /static/app.css serves priv/static/app.css
+  """
+  fn serve_with_prefix(root : String, prefix : String) : Conn -> Conn do
+    serve_with_config(Config(root, prefix))
+  end
+
+  doc "Return a plug that serves static files using the given Config."
+  fn serve_with_config(cfg : Config) : Conn -> Conn do
+    fn conn -> handle(cfg, conn)
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────
+
+  pfn handle(cfg : Config, conn : Conn) : Conn do
+    match cfg do
+    Config(root, prefix) -> do
+      let path      = HttpServer.path(conn)
+      let file_path = root ++ "/" ++ strip_and_normalise(url_path(path, prefix))
+      match File.read(file_path) do
+      Ok(contents) -> do
+        let mime = mime_type(file_path)
+        conn
+        |> HttpServer.put_resp_header("content-type", mime)
+        |> HttpServer.send_resp(200, contents)
+      end
+      Err(_) ->
+        conn
+      end
+    end
+    end
+  end
+
+  -- Strip prefix from url_path if present; otherwise return url_path unchanged.
+  pfn url_path(path : String, prefix : String) : String do
+    match String.is_empty(prefix) do
+    true  -> path
+    false ->
+      match String.starts_with(path, prefix) do
+      true  -> String.slice_bytes(path, String.byte_size(prefix), String.byte_size(path) - String.byte_size(prefix))
+      false -> path
+      end
+    end
+  end
+
+  -- Strip a leading "/" so we can join safely with root ++ "/" ++ rel.
+  pfn strip_and_normalise(path : String) : String do
+    match String.starts_with(path, "/") do
+    true  -> String.slice_bytes(path, 1, String.byte_size(path) - 1)
+    false -> path
+    end
+  end
+
+  -- MIME type lookup table implemented as a list walk.
+  pfn mime_type(path : String) : String do
+    let table = [
+      (".html", "text/html; charset=utf-8"),
+      (".css",  "text/css"),
+      (".js",   "application/javascript"),
+      (".json", "application/json"),
+      (".png",  "image/png"),
+      (".jpg",  "image/jpeg"),
+      (".jpeg", "image/jpeg"),
+      (".svg",  "image/svg+xml"),
+      (".ico",  "image/x-icon"),
+      (".woff", "font/woff"),
+      (".woff2","font/woff2"),
+      (".txt",  "text/plain; charset=utf-8")
+    ]
+    mime_lookup(path, table)
+  end
+
+  pfn mime_lookup(path : String, table : List((String, String))) : String do
+    match table do
+    Nil -> "application/octet-stream"
+    Cons((ext, mime), rest) ->
+      match String.ends_with(path, ext) do
+      true  -> mime
+      false -> mime_lookup(path, rest)
+      end
+    end
+  end
+
+end

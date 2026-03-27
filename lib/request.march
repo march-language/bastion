@@ -1,0 +1,152 @@
+-- Bastion.Request — request inspection and parsing helpers.
+--
+-- Provides structured access to request data: query string parameters,
+-- headers, body content, and path parameters stored in assigns.
+--
+-- All functions are pure transformations on HttpServer.Conn values.
+
+mod Request do
+
+  import HttpServer
+
+  -- ── Query string ──────────────────────────────────────────────────
+
+  doc """
+  Parse the query string into a list of (key, value) pairs.
+
+  Returns an empty list if the query string is empty.
+
+  Example:
+    -- For request "GET /search?q=hello&page=1"
+    Request.query_params(conn)
+    -- => [("q", "hello"), ("page", "1")]
+  """
+  fn query_params(conn : Conn) : List((String, String)) do
+    let qs = HttpServer.query_string(conn)
+    match String.is_empty(qs) do
+    true  -> Nil
+    false -> parse_query(qs)
+    end
+  end
+
+  doc "Look up a single query parameter by name. Returns None if absent."
+  fn get_query_param(conn : Conn, key : String) : Option(String) do
+    let params = query_params(conn)
+    lookup(params, key)
+  end
+
+  -- ── Path parameters ───────────────────────────────────────────────
+
+  doc """
+  Look up a path parameter captured by the router (e.g. ":id" in "/users/:id").
+
+  Path params are stored in conn assigns by the router.
+
+  Example:
+    -- Route: "/users/:id"
+    Request.get_path_param(conn, "id")  -- => Some("42")
+  """
+  fn get_path_param(conn : Conn, name : String) : Option(String) do
+    HttpServer.get_assign(conn, name)
+  end
+
+  doc "Alias for get_path_param. Returns the named path parameter captured by the router."
+  fn path_param(conn : Conn, name : String) : Option(String) do
+    get_path_param(conn, name)
+  end
+
+  -- ── Assigns ───────────────────────────────────────────────────────
+
+  doc "Look up a value stored in conn assigns by key."
+  fn get_assign(conn : Conn, key : String) : Option(String) do
+    HttpServer.get_assign(conn, key)
+  end
+
+  -- ── Headers ───────────────────────────────────────────────────────
+
+  doc "Look up a request header by name (case-insensitive)."
+  fn get_header(conn : Conn, name : String) : Option(String) do
+    HttpServer.get_req_header(conn, name)
+  end
+
+  doc "Returns the Content-Type request header value, if present."
+  fn content_type(conn : Conn) : Option(String) do
+    HttpServer.get_req_header(conn, "content-type")
+  end
+
+  doc "Returns the Authorization header value, if present."
+  fn authorization(conn : Conn) : Option(String) do
+    HttpServer.get_req_header(conn, "authorization")
+  end
+
+  doc "Returns the User-Agent header value, if present."
+  fn user_agent(conn : Conn) : Option(String) do
+    HttpServer.get_req_header(conn, "user-agent")
+  end
+
+  -- ── Body ─────────────────────────────────────────────────────────
+
+  doc "Returns the raw request body string."
+  fn body(conn : Conn) : String do
+    HttpServer.req_body(conn)
+  end
+
+  doc """
+  Parse the request body as URL-encoded form data (application/x-www-form-urlencoded).
+  Returns a list of (key, value) pairs — the same format as query_params.
+
+  Example:
+    -- POST body: "title=Hello&body=World"
+    Request.body_params(conn)  -- => [("title","Hello"), ("body","World")]
+  """
+  fn body_params(conn : Conn) : List((String, String)) do
+    let raw = HttpServer.req_body(conn)
+    match String.is_empty(raw) do
+    true  -> Nil
+    false -> parse_query(raw)
+    end
+  end
+
+  doc "Parse the request body as JSON. Returns Ok or Err."
+  fn json_body(conn : Conn) : Result(JsonValue, String) do
+    let raw = HttpServer.req_body(conn)
+    Json.parse(raw)
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────
+
+  pfn parse_query(qs : String) : List((String, String)) do
+    let pairs = String.split(qs, "&")
+    List.filter_map(pairs, parse_pair)
+  end
+
+  pfn parse_pair(pair : String) : Option((String, String)) do
+    match String.index_of(pair, "=") do
+    None    -> parse_pair_no_eq(pair)
+    Some(i) -> do
+      let k = String.slice_bytes(pair, 0, i)
+      let v = String.slice_bytes(pair, i + 1, string_byte_length(pair) - i - 1)
+      Some((k, v))
+    end
+    end
+  end
+
+  pfn parse_pair_no_eq(pair : String) : Option((String, String)) do
+    match String.is_empty(pair) do
+    true  -> None
+    false -> Some((pair, ""))
+    end
+  end
+
+  pfn lookup(pairs : List((String, String)), key : String) : Option(String) do
+    match pairs do
+    Nil -> None
+    Cons((k, v), rest) ->
+      match k == key do
+      true  -> Some(v)
+      false -> lookup(rest, key)
+      end
+    end
+  end
+
+end

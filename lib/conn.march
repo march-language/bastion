@@ -1,0 +1,125 @@
+-- Bastion.Conn — higher-level helpers for the HttpServer.Conn type.
+--
+-- The underlying connection type is HttpServer.Conn.  This module adds
+-- ergonomic shortcuts and parsed views on top of the raw accessors that
+-- HttpServer already provides.
+--
+-- All functions in this module accept and return HttpServer.Conn values.
+-- There is no separate Bastion.Conn type — this avoids duplicating the
+-- transport-layer type and keeps conversion overhead at zero.
+
+mod Conn do
+
+  import HttpServer
+
+  -- ── Request accessors ──────────────────────────────────────────────
+
+  doc "Returns the HTTP method of the request (Get, Post, Put, …)."
+  fn method(conn : Conn) : Method do
+    HttpServer.method(conn)
+  end
+
+  doc "Returns the raw request path string, e.g. \"/users/42\"."
+  fn path(conn : Conn) : String do
+    HttpServer.path(conn)
+  end
+
+  doc "Returns the path split on '/', empty segments filtered out."
+  fn path_info(conn : Conn) : List(String) do
+    HttpServer.path_info(conn)
+  end
+
+  doc "Returns the raw query string, e.g. \"page=1&limit=10\". Empty string if none."
+  fn query_string(conn : Conn) : String do
+    HttpServer.query_string(conn)
+  end
+
+  doc "Returns all request headers as a list of Header(name, value) values."
+  fn req_headers(conn : Conn) : List(Header) do
+    HttpServer.req_headers(conn)
+  end
+
+  doc "Returns the raw request body as a string."
+  fn req_body(conn : Conn) : String do
+    HttpServer.req_body(conn)
+  end
+
+  doc "Look up a request header by name (case-insensitive). Returns None if missing."
+  fn get_req_header(conn : Conn, name : String) : Option(String) do
+    HttpServer.get_req_header(conn, name)
+  end
+
+  doc """
+  Returns the value of the Content-Type request header, if present.
+  Equivalent to get_req_header(conn, \"content-type\").
+  """
+  fn content_type(conn : Conn) : Option(String) do
+    HttpServer.get_req_header(conn, "content-type")
+  end
+
+  doc """
+  Returns the value of the Accept request header, if present.
+  """
+  fn accept(conn : Conn) : Option(String) do
+    HttpServer.get_req_header(conn, "accept")
+  end
+
+  -- ── Assigns ───────────────────────────────────────────────────────
+
+  doc """
+  Look up a value stored in conn's assigns map by key.
+  Assigns are set by middleware or router param extraction.
+  Returns None if the key is not present.
+  """
+  fn get_assign(conn : Conn, key : String) : Option(String) do
+    HttpServer.get_assign(conn, key)
+  end
+
+  doc "Store a key/value pair in the conn's assigns map. Returns updated conn."
+  fn assign(conn : Conn, key : String, value : String) : Conn do
+    HttpServer.assign(conn, key, value)
+  end
+
+  -- ── Response state ────────────────────────────────────────────────
+
+  doc "Returns the current response status code (0 means not yet set)."
+  fn status(conn : Conn) : Int do
+    HttpServer.status(conn)
+  end
+
+  doc "Returns all response headers accumulated so far."
+  fn resp_headers(conn : Conn) : List(Header) do
+    HttpServer.resp_headers(conn)
+  end
+
+  doc "Returns the response body string accumulated so far."
+  fn resp_body(conn : Conn) : String do
+    HttpServer.resp_body(conn)
+  end
+
+  doc "Returns true if the response has been sent (conn is halted)."
+  fn halted(conn : Conn) : Bool do
+    HttpServer.halted(conn)
+  end
+
+  -- ── Response mutations ────────────────────────────────────────────
+
+  doc "Add a response header. Returns updated conn."
+  fn put_resp_header(conn : Conn, name : String, value : String) : Conn do
+    HttpServer.put_resp_header(conn, name, value)
+  end
+
+  doc """
+  Set the response status and body, and mark the conn as halted.
+  After send_resp the pipeline stops processing further plugs.
+  """
+  fn send_resp(conn : Conn, status : Int, body : String) : Conn do
+    HttpServer.send_resp(conn, status, body)
+  end
+
+  doc "Halt the conn without setting a response (used by auth middleware to short-circuit)."
+  fn halt(conn : Conn) : Conn do
+    HttpServer.halt(conn)
+  end
+
+end

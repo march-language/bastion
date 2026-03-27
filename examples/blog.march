@@ -1,0 +1,171 @@
+-- examples/blog.march — Bastion framework demonstration: an in-memory blog API.
+--
+-- Demonstrates:
+--   • Router.get / Router.post / Router.scope
+--   • Static file serving with Static.serve
+--   • Middleware pipeline (logger, request_id, cors)
+--   • Middleware.compose to wrap the router plug
+--   • Request helpers: query_param, path_param, json_body
+--   • Response helpers: html, json, text, not_found_, bad_request
+--   • Hardcoded in-memory post list (no mutable state needed)
+--   • Pattern matching on Option and Result
+--
+-- Parse check:
+--   cd /path/to/march && dune exec march -- /path/to/bastion/examples/blog.march
+--
+-- Run (once Bastion is loaded):
+--   forge run examples/blog.march
+
+mod Blog do
+
+  -- ── Hardcoded post store ─────────────────────────────────────────────────
+  -- Each post is a triple (id, title, body).  All strings so we can match the
+  -- id directly against the URL path param without a conversion.
+
+  pfn seed_posts() : List((String, String, String)) do
+    Cons(("1", "Hello, Bastion!", "Bastion is a plug-style HTTP framework for March."),
+    Cons(("2", "Pattern Matching", "March match expressions make request handling a pleasure."),
+    Cons(("3", "Middleware Pipelines", "Compose logger, request_id, and cors in one call."),
+    Nil)))
+  end
+
+  -- ── Helpers ──────────────────────────────────────────────────────────────
+
+  pfn find_post(posts : List((String, String, String)), id : String) : Option((String, String, String)) do
+    let matches = List.filter(posts, fn p -> match p do (pid, _, _) -> pid == id end)
+    match matches do
+    Nil           -> None
+    Cons(post, _) -> Some(post)
+    end
+  end
+
+  pfn post_to_json(post : (String, String, String)) : String do
+    match post do
+    (id, title, body) -> do
+      let id_enc    = Json.encode_string(id)
+      let title_enc = Json.encode_string(title)
+      let body_enc  = Json.encode_string(body)
+      "{\"id\":" ++ id_enc ++ ",\"title\":" ++ title_enc ++ ",\"body\":" ++ body_enc ++ "}"
+    end
+    end
+  end
+
+  pfn join_strings(xs : List(String), sep : String) : String do
+    match xs do
+    Nil           -> ""
+    Cons(h, Nil)  -> h
+    Cons(h, rest) -> h ++ sep ++ join_strings(rest, sep)
+    end
+  end
+
+  pfn posts_to_json(posts : List((String, String, String))) : String do
+    let items = List.map(posts, fn p -> post_to_json(p))
+    "[" ++ join_strings(items, ",") ++ "]"
+  end
+
+  -- ── Handlers ─────────────────────────────────────────────────────────────
+
+  -- GET /  — welcome page (HTML)
+  fn home(conn : Conn) : Conn do
+    let body = "<!DOCTYPE html><html><head><title>Bastion Blog</title></head><body><h1>Welcome to Bastion Blog</h1><ul><li><a href=\"/posts\">All posts (JSON)</a></li><li><a href=\"/health\">Health check</a></li><li><a href=\"/api/v1/status\">API v1 status</a></li></ul></body></html>"
+    Response.html(conn, 200, body)
+  end
+
+  -- GET /health  — health check (JSON)
+  fn health(conn : Conn) : Conn do
+    Response.json(conn, 200, "{\"status\":\"ok\"}")
+  end
+
+  -- GET /posts  — list posts; honours optional ?page= query param
+  fn list_posts(conn : Conn) : Conn do
+    let posts = seed_posts()
+    let page  = Request.query_param(conn, "page")
+    let note  = match page do
+                None    -> ""
+                Some(p) -> ",\"page\":" ++ Json.encode_string(p)
+                end
+    let body  = "{\"posts\":" ++ posts_to_json(posts) ++ note ++ "}"
+    Response.json(conn, 200, body)
+  end
+
+  -- GET /posts/:id  — get a single post by id; 404 if not found
+  fn get_post(conn : Conn) : Conn do
+    let id_opt = Request.path_param(conn, "id")
+    match id_opt do
+    None ->
+      Response.not_found_(conn)
+    Some(id) -> do
+      let found = find_post(seed_posts(), id)
+      match found do
+      None       -> Response.not_found_(conn)
+      Some(post) -> Response.json(conn, 200, post_to_json(post))
+      end
+    end
+    end
+  end
+
+  -- POST /posts  — create post stub; echoes parsed JSON body back as 201
+  fn create_post(conn : Conn) : Conn do
+    let result = Request.json_body(conn)
+    match result do
+    Err(msg) ->
+      Response.bad_request(conn, "Invalid JSON: " ++ msg)
+    Ok(body) -> do
+      let echo = "{\"created\":true,\"received\":" ++ Json.to_string(body) ++ "}"
+      Response.json(conn, 201, echo)
+    end
+    end
+  end
+
+  -- ── API v1 handlers ───────────────────────────────────────────────────────
+
+  -- GET /api/v1/status
+  fn api_status(conn : Conn) : Conn do
+    Response.json(conn, 200, "{\"version\":\"1\",\"status\":\"ok\"}")
+  end
+
+  -- GET /api/v1/posts  — versioned post list with count
+  fn api_list_posts(conn : Conn) : Conn do
+    let posts = seed_posts()
+    let count = List.length(posts)
+    let body  = "{\"count\":" ++ int_to_string(count) ++ ",\"posts\":" ++ posts_to_json(posts) ++ "}"
+    Response.json(conn, 200, body)
+  end
+
+  -- ── Router setup ──────────────────────────────────────────────────────────
+
+  pfn build_api_router() : Router do
+    Router.new()
+    |> Router.get("/status", api_status)
+    |> Router.get("/posts",  api_list_posts)
+  end
+
+  pfn build_router() : Router do
+    let api = build_api_router()
+    Router.new()
+    |> Router.get("/",          home)
+    |> Router.get("/health",    health)
+    |> Router.get("/posts",     list_posts)
+    |> Router.get("/posts/:id", get_post)
+    |> Router.post("/posts",    create_post)
+    |> Router.scope("/api/v1",  api)
+    |> Router.scope("/static",  Static.serve("/public"))
+  end
+
+  -- ── Entry point ───────────────────────────────────────────────────────────
+
+  fn main() : Unit do
+    let router = build_router()
+
+    -- Wrap the router plug with middleware using Middleware.compose so that
+    -- every request flows through logger -> request_id -> cors -> router.
+    let router_plug = Router.to_plug(router)
+    let plugs = Cons(Middleware.logger, Cons(Middleware.request_id, Cons(Middleware.cors, Cons(router_plug, Nil))))
+    let handler = Middleware.compose(plugs, fn conn -> conn)
+
+    let opts = Bastion.default_opts(4000)
+    Logger.info("Blog listening on port " ++ int_to_string(4000))
+    Bastion.start(router, opts)
+  end
+
+end

@@ -1,0 +1,154 @@
+-- Bastion.Response — response-building helpers.
+--
+-- All helpers accept an HttpServer.Conn and return an HttpServer.Conn with
+-- the appropriate content-type header set and the conn halted (via send_resp).
+--
+-- These are thin wrappers around HttpServer's built-in response functions
+-- with additional convenience helpers for common status codes.
+
+mod Response do
+
+  import HttpServer
+
+  -- ── Content-type responses ────────────────────────────────────────
+
+  doc """
+  Send an HTML response.
+
+  Sets content-type to \"text/html; charset=utf-8\", writes body, halts conn.
+
+  Example:
+    Response.html(conn, 200, \"<h1>Hello</h1>\")
+  """
+  fn html(conn : Conn, status : Int, body : String) : Conn do
+    HttpServer.html(conn, status, body)
+  end
+
+  doc """
+  Send a JSON response.
+
+  Sets content-type to \"application/json\", writes body, halts conn.
+  The caller is responsible for serialising the body to a JSON string
+  (e.g. with Json.encode).
+
+  Example:
+    Response.json(conn, 200, Json.encode(my_map))
+  """
+  fn json(conn : Conn, status : Int, body : String) : Conn do
+    HttpServer.json(conn, status, body)
+  end
+
+  doc """
+  Send a plain-text response.
+
+  Sets content-type to \"text/plain; charset=utf-8\", writes body, halts conn.
+  """
+  fn text(conn : Conn, status : Int, body : String) : Conn do
+    HttpServer.text(conn, status, body)
+  end
+
+  doc """
+  Send a raw response with an explicit status, without setting a content-type.
+
+  Useful when the content-type has already been set via put_resp_header, or
+  for responses with no body (e.g. 204 No Content).
+  """
+  fn raw(conn : Conn, status : Int, body : String) : Conn do
+    HttpServer.send_resp(conn, status, body)
+  end
+
+  -- ── Redirects ─────────────────────────────────────────────────────
+
+  doc """
+  Send a 302 Found redirect to the given URL.
+
+  Example:
+    Response.redirect(conn, \"/login\")
+  """
+  fn redirect(conn : Conn, url : String) : Conn do
+    HttpServer.redirect(conn, url)
+  end
+
+  doc """
+  Send a 301 Moved Permanently redirect to the given URL.
+  Use for permanent URL changes (canonicalisation, HTTPS upgrades, etc.).
+  """
+  fn redirect_permanent(conn : Conn, url : String) : Conn do
+    conn
+    |> HttpServer.put_resp_header("location", url)
+    |> HttpServer.send_resp(301, "")
+  end
+
+  -- ── Common status shortcuts ────────────────────────────────────────
+
+  doc "Send 200 OK with a plain-text body."
+  fn ok(conn : Conn, body : String) : Conn do
+    HttpServer.text(conn, 200, body)
+  end
+
+  doc "Send 201 Created with a plain-text body."
+  fn created(conn : Conn, body : String) : Conn do
+    HttpServer.text(conn, 201, body)
+  end
+
+  doc "Send 204 No Content (empty body)."
+  fn no_content(conn : Conn) : Conn do
+    HttpServer.send_resp(conn, 204, "")
+  end
+
+  doc "Send 400 Bad Request with a descriptive message."
+  fn bad_request(conn : Conn, message : String) : Conn do
+    HttpServer.text(conn, 400, message)
+  end
+
+  doc "Send 401 Unauthorized with the given message."
+  fn unauthorized(conn : Conn, message : String) : Conn do
+    HttpServer.text(conn, 401, message)
+  end
+
+  doc "Send 403 Forbidden with the given message."
+  fn forbidden(conn : Conn, message : String) : Conn do
+    HttpServer.text(conn, 403, message)
+  end
+
+  doc "Send 404 Not Found with the given message."
+  fn not_found(conn : Conn, message : String) : Conn do
+    HttpServer.text(conn, 404, message)
+  end
+
+  doc "Send 404 Not Found with the default body \"Not Found\"."
+  fn not_found_(conn : Conn) : Conn do
+    HttpServer.text(conn, 404, "Not Found")
+  end
+
+  doc "Send 405 Method Not Allowed."
+  fn method_not_allowed(conn : Conn) : Conn do
+    HttpServer.text(conn, 405, "Method Not Allowed")
+  end
+
+  doc "Send 422 Unprocessable Entity with the given message."
+  fn unprocessable(conn : Conn, message : String) : Conn do
+    HttpServer.text(conn, 422, message)
+  end
+
+  doc "Send 500 Internal Server Error with the given message."
+  fn internal_error(conn : Conn, message : String) : Conn do
+    HttpServer.text(conn, 500, message)
+  end
+
+  doc "Send 500 Internal Server Error with the default body \"Internal Server Error\"."
+  fn internal_error_(conn : Conn) : Conn do
+    HttpServer.text(conn, 500, "Internal Server Error")
+  end
+
+  doc "Alias for internal_error_."
+  fn internal_server_error_(conn : Conn) : Conn do
+    internal_error_(conn)
+  end
+
+  doc "Send 503 Service Unavailable."
+  fn service_unavailable(conn : Conn) : Conn do
+    HttpServer.text(conn, 503, "Service Unavailable")
+  end
+
+end

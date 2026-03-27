@@ -1,0 +1,8 @@
+[package]
+name = "bastion"
+version = "0.1.0"
+type = "lib"
+description = ""
+author = ""
+
+[deps]
