@@ -51,46 +51,45 @@
 
     /**
      * Called when server sends a full state replacement.
+     * In Phase 2 (server-rendering), we store the state but do NOT
+     * trigger a local rerender -- the server will send a separate
+     * 'render' message with the HTML.
      * @param {Object} newState
      */
     onStateUpdate(newState) {
       this.state = newState;
-      this.rerender();
+      // Phase 2: don't rerender locally; server sends 'render' messages.
+      // Phase 4 (client WASM): uncomment this to rerender client-side.
+      // this.rerender();
     }
 
     /**
      * Called when server sends a merge (CRDT reconciliation).
-     * If a WASM module with a merge function is loaded, use it;
-     * otherwise the server state wins.
+     * Phase 2: server state always wins (no client-side WASM merge).
+     * Phase 4: will use WASM merge function if available.
      * @param {Object} remoteState
      */
     onMerge(remoteState) {
-      if (this.wasmModule && typeof this.wasmModule.merge === 'function') {
-        this.state = this.wasmModule.merge(this.state, remoteState);
-      } else {
-        this.state = remoteState;
-      }
-      this.rerender();
+      this.state = remoteState;
+      // Phase 2: don't rerender locally; server sends 'render' messages.
     }
 
     /**
-     * Dispatch a user-initiated message. Performs an optimistic local
-     * update when a WASM update function is available, then sends
-     * the message to the server for authoritative processing.
+     * Dispatch a user-initiated message.
+     *
+     * Phase 2 (server-rendering): No optimistic local update. The message
+     * is sent to the server which runs update() + render() and sends back
+     * rendered HTML.  The client morphs the DOM when the 'render' response
+     * arrives.
+     *
+     * Phase 4 (client WASM): Will restore optimistic local updates when
+     * WASM modules are available on the client.
+     *
      * @param {string|Object} msgPayload
      */
     dispatch(msgPayload) {
-      // Optimistic local update if WASM is available
-      if (this.wasmModule && typeof this.wasmModule.update === 'function') {
-        try {
-          this.state = this.wasmModule.update(this.state, msgPayload);
-          this.rerender();
-        } catch (e) {
-          console.warn(`[bastion] WASM optimistic update failed for ${this.moduleName}:`, e);
-        }
-      }
-
-      // Always send to server for authoritative processing
+      // Phase 2: send to server, wait for render response.
+      // No optimistic local update — all state lives on the server.
       this.manager.send({
         island: this.instanceId,
         type: 'msg',

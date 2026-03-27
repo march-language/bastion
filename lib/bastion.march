@@ -251,7 +251,8 @@ mod Bastion do
     "  import IslandSocket\n" ++
     "  import IslandAssets\n" ++
     "  import Static\n" ++
-    "  import PageController\n\n" ++
+    "  import PageController\n" ++
+    "  import Counter\n\n" ++
     "  pfn build_router() : Router do\n" ++
     "    Router.new()\n" ++
     "    |> Router.get(\"/\",       fn conn -> PageController.home(conn))\n" ++
@@ -261,11 +262,20 @@ mod Bastion do
     "  pfn health(conn : Conn) : Conn do\n" ++
     "    Controller.json(conn, 200, \"{\\\"status\\\":\\\"ok\\\"}\")\n" ++
     "  end\n\n" ++
+    "  -- ── Island registry ──────────────────────────────────────────────\n" ++
+    "  -- Register all island modules with their JSON bridge functions.\n" ++
+    "  -- Each island exposes update_json/render_json wrappers that handle\n" ++
+    "  -- JSON string serialization across the WebSocket boundary.\n\n" ++
+    "  pfn build_island_registry() : IslandSocket.Registry do\n" ++
+    "    IslandSocket.new_registry()\n" ++
+    "    |> IslandSocket.register(\"Counter\", fn (state, msg) -> Counter.update_json(state, msg), fn state -> Counter.render_json(state))\n" ++
+    "  end\n\n" ++
     "  fn main() : Unit do\n" ++
     "    let router  = build_router()\n" ++
     "    let plug    = Router.to_plug(router)\n\n" ++
     "    -- Island infrastructure\n" ++
-    "    let island_ws     = IslandSocket.plug(IslandSocket.default_config())\n" ++
+    "    let registry      = build_island_registry()\n" ++
+    "    let island_ws     = IslandSocket.plug(IslandSocket.default_config(), registry)\n" ++
     "    let island_assets = IslandAssets.plug(IslandAssets.default_config())\n" ++
     "    let static_files  = Static.serve(\"public\")\n\n" ++
     "    let app = fn conn -> do\n" ++
@@ -355,8 +365,13 @@ mod Bastion do
     "-- Counter — example island component.\n" ++
     "--\n" ++
     "-- Islands follow the init/update/render protocol.\n" ++
-    "-- State is synced between client and server via CRDT merge.\n\n" ++
+    "-- State is synced between client and server via WebSocket.\n" ++
+    "--\n" ++
+    "-- Phase 2: The server calls update_json/render_json which handle\n" ++
+    "-- JSON serialization.  The typed update/render functions contain\n" ++
+    "-- the actual logic.\n\n" ++
     "mod Counter do\n\n" ++
+    "  import Json\n\n" ++
     "  type Props = { initial : Int }\n" ++
     "  type State = { count : Int }\n" ++
     "  type Msg = Increment | Decrement | Reset\n\n" ++
@@ -376,6 +391,59 @@ mod Bastion do
     "    \"  <span class=\\\"count\\\">\" ++ int_to_string(state.count) ++ \"</span>\\n\" ++\n" ++
     "    \"  <button data-msg=\\\"Increment\\\">+</button>\\n\" ++\n" ++
     "    \"</div>\"\n" ++
+    "  end\n\n" ++
+    "  -- ── JSON bridge functions (Phase 2: server-side rendering) ────────\n" ++
+    "  -- These bridge the JSON wire format to typed island functions.\n" ++
+    "  -- The IslandSocket calls these with raw JSON strings.\n\n" ++
+    "  doc \"Parse a JSON msg string and apply update. Returns new state as JSON.\"\n" ++
+    "  fn update_json(state_json : String, msg_json : String) : String do\n" ++
+    "    let state = parse_state(state_json)\n" ++
+    "    let msg   = parse_msg(msg_json)\n" ++
+    "    let new_state = update(state, msg)\n" ++
+    "    serialize_state(new_state)\n" ++
+    "  end\n\n" ++
+    "  doc \"Parse a JSON state string and render to HTML.\"\n" ++
+    "  fn render_json(state_json : String) : String do\n" ++
+    "    let state = parse_state(state_json)\n" ++
+    "    render(state)\n" ++
+    "  end\n\n" ++
+    "  -- ── Serialization helpers ────────────────────────────────────────\n\n" ++
+    "  pfn parse_state(json : String) : State do\n" ++
+    "    match Json.parse(json) do\n" ++
+    "    Ok(obj) -> do\n" ++
+    "      let count = match Json.get(obj, \"count\") do\n" ++
+    "        Some(Num(n)) -> float_to_int(n)\n" ++
+    "        _ -> 0\n" ++
+    "      end\n" ++
+    "      { count = count }\n" ++
+    "    end\n" ++
+    "    Err(_) -> { count = 0 }\n" ++
+    "    end\n" ++
+    "  end\n\n" ++
+    "  pfn parse_msg(json : String) : Msg do\n" ++
+    "    -- Messages arrive as JSON strings: \"\\\"Increment\\\"\", \"\\\"Decrement\\\"\", etc.\n" ++
+    "    -- Strip surrounding quotes if present.\n" ++
+    "    let cleaned = strip_quotes(json)\n" ++
+    "    match cleaned do\n" ++
+    "    \"Increment\" -> Increment\n" ++
+    "    \"Decrement\" -> Decrement\n" ++
+    "    \"Reset\"     -> Reset\n" ++
+    "    _           -> Reset\n" ++
+    "    end\n" ++
+    "  end\n\n" ++
+    "  pfn strip_quotes(s : String) : String do\n" ++
+    "    let len = string_length(s)\n" ++
+    "    if len >= 2 then do\n" ++
+    "      let first = String.slice_bytes(s, 0, 1)\n" ++
+    "      if first == \"\\\"\" then\n" ++
+    "        String.slice_bytes(s, 1, len - 2)\n" ++
+    "      else\n" ++
+    "        s\n" ++
+    "    end else\n" ++
+    "      s\n" ++
+    "  end\n\n" ++
+    "  pfn serialize_state(state : State) : String do\n" ++
+    "    \"{\\\"count\\\":\" ++ int_to_string(state.count) ++ \"}\"\n" ++
     "  end\n\n" ++
     "  -- Default merge: server wins (omit for custom CRDT logic)\n" ++
     "  -- fn merge(local : State, remote : State) : State do\n" ++
@@ -418,17 +486,29 @@ mod Bastion do
     "mod " ++ pascal ++ "Test do\n\n" ++
     "  import Counter\n\n" ++
     "  describe \"Counter island\" do\n\n" ++
-    "    test \"render shows initial count\" do\n" ++
-    "      let html = Counter.render(\"{\\\"count\\\":0}\")\n" ++
+    "    test \"render_json shows initial count\" do\n" ++
+    "      let html = Counter.render_json(\"{\\\"count\\\":0}\")\n" ++
     "      assert (String.contains(html, \"0\"))\n" ++
     "    end\n\n" ++
-    "    test \"increment increases count\" do\n" ++
-    "      let next = Counter.update(\"{\\\"count\\\":5}\", \"\\\"Increment\\\"\")\n" ++
+    "    test \"update_json increment increases count\" do\n" ++
+    "      let next = Counter.update_json(\"{\\\"count\\\":5}\", \"\\\"Increment\\\"\")\n" ++
     "      assert (String.contains(next, \"6\"))\n" ++
     "    end\n\n" ++
-    "    test \"decrement decreases count\" do\n" ++
-    "      let next = Counter.update(\"{\\\"count\\\":5}\", \"\\\"Decrement\\\"\")\n" ++
+    "    test \"update_json decrement decreases count\" do\n" ++
+    "      let next = Counter.update_json(\"{\\\"count\\\":5}\", \"\\\"Decrement\\\"\")\n" ++
     "      assert (String.contains(next, \"4\"))\n" ++
+    "    end\n\n" ++
+    "    test \"render_json produces correct HTML\" do\n" ++
+    "      let html = Counter.render_json(\"{\\\"count\\\":42}\")\n" ++
+    "      assert (String.contains(html, \"42\"))\n" ++
+    "      assert (String.contains(html, \"data-msg\"))\n" ++
+    "      assert (String.contains(html, \"Increment\"))\n" ++
+    "      assert (String.contains(html, \"Decrement\"))\n" ++
+    "    end\n\n" ++
+    "    test \"update_json then render_json round-trip\" do\n" ++
+    "      let state = Counter.update_json(\"{\\\"count\\\":0}\", \"\\\"Increment\\\"\")\n" ++
+    "      let html  = Counter.render_json(state)\n" ++
+    "      assert (String.contains(html, \"1\"))\n" ++
     "    end\n\n" ++
     "  end\n\n" ++
     "end\n"

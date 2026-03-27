@@ -1,36 +1,50 @@
--- IslandSocket — WebSocket transport for server-side islands.
+-- IslandSocket — WebSocket transport for server-side island rendering.
 --
--- IslandSocket upgrades matching HTTP connections to WebSocket and handles
--- the JSON island protocol.  Client messages:
+-- Phase 2: Server-side rendering.  The server maintains state for each
+-- island instance, runs update() and render() on the server, and sends
+-- rendered HTML back to the client for DOM morphing via idiomorph.
 --
---   {"island":"counter-1","type":"init","module":"Counter","payload":{...}}
+-- Client messages:
+--
+--   {"island":"Counter-1","type":"init","module":"Counter","payload":{...}}
 --     Register a new island instance with initial state.
 --
---   {"island":"counter-1","type":"msg","payload":"Increment"}
+--   {"island":"Counter-1","type":"msg","payload":"Increment"}
 --     Forward a message to an existing island instance.
+--
+--   {"island":"Counter-1","type":"destroy"}
+--     Remove an island instance.
 --
 -- Server responses:
 --
---   {"island":"counter-1","type":"state","payload":{...}}
---     State update after processing a message.
---
---   {"island":"counter-1","type":"render","payload":"<html>..."}
+--   {"island":"Counter-1","type":"render","payload":"<html>..."}
 --     Server-rendered HTML after a state change.
+--
+--   {"island":"Counter-1","type":"state","payload":{...}}
+--     State update (sent alongside render for client-side state tracking).
+--
+-- Island modules register their update and render functions with the socket
+-- via IslandSocket.register/3.  The scaffolded app registers the Counter
+-- island at startup.
 --
 -- Usage:
 --
+--   let registry = IslandSocket.new_registry()
+--                  |> IslandSocket.register("Counter", counter_update, counter_render)
+--
 --   HttpServer.new(4000)
---   |> HttpServer.plug(IslandSocket.plug(IslandSocket.default_config()))
---   |> HttpServer.plug(Router.to_plug(router))
+--   |> HttpServer.plug(IslandSocket.plug(IslandSocket.default_config(), registry))
 --   |> HttpServer.listen()
 --
--- See also: island_view.march, island_assets.march, stdlib/islands.march.
+-- See also: island_view.march, island_assets.march.
 
 mod IslandSocket do
 
   import HttpServer
   import WebSocket
   import Json
+
+  -- ── Configuration ──────────────────────────────────────────────────────
 
   -- Configuration for the island socket endpoint.
   --   path — URL path to match for WebSocket upgrade (e.g. "/_bastion/ws")
@@ -53,23 +67,147 @@ mod IslandSocket do
     end
   end
 
+  -- ── Island Registry ───────────────────────────────────────────────────
+  --
+  -- The registry maps module names (e.g. "Counter") to pairs of functions:
+  --   update : (String, String) -> String
+  --     Takes (state_json, msg_json), returns new state_json.
+  --   render : (String) -> String
+  --     Takes state_json, returns HTML string.
+  --
+  -- We store this as a list of (name, update_fn, render_fn) tuples.  For
+  -- Phase 2 with a handful of islands, linear search is fine.
+
+  type IslandHandler = IslandHandler(
+    String,
+    (String, String) -> String,
+    String -> String
+  )
+
+  type Registry = Registry(List(IslandHandler))
+
+  doc "Create an empty island registry."
+  fn new_registry() : Registry do
+    Registry(Nil)
+  end
+
+  doc """
+  Register an island module with its update and render functions.
+
+  update_fn takes (state_json, msg_json) and returns new state_json.
+  render_fn takes state_json and returns an HTML string.
+
+  Example:
+    IslandSocket.register(registry, "Counter", counter_update, counter_render)
+  """
+  fn register(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String) : Registry do
+    match reg do
+    Registry(handlers) ->
+      Registry(Cons(IslandHandler(name, update_fn, render_fn), handlers))
+    end
+  end
+
+  doc "Look up a handler by module name. Returns Some(handler) or None."
+  fn find_handler(reg : Registry, name : String) : Option(IslandHandler) do
+    match reg do
+    Registry(handlers) -> find_in_list(handlers, name)
+    end
+  end
+
+  pfn find_in_list(handlers : List(IslandHandler), name : String) : Option(IslandHandler) do
+    match handlers do
+    Nil -> None
+    Cons(h, rest) ->
+      match h do
+      IslandHandler(n, _, _) ->
+        if n == name then Some(h)
+        else find_in_list(rest, name)
+      end
+    end
+  end
+
+  -- ── Island State Store ─────────────────────────────────────────────────
+  --
+  -- Per-connection state: maps island instance IDs to their current state
+  -- (as JSON strings) and module name.
+
+  type IslandEntry = IslandEntry(String, String)
+  -- IslandEntry(module_name, state_json)
+
+  type IslandState = IslandState(List((String, IslandEntry)))
+  -- List of (instance_id, entry) pairs
+
+  pfn empty_state() : IslandState do
+    IslandState(Nil)
+  end
+
+  pfn put_island(store : IslandState, id : String, entry : IslandEntry) : IslandState do
+    match store do
+    IslandState(entries) ->
+      IslandState(put_entry(entries, id, entry))
+    end
+  end
+
+  pfn put_entry(entries : List((String, IslandEntry)), id : String, entry : IslandEntry) : List((String, IslandEntry)) do
+    match entries do
+    Nil -> Cons((id, entry), Nil)
+    Cons((k, v), rest) ->
+      if k == id then Cons((id, entry), rest)
+      else Cons((k, v), put_entry(rest, id, entry))
+    end
+  end
+
+  pfn get_island(store : IslandState, id : String) : Option(IslandEntry) do
+    match store do
+    IslandState(entries) -> get_entry(entries, id)
+    end
+  end
+
+  pfn get_entry(entries : List((String, IslandEntry)), id : String) : Option(IslandEntry) do
+    match entries do
+    Nil -> None
+    Cons((k, v), rest) ->
+      if k == id then Some(v)
+      else get_entry(rest, id)
+    end
+  end
+
+  pfn remove_island(store : IslandState, id : String) : IslandState do
+    match store do
+    IslandState(entries) ->
+      IslandState(remove_entry(entries, id))
+    end
+  end
+
+  pfn remove_entry(entries : List((String, IslandEntry)), id : String) : List((String, IslandEntry)) do
+    match entries do
+    Nil -> Nil
+    Cons((k, v), rest) ->
+      if k == id then rest
+      else Cons((k, v), remove_entry(rest, id))
+    end
+  end
+
   -- ── Plug ────────────────────────────────────────────────────────────────
 
   doc """
   Build a Conn -> Conn plug that upgrades matching requests to an island
-  WebSocket.  Mount with HttpServer.plug/2.
+  WebSocket with server-side rendering.
 
   Usage:
+    let registry = IslandSocket.new_registry()
+                   |> IslandSocket.register("Counter", counter_update, counter_render)
+
     HttpServer.new(4000)
-    |> HttpServer.plug(IslandSocket.plug(IslandSocket.default_config()))
+    |> HttpServer.plug(IslandSocket.plug(IslandSocket.default_config(), registry))
     |> HttpServer.listen()
   """
-  fn plug(cfg : Config) : Conn -> Conn do
+  fn plug(cfg : Config, registry : Registry) : Conn -> Conn do
     let socket_path = config_path(cfg)
     fn conn -> do
       let req_path = HttpServer.path(conn)
       if req_path == socket_path do
-        WebSocket.upgrade(conn, fn ws_sock -> ws_loop(ws_sock))
+        WebSocket.upgrade(conn, fn ws_sock -> ws_loop(ws_sock, empty_state(), registry))
       else
         conn
       end
@@ -78,61 +216,131 @@ mod IslandSocket do
 
   -- ── WebSocket loop ──────────────────────────────────────────────────────
 
-  pfn ws_loop(ws_sock : WebSocket.WsSocket) : Unit do
+  pfn ws_loop(ws_sock : WebSocket.WsSocket, store : IslandState, registry : Registry) : Unit do
     match WebSocket.recv(ws_sock) do
     TextFrame(text) -> do
-      handle_text(ws_sock, text)
-      ws_loop(ws_sock)
+      let new_store = handle_text(ws_sock, text, store, registry)
+      ws_loop(ws_sock, new_store, registry)
     end
     Close(_, _) -> ()
     Ping -> do
       WebSocket.send_frame(ws_sock, Pong)
-      ws_loop(ws_sock)
+      ws_loop(ws_sock, store, registry)
     end
-    _ -> ws_loop(ws_sock)
+    _ -> ws_loop(ws_sock, store, registry)
     end
   end
 
   -- ── Message dispatch ────────────────────────────────────────────────────
 
-  pfn handle_text(ws_sock : WebSocket.WsSocket, text : String) : Unit do
+  pfn handle_text(ws_sock : WebSocket.WsSocket, text : String, store : IslandState, registry : Registry) : IslandState do
     match Json.parse(text) do
     Ok(msg) -> do
       let island_id = json_string_field(msg, "island")
       let msg_type  = json_string_field(msg, "type")
       match msg_type do
-      "init" -> handle_init(ws_sock, msg, island_id)
-      "msg"  -> handle_msg(ws_sock, msg, island_id)
-      _      -> ()
+      "init"    -> handle_init(ws_sock, msg, island_id, store, registry)
+      "msg"     -> handle_msg(ws_sock, msg, island_id, store, registry)
+      "destroy" -> handle_destroy(island_id, store)
+      _         -> store
       end
     end
-    Err(_) -> ()
+    Err(_) -> store
     end
   end
 
   -- ── Init handler ────────────────────────────────────────────────────────
-  -- Phase 1: acknowledge the init by echoing back the payload as state.
+  -- Store initial state, render the island, send back rendered HTML.
 
-  pfn handle_init(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String) : Unit do
-    let payload = json_field_raw(msg, "payload")
-    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ payload ++ "}"
-    WebSocket.send_frame(ws_sock, TextFrame(response))
+  pfn handle_init(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
+    let module_name = json_string_field(msg, "module")
+    let payload     = json_field_raw(msg, "payload")
+    -- Store the island state
+    let entry = IslandEntry(module_name, payload)
+    let new_store = put_island(store, island_id, entry)
+    -- Look up the handler and render
+    match find_handler(registry, module_name) do
+    Some(handler) -> do
+      match handler do
+      IslandHandler(_, _, render_fn) -> do
+        let html = render_fn(payload)
+        -- Send rendered HTML
+        send_render(ws_sock, island_id, html)
+        -- Also send state for client-side tracking
+        send_state(ws_sock, island_id, payload)
+      end
+      end
+    end
+    None -> do
+      -- No handler registered; just echo state back (Phase 1 fallback)
+      send_state(ws_sock, island_id, payload)
+    end
+    end
+    new_store
   end
 
   -- ── Msg handler ─────────────────────────────────────────────────────────
-  -- Phase 1: echo an acknowledgement back. Full actor-based island instances
-  -- will be wired in Phase 3.
+  -- Look up current state, run update, store new state, render, send HTML.
 
-  pfn handle_msg(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String) : Unit do
-    let payload = json_field_raw(msg, "payload")
-    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ payload ++ "}"
+  pfn handle_msg(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
+    let msg_payload = json_field_raw(msg, "payload")
+    match get_island(store, island_id) do
+    Some(entry) -> do
+      match entry do
+      IslandEntry(module_name, current_state) -> do
+        match find_handler(registry, module_name) do
+        Some(handler) -> do
+          match handler do
+          IslandHandler(_, update_fn, render_fn) -> do
+            -- Run update: (current_state_json, msg_json) -> new_state_json
+            let new_state = update_fn(current_state, msg_payload)
+            -- Store updated state
+            let new_store = put_island(store, island_id, IslandEntry(module_name, new_state))
+            -- Render with new state
+            let html = render_fn(new_state)
+            -- Send rendered HTML and new state to client
+            send_render(ws_sock, island_id, html)
+            send_state(ws_sock, island_id, new_state)
+            new_store
+          end
+          end
+        end
+        None -> do
+          -- No handler; echo payload as state (Phase 1 fallback)
+          send_state(ws_sock, island_id, msg_payload)
+          store
+        end
+        end
+      end
+      end
+    end
+    None -> do
+      -- Unknown island instance; ignore
+      store
+    end
+    end
+  end
+
+  -- ── Destroy handler ────────────────────────────────────────────────────
+
+  pfn handle_destroy(island_id : String, store : IslandState) : IslandState do
+    remove_island(store, island_id)
+  end
+
+  -- ── Response helpers ──────────────────────────────────────────────────
+
+  pfn send_render(ws_sock : WebSocket.WsSocket, island_id : String, html : String) : Unit do
+    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"render\",\"payload\":" ++ Json.to_string(Str(html)) ++ "}"
+    WebSocket.send_frame(ws_sock, TextFrame(response))
+  end
+
+  pfn send_state(ws_sock : WebSocket.WsSocket, island_id : String, state_json : String) : Unit do
+    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ state_json ++ "}"
     WebSocket.send_frame(ws_sock, TextFrame(response))
   end
 
   -- ── JSON helpers ────────────────────────────────────────────────────────
 
-  -- Extract a string value from a JsonValue object by key.
-  -- Returns "" if the key is missing or the value is not a string.
   pfn json_string_field(obj : Json.JsonValue, key : String) : String do
     match Json.get(obj, key) do
     Some(Str(s)) -> s
@@ -140,8 +348,6 @@ mod IslandSocket do
     end
   end
 
-  -- Extract a field's raw JSON string representation from a JsonValue object.
-  -- Returns "null" if the key is missing.
   pfn json_field_raw(obj : Json.JsonValue, key : String) : String do
     match Json.get(obj, key) do
     Some(v) -> Json.to_string(v)
@@ -149,7 +355,6 @@ mod IslandSocket do
     end
   end
 
-  -- Escape a string for safe embedding in a JSON string value.
   pfn json_escape(s : String) : String do
     let s1 = String.replace_all(s, "\\", "\\\\")
     String.replace_all(s1, "\"", "\\\"")
