@@ -1,0 +1,115 @@
+-- IslandView — template helpers for embedding islands in server-rendered HTML.
+--
+-- Use these functions in your controller templates to render island placeholders
+-- and include the client runtime scripts.
+--
+-- Example (in a controller template):
+--
+--   let counter_html = IslandView.island("Counter", "{\"count\":0}")
+--   let scripts      = IslandView.scripts()
+--   "<html><body>" ++ counter_html ++ scripts ++ "</body></html>"
+--
+-- For server-side rendered islands with initial HTML:
+--
+--   let inner = Counter.render("{\"count\":0}")
+--   let html  = IslandView.island_ssr("Counter", "{\"count\":0}", inner)
+--
+-- See also: island_socket.march, island_assets.march, stdlib/islands.march.
+
+mod IslandView do
+
+  -- ── Island placeholders ─────────────────────────────────────────────────
+
+  doc """
+  Render an island placeholder div with initial state.
+
+  The client JS runtime discovers elements with data-march-island and hydrates
+  them.  State is embedded in a single-quoted data-march-state attribute.
+
+  Example:
+    IslandView.island("Counter", "{\"count\":0}")
+  """
+  fn island(name : String, state_json : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'></div>"
+  end
+
+  doc """
+  Render an island placeholder with server-side rendered initial HTML inside.
+
+  The inner_html is displayed immediately while the client runtime loads. On
+  hydration the runtime takes over and patches the DOM as needed.
+
+  Example:
+    IslandView.island_ssr("Counter", "{\"count\":0}", Counter.render("{\"count\":0}"))
+  """
+  fn island_ssr(name : String, state_json : String, inner_html : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'>" ++ inner_html ++ "</div>"
+  end
+
+  doc """
+  Render an island placeholder with a hydration strategy.
+
+  strategy is one of: "eager", "lazy", "idle", "interaction".
+  """
+  fn island_with_strategy(name : String, state_json : String, strategy : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-hydrate=\"" ++ strategy ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'></div>"
+  end
+
+  doc """
+  Render an island placeholder with SSR content and a hydration strategy.
+  """
+  fn island_ssr_with_strategy(name : String, state_json : String, strategy : String, inner_html : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-hydrate=\"" ++ strategy ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'>" ++ inner_html ++ "</div>"
+  end
+
+  -- ── Script tags ─────────────────────────────────────────────────────────
+
+  doc """
+  Generate the script tag that loads the island client runtime.
+
+  Include this in your layout <head> or before </body>.
+  Uses the default Bastion assets path.
+  """
+  fn scripts() : String do
+    "<script src=\"/_bastion/islands.js\"></script>"
+  end
+
+  doc """
+  Generate the island runtime script tag with a custom base URL.
+
+  Example:
+    IslandView.scripts_with_base("/assets")
+    -- produces: <script src="/assets/islands.js"></script>
+  """
+  fn scripts_with_base(base_url : String) : String do
+    "<script src=\"" ++ base_url ++ "/islands.js\"></script>"
+  end
+
+  doc """
+  Generate the WebSocket connection script tag.
+
+  This script connects to the island WebSocket endpoint and wires up
+  the bidirectional message loop.  Include after scripts().
+  """
+  fn ws_scripts() : String do
+    "<script src=\"/_bastion/islands-ws.js\"></script>"
+  end
+
+  doc """
+  Generate the WebSocket script tag with a custom base URL.
+  """
+  fn ws_scripts_with_base(base_url : String) : String do
+    "<script src=\"" ++ base_url ++ "/islands-ws.js\"></script>"
+  end
+
+  -- ── Internal helpers ────────────────────────────────────────────────────
+
+  -- Escape single-quote characters so JSON can be safely embedded in a
+  -- single-quoted HTML attribute (data-march-state='...').
+  pfn escape_attr(s : String) : String do
+    let s1 = String.replace_all(s, "&", "&amp;")
+    let s2 = String.replace_all(s1, "'", "&#39;")
+    s2
+  end
+
+end

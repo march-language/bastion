@@ -1,0 +1,158 @@
+-- IslandSocket — WebSocket transport for server-side islands.
+--
+-- IslandSocket upgrades matching HTTP connections to WebSocket and handles
+-- the JSON island protocol.  Client messages:
+--
+--   {"island":"counter-1","type":"init","module":"Counter","payload":{...}}
+--     Register a new island instance with initial state.
+--
+--   {"island":"counter-1","type":"msg","payload":"Increment"}
+--     Forward a message to an existing island instance.
+--
+-- Server responses:
+--
+--   {"island":"counter-1","type":"state","payload":{...}}
+--     State update after processing a message.
+--
+--   {"island":"counter-1","type":"render","payload":"<html>..."}
+--     Server-rendered HTML after a state change.
+--
+-- Usage:
+--
+--   HttpServer.new(4000)
+--   |> HttpServer.plug(IslandSocket.plug(IslandSocket.default_config()))
+--   |> HttpServer.plug(Router.to_plug(router))
+--   |> HttpServer.listen()
+--
+-- See also: island_view.march, island_assets.march, stdlib/islands.march.
+
+mod IslandSocket do
+
+  import HttpServer
+  import WebSocket
+  import Json
+
+  -- Configuration for the island socket endpoint.
+  --   path — URL path to match for WebSocket upgrade (e.g. "/_bastion/ws")
+  type Config = Config(String)
+
+  doc "Create a default config that listens on /_bastion/ws."
+  fn default_config() : Config do
+    Config("/_bastion/ws")
+  end
+
+  doc "Create a config with a custom WebSocket path."
+  fn make_config(path : String) : Config do
+    Config(path)
+  end
+
+  doc "Return the path from a config."
+  fn config_path(cfg : Config) : String do
+    match cfg do
+    Config(p) -> p
+    end
+  end
+
+  -- ── Plug ────────────────────────────────────────────────────────────────
+
+  doc """
+  Build a Conn -> Conn plug that upgrades matching requests to an island
+  WebSocket.  Mount with HttpServer.plug/2.
+
+  Usage:
+    HttpServer.new(4000)
+    |> HttpServer.plug(IslandSocket.plug(IslandSocket.default_config()))
+    |> HttpServer.listen()
+  """
+  fn plug(cfg : Config) : Conn -> Conn do
+    let socket_path = config_path(cfg)
+    fn conn -> do
+      let req_path = HttpServer.path(conn)
+      if req_path == socket_path do
+        WebSocket.upgrade(conn, fn ws_sock -> ws_loop(ws_sock))
+      else
+        conn
+      end
+    end
+  end
+
+  -- ── WebSocket loop ──────────────────────────────────────────────────────
+
+  pfn ws_loop(ws_sock : WebSocket.WsSocket) : Unit do
+    match WebSocket.recv(ws_sock) do
+    TextFrame(text) -> do
+      handle_text(ws_sock, text)
+      ws_loop(ws_sock)
+    end
+    Close(_, _) -> ()
+    Ping -> do
+      WebSocket.send_frame(ws_sock, Pong)
+      ws_loop(ws_sock)
+    end
+    _ -> ws_loop(ws_sock)
+    end
+  end
+
+  -- ── Message dispatch ────────────────────────────────────────────────────
+
+  pfn handle_text(ws_sock : WebSocket.WsSocket, text : String) : Unit do
+    match Json.parse(text) do
+    Ok(msg) -> do
+      let island_id = json_string_field(msg, "island")
+      let msg_type  = json_string_field(msg, "type")
+      match msg_type do
+      "init" -> handle_init(ws_sock, msg, island_id)
+      "msg"  -> handle_msg(ws_sock, msg, island_id)
+      _      -> ()
+      end
+    end
+    Err(_) -> ()
+    end
+  end
+
+  -- ── Init handler ────────────────────────────────────────────────────────
+  -- Phase 1: acknowledge the init by echoing back the payload as state.
+
+  pfn handle_init(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String) : Unit do
+    let payload = json_field_raw(msg, "payload")
+    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ payload ++ "}"
+    WebSocket.send_frame(ws_sock, TextFrame(response))
+  end
+
+  -- ── Msg handler ─────────────────────────────────────────────────────────
+  -- Phase 1: echo an acknowledgement back. Full actor-based island instances
+  -- will be wired in Phase 3.
+
+  pfn handle_msg(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String) : Unit do
+    let payload = json_field_raw(msg, "payload")
+    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ payload ++ "}"
+    WebSocket.send_frame(ws_sock, TextFrame(response))
+  end
+
+  -- ── JSON helpers ────────────────────────────────────────────────────────
+
+  -- Extract a string value from a JsonValue object by key.
+  -- Returns "" if the key is missing or the value is not a string.
+  pfn json_string_field(obj : Json.JsonValue, key : String) : String do
+    match Json.get(obj, key) do
+    Some(Str(s)) -> s
+    _            -> ""
+    end
+  end
+
+  -- Extract a field's raw JSON string representation from a JsonValue object.
+  -- Returns "null" if the key is missing.
+  pfn json_field_raw(obj : Json.JsonValue, key : String) : String do
+    match Json.get(obj, key) do
+    Some(v) -> Json.to_string(v)
+    None    -> "null"
+    end
+  end
+
+  -- Escape a string for safe embedding in a JSON string value.
+  pfn json_escape(s : String) : String do
+    let s1 = String.replace_all(s, "\\", "\\\\")
+    String.replace_all(s1, "\"", "\\\"")
+  end
+
+end

@@ -1,0 +1,122 @@
+-- IslandAssets — serves the island client runtime JavaScript.
+--
+-- For Phase 1 the JS is embedded as string literals in March code, avoiding
+-- the need for a separate build step or file serving setup.  The actual JS
+-- runtime will be injected by a separate agent; for now a placeholder is
+-- served that logs a startup message.
+--
+-- Usage (as a plug):
+--
+--   HttpServer.new(4000)
+--   |> HttpServer.plug(IslandAssets.plug(IslandAssets.default_config()))
+--   |> HttpServer.plug(Router.to_plug(router))
+--   |> HttpServer.listen()
+--
+-- Or serve manually from a controller:
+--
+--   fn js_handler(conn : Conn) : Conn do
+--     IslandAssets.serve_js(conn)
+--   end
+
+mod IslandAssets do
+
+  import HttpServer
+
+  -- Configuration for the asset server.
+  --   base_path — URL prefix for island assets (e.g. "/_bastion")
+  type Config = Config(String)
+
+  doc "Create a default config that serves assets under /_bastion."
+  fn default_config() : Config do
+    Config("/_bastion")
+  end
+
+  doc "Create a config with a custom base path."
+  fn make_config(base_path : String) : Config do
+    Config(base_path)
+  end
+
+  doc "Return the base path from a config."
+  fn config_base_path(cfg : Config) : String do
+    match cfg do
+    Config(p) -> p
+    end
+  end
+
+  -- ── Plug ────────────────────────────────────────────────────────────────
+
+  doc """
+  Build a Conn -> Conn plug that serves island asset files.
+
+  Routes:
+    {base_path}/islands.js    — main island client runtime
+    {base_path}/islands-ws.js — WebSocket connection script
+
+  Non-matching requests pass through unchanged.
+  """
+  fn plug(cfg : Config) : Conn -> Conn do
+    let base = config_base_path(cfg)
+    let js_path    = base ++ "/islands.js"
+    let ws_js_path = base ++ "/islands-ws.js"
+    fn conn -> do
+      let req_path = HttpServer.path(conn)
+      if req_path == js_path do
+        serve_js(conn)
+      else if req_path == ws_js_path do
+        serve_ws_js(conn)
+      else
+        conn
+      end end
+    end
+  end
+
+  -- ── Direct serving ──────────────────────────────────────────────────────
+
+  doc """
+  Serve the main island client runtime JS.
+
+  Sets content-type and cache-control headers, then sends the embedded JS.
+  """
+  fn serve_js(conn : Conn) : Conn do
+    conn
+    |> HttpServer.put_resp_header("content-type", "application/javascript")
+    |> HttpServer.put_resp_header("cache-control", "public, max-age=3600")
+    |> HttpServer.send_resp(200, client_runtime_js())
+  end
+
+  doc """
+  Serve the WebSocket connection JS.
+  """
+  fn serve_ws_js(conn : Conn) : Conn do
+    conn
+    |> HttpServer.put_resp_header("content-type", "application/javascript")
+    |> HttpServer.put_resp_header("cache-control", "public, max-age=3600")
+    |> HttpServer.send_resp(200, client_ws_js())
+  end
+
+  -- ── Embedded JS ─────────────────────────────────────────────────────────
+  -- Placeholder JS for Phase 1.  The real runtime will be injected later by
+  -- the client-side agent.
+
+  pfn client_runtime_js() : String do
+    "// Bastion Islands Runtime (placeholder)\n" ++
+    "// This will be replaced with the real island runtime.\n" ++
+    "console.log('[bastion] islands runtime loaded (placeholder)');\n" ++
+    "\n" ++
+    "// Discover island elements and log them\n" ++
+    "(function() {\n" ++
+    "  var islands = document.querySelectorAll('[data-march-island]');\n" ++
+    "  console.log('[bastion] found ' + islands.length + ' island(s)');\n" ++
+    "  islands.forEach(function(el) {\n" ++
+    "    console.log('[bastion] island: ' + el.getAttribute('data-march-island'));\n" ++
+    "  });\n" ++
+    "})();\n"
+  end
+
+  pfn client_ws_js() : String do
+    "// Bastion Islands WebSocket (placeholder)\n" ++
+    "// This will be replaced with the real WS connection script.\n" ++
+    "console.log('[bastion] islands WebSocket script loaded (placeholder)');\n"
+  end
+
+end
