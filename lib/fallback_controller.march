@@ -1,0 +1,89 @@
+-- Bastion.FallbackController — catch-all error handler for controller actions.
+--
+-- When a controller action returns Controller.Error(status, message), the
+-- FallbackController converts it into an appropriate HTTP response. This
+-- mirrors the Phoenix fallback controller pattern, centralising error handling.
+--
+-- Usage:
+--
+--   -- Use the default fallback (renders ErrorView HTML pages):
+--   fn show_handler(conn : Conn) : Conn do
+--     FallbackController.call(conn, show_action(conn))
+--   end
+--
+--   -- Or create a custom fallback for API routes:
+--   let api_fallback = FallbackController.new(fn (conn, result) ->
+--     match result do
+--     Controller.Ok(c) -> c
+--     Controller.Error(status, msg) ->
+--       Response.json(conn, status, "{\"error\":\"" ++ msg ++ "\"}")
+--     end
+--   )
+
+mod FallbackController do
+
+  import HttpServer
+  import Response
+  import Controller
+  import ErrorView
+
+  doc """
+  Handle a Controller.ActionResult using the default error renderer.
+
+  If the result is Ok(conn), the conn is returned unchanged.
+  If the result is Error(status, message), an HTML error page is rendered
+  using ErrorView.
+
+  Example:
+    FallbackController.call(conn, my_action(conn))
+  """
+  fn call(conn : Conn, result : Controller.ActionResult) : Conn do
+    match result do
+    Controller.Ok(c) -> c
+    Controller.Error(status, message) ->
+      Response.html(conn, status, ErrorView.render(status, message))
+    end
+  end
+
+  doc """
+  Handle a Controller.ActionResult by rendering JSON error responses.
+
+  Useful for API endpoints where HTML error pages are not appropriate.
+
+  Example:
+    FallbackController.call_json(conn, my_action(conn))
+  """
+  fn call_json(conn : Conn, result : Controller.ActionResult) : Conn do
+    match result do
+    Controller.Ok(c) -> c
+    Controller.Error(status, message) -> do
+      let body = "{\"error\":{\"status\":" ++ int_to_string(status) ++
+                 ",\"message\":" ++ Json.encode_string(message) ++ "}}"
+      Response.json(conn, status, body)
+    end
+    end
+  end
+
+  doc """
+  Create a custom fallback handler function.
+
+  The handler receives the original conn and the ActionResult, and must
+  return a Conn. This lets you define application-specific error rendering.
+
+  Example:
+    let my_fallback = FallbackController.new(fn (conn, result) ->
+      match result do
+      Controller.Ok(c) -> c
+      Controller.Error(status, msg) ->
+        Response.text(conn, status, msg)
+      end
+    )
+
+    -- Later, in a handler:
+    my_fallback(conn, some_action(conn))
+  """
+  fn new(handler : (Conn, Controller.ActionResult) -> Conn) : (Conn, Controller.ActionResult) -> Conn do
+    handler
+  end
+
+end

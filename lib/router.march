@@ -22,6 +22,7 @@
 mod Router do
 
   import HttpServer
+  import ErrorView
 
   -- A single registered route.
   type Route = Route(Method, List(String), Conn -> Conn)
@@ -143,7 +144,7 @@ mod Router do
   pfn find_and_call(routes : List(Route), method : Method, path_segs : List(String), conn : Conn) : Conn do
     match routes do
     Nil ->
-      HttpServer.text(conn, 404, "Not Found")
+      HttpServer.html(conn, 404, ErrorView.render_default(404))
     Cons(Route(m, pattern, handler), rest) ->
       try_route(m, pattern, handler, rest, method, path_segs, conn)
     end

@@ -1,0 +1,107 @@
+-- Bastion.ErrorView — default HTML error page rendering.
+--
+-- Renders user-friendly error pages for common HTTP status codes.
+-- Used by FallbackController and the router's default 404 handler.
+--
+-- Example:
+--
+--   let html = ErrorView.render(404, "The page you were looking for does not exist.")
+--   Response.html(conn, 404, html)
+
+mod ErrorView do
+
+  doc """
+  Render an HTML error page for the given HTTP status code and message.
+
+  Returns a complete HTML document string with inline styling.
+
+  Example:
+    ErrorView.render(404, "Not Found")
+  """
+  fn render(status : Int, message : String) : String do
+    let title = int_to_string(status) ++ " " ++ status_text(status)
+    "<!DOCTYPE html>\n" ++
+    "<html lang=\"en\">\n" ++
+    "<head>\n" ++
+    "  <meta charset=\"utf-8\">\n" ++
+    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" ++
+    "  <title>" ++ title ++ "</title>\n" ++
+    "  <style>\n" ++
+    "    body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f8f9fa; color: #1a1a1a; }\n" ++
+    "    .error { text-align: center; max-width: 500px; padding: 2rem; }\n" ++
+    "    .error h1 { font-size: 4rem; margin: 0 0 0.5rem; color: #6c757d; }\n" ++
+    "    .error h2 { font-size: 1.5rem; margin: 0 0 1rem; font-weight: 400; }\n" ++
+    "    .error p { color: #6c757d; line-height: 1.6; }\n" ++
+    "    .error a { color: #0070f3; text-decoration: none; }\n" ++
+    "    .error a:hover { text-decoration: underline; }\n" ++
+    "  </style>\n" ++
+    "</head>\n" ++
+    "<body>\n" ++
+    "  <div class=\"error\">\n" ++
+    "    <h1>" ++ int_to_string(status) ++ "</h1>\n" ++
+    "    <h2>" ++ status_text(status) ++ "</h2>\n" ++
+    "    <p>" ++ message ++ "</p>\n" ++
+    "    <p><a href=\"/\">Back to home</a></p>\n" ++
+    "  </div>\n" ++
+    "</body>\n" ++
+    "</html>\n"
+  end
+
+  doc """
+  Render a minimal error page using a default message for the given status code.
+
+  Example:
+    ErrorView.render_default(500)
+  """
+  fn render_default(status : Int) : String do
+    render(status, default_message(status))
+  end
+
+  doc """
+  Return the standard HTTP status text for a given status code.
+
+  Example:
+    ErrorView.status_text(404)  -- => "Not Found"
+  """
+  fn status_text(status : Int) : String do
+    match status do
+    400 -> "Bad Request"
+    401 -> "Unauthorized"
+    403 -> "Forbidden"
+    404 -> "Not Found"
+    405 -> "Method Not Allowed"
+    408 -> "Request Timeout"
+    409 -> "Conflict"
+    410 -> "Gone"
+    413 -> "Payload Too Large"
+    415 -> "Unsupported Media Type"
+    422 -> "Unprocessable Entity"
+    429 -> "Too Many Requests"
+    500 -> "Internal Server Error"
+    501 -> "Not Implemented"
+    502 -> "Bad Gateway"
+    503 -> "Service Unavailable"
+    504 -> "Gateway Timeout"
+    _   -> "Error"
+    end
+  end
+
+  doc """
+  Return a default user-facing message for a given status code.
+  """
+  fn default_message(status : Int) : String do
+    match status do
+    400 -> "The request could not be understood by the server."
+    401 -> "You must authenticate to access this resource."
+    403 -> "You do not have permission to access this resource."
+    404 -> "The page you were looking for does not exist."
+    405 -> "The HTTP method used is not allowed for this resource."
+    422 -> "The request was well-formed but could not be processed."
+    429 -> "You have made too many requests. Please try again later."
+    500 -> "Something went wrong on our end. Please try again later."
+    503 -> "The service is temporarily unavailable. Please try again later."
+    _   -> "An unexpected error occurred."
+    end
+  end
+
+end

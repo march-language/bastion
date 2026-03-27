@@ -1,0 +1,122 @@
+-- Bastion.Controller — structured request handling with automatic error recovery.
+--
+-- Controllers encapsulate request handling logic using the ActionResult type,
+-- which separates success (Ok) from failure (Error). This pattern, inspired by
+-- Phoenix controllers, lets handlers focus on business logic while error
+-- rendering is delegated to FallbackController.
+--
+-- Example:
+--
+--   fn show(conn : Conn) : Controller.ActionResult do
+--     let id_opt = Request.path_param(conn, "id")
+--     match id_opt do
+--     None      -> Controller.Error(404, "User not found")
+--     Some(id)  -> Controller.Ok(Response.json(conn, 200, "{\"id\":\"" ++ id ++ "\"}"))
+--     end
+--   end
+--
+--   -- In the router handler:
+--   fn show_handler(conn : Conn) : Conn do
+--     Controller.action(conn, fn c -> show(c))
+--   end
+
+mod Controller do
+
+  import HttpServer
+  import Response
+  import ErrorView
+
+  -- What controller actions return: either a successful conn or an error
+  -- with a status code and message.
+  type ActionResult =
+    Ok(Conn)
+  | Error(Int, String)
+
+  doc """
+  Execute a controller action with automatic error handling.
+
+  Calls the handler function with the conn. If the handler returns Ok(conn),
+  the conn is returned as-is. If it returns Error(status, message), an HTML
+  error page is rendered using ErrorView.
+
+  Example:
+    Controller.action(conn, fn c -> my_action(c))
+  """
+  fn action(conn : Conn, handler : Conn -> ActionResult) : Conn do
+    let result = handler(conn)
+    match result do
+    Ok(c) -> c
+    Error(status, message) ->
+      Response.html(conn, status, ErrorView.render(status, message))
+    end
+  end
+
+  doc """
+  Render HTML by calling a template function that receives the conn and
+  returns an HTML string.
+
+  Example:
+    Controller.render(conn, 200, fn c -> home_template(c))
+  """
+  fn render(conn : Conn, status : Int, template : Conn -> String) : Conn do
+    let html = template(conn)
+    Response.html(conn, status, html)
+  end
+
+  doc """
+  Send a JSON response with the given status and body string.
+
+  The caller is responsible for serialising the body to a JSON string.
+
+  Example:
+    Controller.json(conn, 200, Json.encode(data))
+  """
+  fn json(conn : Conn, status : Int, body : String) : Conn do
+    Response.json(conn, status, body)
+  end
+
+  doc """
+  Send a plain text response with the given status and body.
+  """
+  fn text(conn : Conn, status : Int, body : String) : Conn do
+    Response.text(conn, status, body)
+  end
+
+  doc """
+  Convenience: render HTML with a 200 OK status.
+
+  Example:
+    Controller.render_ok(conn, fn c -> home_template(c))
+  """
+  fn render_ok(conn : Conn, template : Conn -> String) : Conn do
+    render(conn, 200, template)
+  end
+
+  doc """
+  Render HTML from a template function that returns an IOList (e.g. from ~H sigil).
+  Converts the IOList to a string before sending.
+
+  Example:
+    Controller.render_iolist(conn, 200, fn c -> ~H"<h1>Hello</h1>")
+  """
+  fn render_iolist(conn : Conn, status : Int, template : Conn -> IOList) : Conn do
+    let iol = template(conn)
+    let html = IOList.to_string(iol)
+    Response.html(conn, status, html)
+  end
+
+  doc """
+  Convenience: render an IOList template with 200 OK status.
+  """
+  fn render_iolist_ok(conn : Conn, template : Conn -> IOList) : Conn do
+    render_iolist(conn, 200, template)
+  end
+
+  doc """
+  Send a redirect response (302 Found) to the given URL.
+  """
+  fn redirect(conn : Conn, url : String) : Conn do
+    Response.redirect(conn, url)
+  end
+
+end

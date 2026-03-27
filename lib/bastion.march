@@ -246,6 +246,8 @@ mod Bastion do
     "  import HttpServer\n" ++
     "  import Router\n" ++
     "  import Middleware\n" ++
+    "  import Controller\n" ++
+    "  import FallbackController\n" ++
     "  import PageController\n\n" ++
     "  pfn build_router() : Router do\n" ++
     "    Router.new()\n" ++
@@ -253,16 +255,17 @@ mod Bastion do
     "    |> Router.get(\"/about\",  fn conn -> PageController.about(conn))\n" ++
     "    |> Router.get(\"/health\", fn conn -> health(conn))\n" ++
     "  end\n\n" ++
+    "  -- Health check using Controller.json for consistency\n" ++
     "  pfn health(conn : Conn) : Conn do\n" ++
-    "    HttpServer.json(conn, 200, \"{\\\"status\\\":\\\"ok\\\"}\")\n" ++
+    "    Controller.json(conn, 200, \"{\\\"status\\\":\\\"ok\\\"}\")\n" ++
     "  end\n\n" ++
     "  fn main() : Unit do\n" ++
     "    let router  = build_router()\n" ++
     "    let plug    = Router.to_plug(router)\n" ++
     "    let wrapped = fn conn -> do\n" ++
-    "      let c1 = logger(conn)\n" ++
-    "      let c2 = request_id(c1)\n" ++
-    "      let c3 = cors(c2)\n" ++
+    "      let c1 = Middleware.logger(conn)\n" ++
+    "      let c2 = Middleware.request_id(c1)\n" ++
+    "      let c3 = Middleware.cors(c2)\n" ++
     "      match HttpServer.halted(c3) do\n" ++
     "      true  -> c3\n" ++
     "      false -> plug(c3)\n" ++
@@ -278,20 +281,38 @@ mod Bastion do
 
   pfn page_controller(pascal : String) : String do
     "mod PageController do\n\n" ++
-    "  import HttpServer\n\n" ++
-    "  fn home(conn : Conn) : Conn do\n" ++
-    "    HttpServer.html(conn, 200, layout(\"Home\",\n" ++
+    "  import HttpServer\n" ++
+    "  import Controller\n" ++
+    "  import FallbackController\n" ++
+    "  import Response\n\n" ++
+    "  -- ── Actions ────────────────────────────────────────────────────────\n" ++
+    "  -- Actions return Controller.ActionResult so errors are handled\n" ++
+    "  -- uniformly by FallbackController.\n\n" ++
+    "  pfn home_action(conn : Conn) : Controller.ActionResult do\n" ++
+    "    let html = layout(\"Home\",\n" ++
     "      \"<h1>Welcome to " ++ pascal ++ "!</h1>\\n\" ++\n" ++
     "      \"<p>Edit <code>lib/page_controller.march</code> to get started.</p>\\n\" ++\n" ++
     "      \"<p><a href=\\\"/about\\\">About</a></p>\"\n" ++
-    "    ))\n" ++
+    "    )\n" ++
+    "    Controller.Ok(Response.html(conn, 200, html))\n" ++
     "  end\n\n" ++
-    "  fn about(conn : Conn) : Conn do\n" ++
-    "    HttpServer.html(conn, 200, layout(\"About\",\n" ++
+    "  pfn about_action(conn : Conn) : Controller.ActionResult do\n" ++
+    "    let html = layout(\"About\",\n" ++
     "      \"<h1>About</h1>\\n\" ++\n" ++
     "      \"<p>Built with <a href=\\\"https://github.com/march-lang/bastion\\\">Bastion</a>.</p>\"\n" ++
-    "    ))\n" ++
+    "    )\n" ++
+    "    Controller.Ok(Response.html(conn, 200, html))\n" ++
     "  end\n\n" ++
+    "  -- ── Public handlers (used in Router) ───────────────────────────────\n" ++
+    "  -- Each handler delegates to an action and passes the result through\n" ++
+    "  -- FallbackController.call for automatic error rendering.\n\n" ++
+    "  fn home(conn : Conn) : Conn do\n" ++
+    "    FallbackController.call(conn, home_action(conn))\n" ++
+    "  end\n\n" ++
+    "  fn about(conn : Conn) : Conn do\n" ++
+    "    FallbackController.call(conn, about_action(conn))\n" ++
+    "  end\n\n" ++
+    "  -- ── Templates ──────────────────────────────────────────────────────\n\n" ++
     "  pfn layout(title : String, body : String) : String do\n" ++
     "    \"<!DOCTYPE html>\\n\" ++\n" ++
     "    \"<html lang=\\\"en\\\">\\n\" ++\n" ++
