@@ -1,0 +1,9 @@
+[package]
+name = "bastion"
+version = "0.1.0"
+type = "tool"
+description = "Bastion web framework CLI — project scaffolding and generators"
+author = ""
+
+[deps]
+bastion = { path = ".." }

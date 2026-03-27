@@ -1,0 +1,352 @@
+-- bastion — CLI for the Bastion web framework.
+--
+-- Usage:
+--   bastion new <app_name>   Create a new Bastion application
+--
+-- Example:
+--   bastion new blog
+--   cd blog && forge deps && forge run
+
+mod Bastion do
+
+  -- ── Entry point ───────────────────────────────────────────────────────
+
+  fn main() : Unit do
+    let args = Process.argv()
+    match args do
+    Cons(_, Cons(cmd, rest)) ->
+      match cmd do
+      "new" ->
+        match rest do
+        Cons(name, _) -> cmd_new(name)
+        Nil ->
+          panic("error: missing app name\nusage: bastion new <app_name>")
+        end
+      _ ->
+        panic("error: unknown command: " ++ cmd)
+      end
+    _ -> do
+      print_help()
+    end
+    end
+  end
+
+  pfn print_help() : Unit do
+    println("Bastion — web framework CLI")
+    println("")
+    println("Commands:")
+    println("  bastion new <app_name>   Create a new Bastion application")
+  end
+
+  -- ── new command ───────────────────────────────────────────────────────
+
+  pfn cmd_new(name : String) : Unit do
+    match Dir.exists(name) do
+    true ->
+      panic("error: directory '" ++ name ++ "' already exists")
+    false -> do
+      println("Creating Bastion app: " ++ name)
+      scaffold(name)
+      println("")
+      println("Done! Next steps:")
+      println("")
+      println("  cd " ++ name)
+      println("  forge deps")
+      println("  forge run")
+      println("")
+      println("Your app will be at http://localhost:4000")
+    end
+    end
+  end
+
+  -- ── Scaffolding ───────────────────────────────────────────────────────
+
+  pfn scaffold(name : String) : Unit do
+    let pascal = to_pascal(name)
+
+    -- Directory structure
+    Dir.mkdir_p(name)
+    Dir.mkdir_p(name ++ "/lib")
+    Dir.mkdir_p(name ++ "/public")
+    Dir.mkdir_p(name ++ "/public/css")
+    Dir.mkdir_p(name ++ "/public/js")
+    Dir.mkdir_p(name ++ "/islands")
+    Dir.mkdir_p(name ++ "/test")
+
+    -- Project files
+    write(name ++ "/forge.toml",           forge_toml(name))
+    write(name ++ "/.editorconfig",        editorconfig())
+    write(name ++ "/.gitignore",           gitignore())
+    write(name ++ "/README.md",            readme(name))
+
+    -- Lib files
+    write(name ++ "/lib/" ++ name ++ ".march",           main_module(name, pascal))
+    write(name ++ "/lib/page_controller.march",          page_controller(pascal))
+    write(name ++ "/lib/counter.march",                  counter_island(pascal))
+
+    -- Public assets
+    write(name ++ "/public/css/app.css",   app_css())
+    write(name ++ "/public/js/.gitkeep",   "")
+    write(name ++ "/islands/.gitkeep",     "")
+
+    -- Tests
+    write(name ++ "/test/" ++ name ++ "_test.march", test_module(name, pascal))
+
+    println("  created " ++ name ++ "/")
+  end
+
+  pfn write(path : String, content : String) : Unit do
+    File.write(path, content)
+    println("  created " ++ path)
+  end
+
+  -- ── Name helpers ──────────────────────────────────────────────────────
+
+  -- Convert snake_case to PascalCase: "my_app" -> "MyApp"
+  pfn to_pascal(s : String) : String do
+    join_parts(String.split(s, "_"), "")
+  end
+
+  pfn join_parts(parts : List(String), acc : String) : String do
+    match parts do
+    Nil              -> acc
+    Cons(part, rest) -> join_parts(rest, acc ++ capitalise(part))
+    end
+  end
+
+  pfn capitalise(s : String) : String do
+    match String.is_empty(s) do
+    true  -> s
+    false -> do
+      let head = String.slice_bytes(s, 0, 1)
+      let tail = String.slice_bytes(s, 1, String.byte_size(s) - 1)
+      String.to_uppercase(head) ++ tail
+    end
+    end
+  end
+
+  -- ── File templates ────────────────────────────────────────────────────
+
+  pfn forge_toml(name : String) : String do
+    "[package]\n" ++
+    "name = \"" ++ name ++ "\"\n" ++
+    "version = \"0.1.0\"\n" ++
+    "type = \"app\"\n" ++
+    "description = \"\"\n" ++
+    "author = \"\"\n" ++
+    "\n" ++
+    "[deps]\n" ++
+    "bastion = { path = \"../bastion\" }\n" ++
+    "islands = { path = \"../islands\" }\n"
+  end
+
+  pfn editorconfig() : String do
+    "root = true\n\n" ++
+    "[*]\n" ++
+    "indent_style = space\n" ++
+    "indent_size = 2\n" ++
+    "charset = utf-8\n" ++
+    "end_of_line = lf\n" ++
+    "trim_trailing_whitespace = true\n" ++
+    "insert_final_newline = true\n\n" ++
+    "[*.march]\n" ++
+    "indent_style = space\n" ++
+    "indent_size = 2\n"
+  end
+
+  pfn gitignore() : String do
+    "/.march/\n" ++
+    "/islands/*.wasm\n" ++
+    "/islands/*.glue.js\n"
+  end
+
+  pfn readme(name : String) : String do
+    "# " ++ to_pascal(name) ++ "\n\n" ++
+    "A [Bastion](https://github.com/march-lang/bastion) web application.\n\n" ++
+    "## Getting started\n\n" ++
+    "```bash\n" ++
+    "forge deps\n" ++
+    "forge run\n" ++
+    "```\n\n" ++
+    "Visit http://localhost:4000\n\n" ++
+    "## Structure\n\n" ++
+    "```\n" ++
+    "lib/\n" ++
+    "  " ++ name ++ ".march          # Router and server entry point\n" ++
+    "  page_controller.march  # Page handlers\n" ++
+    "  counter.march          # Example island component\n" ++
+    "public/                  # Static assets (CSS, JS, images)\n" ++
+    "islands/                 # Compiled .wasm island modules\n" ++
+    "test/                    # Tests\n" ++
+    "```\n\n" ++
+    "## Islands\n\n" ++
+    "Compile an island to WASM:\n\n" ++
+    "```bash\n" ++
+    "march --compile --target wasm32-unknown-unknown lib/counter.march -o islands/Counter.wasm\n" ++
+    "```\n"
+  end
+
+  pfn main_module(_name : String, pascal : String) : String do
+    "mod " ++ pascal ++ " do\n\n" ++
+    "  import HttpServer\n" ++
+    "  import Router\n" ++
+    "  import Middleware\n" ++
+    "  import PageController\n\n" ++
+    "  pfn build_router() : Router do\n" ++
+    "    Router.new()\n" ++
+    "    |> Router.get(\"/\",       fn conn -> PageController.home(conn))\n" ++
+    "    |> Router.get(\"/about\",  fn conn -> PageController.about(conn))\n" ++
+    "    |> Router.get(\"/health\", fn conn -> health(conn))\n" ++
+    "  end\n\n" ++
+    "  pfn health(conn : Conn) : Conn do\n" ++
+    "    HttpServer.json(conn, 200, \"{\\\"status\\\":\\\"ok\\\"}\")\n" ++
+    "  end\n\n" ++
+    "  fn main() : Unit do\n" ++
+    "    let router  = build_router()\n" ++
+    "    let plug    = Router.to_plug(router)\n" ++
+    "    let wrapped = fn conn -> do\n" ++
+    "      let c1 = logger(conn)\n" ++
+    "      let c2 = request_id(c1)\n" ++
+    "      let c3 = cors(c2)\n" ++
+    "      match HttpServer.halted(c3) do\n" ++
+    "      true  -> c3\n" ++
+    "      false -> plug(c3)\n" ++
+    "      end\n" ++
+    "    end\n" ++
+    "    println(\"" ++ pascal ++ " listening on http://localhost:4000\")\n" ++
+    "    HttpServer.new(4000)\n" ++
+    "    |> HttpServer.plug(wrapped)\n" ++
+    "    |> HttpServer.listen()\n" ++
+    "  end\n\n" ++
+    "end\n"
+  end
+
+  pfn page_controller(pascal : String) : String do
+    "mod PageController do\n\n" ++
+    "  import HttpServer\n\n" ++
+    "  fn home(conn : Conn) : Conn do\n" ++
+    "    HttpServer.html(conn, 200, layout(\"Home\",\n" ++
+    "      \"<h1>Welcome to " ++ pascal ++ "!</h1>\\n\" ++\n" ++
+    "      \"<p>Edit <code>lib/page_controller.march</code> to get started.</p>\\n\" ++\n" ++
+    "      \"<p><a href=\\\"/about\\\">About</a></p>\"\n" ++
+    "    ))\n" ++
+    "  end\n\n" ++
+    "  fn about(conn : Conn) : Conn do\n" ++
+    "    HttpServer.html(conn, 200, layout(\"About\",\n" ++
+    "      \"<h1>About</h1>\\n\" ++\n" ++
+    "      \"<p>Built with <a href=\\\"https://github.com/march-lang/bastion\\\">Bastion</a>.</p>\"\n" ++
+    "    ))\n" ++
+    "  end\n\n" ++
+    "  pfn layout(title : String, body : String) : String do\n" ++
+    "    \"<!DOCTYPE html>\\n\" ++\n" ++
+    "    \"<html lang=\\\"en\\\">\\n\" ++\n" ++
+    "    \"<head>\\n\" ++\n" ++
+    "    \"  <meta charset=\\\"utf-8\\\">\\n\" ++\n" ++
+    "    \"  <meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1\\\">\\n\" ++\n" ++
+    "    \"  <title>\" ++ title ++ \" · " ++ pascal ++ "</title>\\n\" ++\n" ++
+    "    \"  <link rel=\\\"stylesheet\\\" href=\\\"/css/app.css\\\">\\n\" ++\n" ++
+    "    \"</head>\\n\" ++\n" ++
+    "    \"<body>\\n\" ++\n" ++
+    "    \"  <nav><a href=\\\"/\\\">Home</a> <a href=\\\"/about\\\">About</a></nav>\\n\" ++\n" ++
+    "    \"  <main>\\n\" ++ body ++ \"\\n  </main>\\n\" ++\n" ++
+    "    \"</body>\\n\" ++\n" ++
+    "    \"</html>\\n\"\n" ++
+    "  end\n\n" ++
+    "end\n"
+  end
+
+  pfn counter_island(_pascal : String) : String do
+    "-- Counter — example island component.\n" ++
+    "--\n" ++
+    "-- Compile to WASM:\n" ++
+    "--   march --compile --target wasm32-unknown-unknown lib/counter.march -o islands/Counter.wasm\n\n" ++
+    "mod Counter do\n\n" ++
+    "  type State = { count : Int }\n\n" ++
+    "  fn render(state_json : String) : String do\n" ++
+    "    let count = parse_count(state_json)\n" ++
+    "    \"<div class=\\\"counter\\\">\\n\" ++\n" ++
+    "    \"  <button data-on-click=\\\"Decrement\\\">−</button>\\n\" ++\n" ++
+    "    \"  <span class=\\\"count\\\">\" ++ int_to_string(count) ++ \"</span>\\n\" ++\n" ++
+    "    \"  <button data-on-click=\\\"Increment\\\">+</button>\\n\" ++\n" ++
+    "    \"</div>\"\n" ++
+    "  end\n\n" ++
+    "  fn update(state_json : String, msg_json : String) : String do\n" ++
+    "    let count = parse_count(state_json)\n" ++
+    "    let new_count = match msg_json do\n" ++
+    "      \"\\\"Increment\\\"\" -> count + 1\n" ++
+    "      \"\\\"Decrement\\\"\" -> count - 1\n" ++
+    "      _              -> count\n" ++
+    "      end\n" ++
+    "    \"{\\\"count\\\":\" ++ int_to_string(new_count) ++ \"}\"\n" ++
+    "  end\n\n" ++
+    "  pfn parse_count(state_json : String) : Int do\n" ++
+    "    match Json.parse(state_json) do\n" ++
+    "    Ok(v) -> do\n" ++
+    "      match Json.get(v, \"count\") do\n" ++
+    "      Some(n) -> json_to_int(n)\n" ++
+    "      None    -> 0\n" ++
+    "      end\n" ++
+    "    end\n" ++
+    "    Err(_) -> 0\n" ++
+    "    end\n" ++
+    "  end\n\n" ++
+    "  pfn json_to_int(v : JsonValue) : Int do\n" ++
+    "    match v do\n" ++
+    "    Number(f) -> float_to_int(f)\n" ++
+    "    _         -> 0\n" ++
+    "    end\n" ++
+    "  end\n\n" ++
+    "end\n"
+  end
+
+  pfn app_css() : String do
+    "*, *::before, *::after { box-sizing: border-box; }\n\n" ++
+    "body {\n" ++
+    "  font-family: system-ui, sans-serif;\n" ++
+    "  max-width: 800px;\n" ++
+    "  margin: 0 auto;\n" ++
+    "  padding: 1rem;\n" ++
+    "  color: #1a1a1a;\n" ++
+    "}\n\n" ++
+    "nav { margin-bottom: 2rem; }\n" ++
+    "nav a { margin-right: 1rem; color: #0070f3; text-decoration: none; }\n" ++
+    "nav a:hover { text-decoration: underline; }\n\n" ++
+    ".counter {\n" ++
+    "  display: inline-flex;\n" ++
+    "  align-items: center;\n" ++
+    "  gap: 0.75rem;\n" ++
+    "  font-size: 1.5rem;\n" ++
+    "}\n\n" ++
+    ".counter button {\n" ++
+    "  font-size: 1.5rem;\n" ++
+    "  width: 2.5rem;\n" ++
+    "  height: 2.5rem;\n" ++
+    "  border: 1px solid #ccc;\n" ++
+    "  border-radius: 6px;\n" ++
+    "  cursor: pointer;\n" ++
+    "  background: white;\n" ++
+    "}\n\n" ++
+    ".counter button:hover { background: #f0f0f0; }\n"
+  end
+
+  pfn test_module(_name : String, pascal : String) : String do
+    "mod " ++ pascal ++ "Test do\n\n" ++
+    "  import Counter\n\n" ++
+    "  describe \"Counter island\" do\n\n" ++
+    "    test \"render shows initial count\" do\n" ++
+    "      let html = Counter.render(\"{\\\"count\\\":0}\")\n" ++
+    "      assert (String.contains(html, \"0\"))\n" ++
+    "    end\n\n" ++
+    "    test \"increment increases count\" do\n" ++
+    "      let next = Counter.update(\"{\\\"count\\\":5}\", \"\\\"Increment\\\"\")\n" ++
+    "      assert (String.contains(next, \"6\"))\n" ++
+    "    end\n\n" ++
+    "    test \"decrement decreases count\" do\n" ++
+    "      let next = Counter.update(\"{\\\"count\\\":5}\", \"\\\"Decrement\\\"\")\n" ++
+    "      assert (String.contains(next, \"4\"))\n" ++
+    "    end\n\n" ++
+    "  end\n\n" ++
+    "end\n"
+  end
+
+end
