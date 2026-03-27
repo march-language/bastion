@@ -56,17 +56,21 @@ mod IslandAssets do
   """
   fn plug(cfg : Config) : Conn -> Conn do
     let base = config_base_path(cfg)
-    let js_path    = base ++ "/islands.js"
-    let ws_js_path = base ++ "/islands-ws.js"
+    let js_path      = base ++ "/islands.js"
+    let ws_js_path   = base ++ "/islands-ws.js"
+    let wasm_prefix  = base ++ "/islands/"
     fn conn -> do
       let req_path = HttpServer.path(conn)
       if req_path == js_path do
         serve_js(conn)
       else if req_path == ws_js_path do
         serve_ws_js(conn)
+      else if String.starts_with(req_path, wasm_prefix) && String.ends_with(req_path, ".wasm") do
+        let name = String.slice(req_path, String.byte_length(wasm_prefix), String.byte_length(req_path) - String.byte_length(wasm_prefix) - 5)
+        serve_wasm(conn, name)
       else
         conn
-      end end
+      end end end
     end
   end
 
@@ -114,6 +118,38 @@ mod IslandAssets do
     match File.read(path) do
     Ok(content) -> content
     Err(_) -> "console.warn('[bastion] could not load " ++ path ++ "');\n"
+    end
+  end
+
+  -- ── WASM file serving ──────────────────────────────────────────────────
+
+  doc """
+  Serve a compiled island WASM file.
+
+  The file is looked up under priv/static/islands/{name}.wasm.
+  Falls back to the build output directory islands/{name}.wasm if not found.
+  Returns 404 if the WASM file is not present (island not yet compiled).
+  """
+  fn serve_wasm(conn : Conn, name : String) : Conn do
+    let primary_path = "priv/static/islands/" ++ name ++ ".wasm"
+    let fallback_path = "islands/" ++ name ++ ".wasm"
+    let content_opt = match File.read(primary_path) do
+      Ok(bytes) -> Some(bytes)
+      Err(_) ->
+        match File.read(fallback_path) do
+        Ok(bytes) -> Some(bytes)
+        Err(_) -> None
+        end
+      end
+    match content_opt do
+    Some(bytes) ->
+      conn
+      |> HttpServer.put_resp_header("content-type", "application/wasm")
+      |> HttpServer.put_resp_header("cache-control", "public, max-age=3600")
+      |> HttpServer.send_resp(200, bytes)
+    None ->
+      conn
+      |> HttpServer.send_resp(404, "Island WASM not found: " ++ name)
     end
   end
 

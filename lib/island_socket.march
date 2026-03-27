@@ -81,7 +81,8 @@ mod IslandSocket do
   type IslandHandler = IslandHandler(
     String,
     (String, String) -> String,
-    String -> String
+    String -> String,
+    Option((String, String) -> String)
   )
 
   type Registry = Registry(List(IslandHandler))
@@ -103,7 +104,20 @@ mod IslandSocket do
   fn register(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String) : Registry do
     match reg do
     Registry(handlers) ->
-      Registry(Cons(IslandHandler(name, update_fn, render_fn), handlers))
+      Registry(Cons(IslandHandler(name, update_fn, render_fn, None), handlers))
+    end
+  end
+
+  doc """
+  Register an island module with a custom merge function for CRDT reconciliation.
+
+  merge_fn takes (local_state_json, remote_state_json) and returns merged state_json.
+  The default server-wins behavior is register/3; this variant enables real CRDT merges.
+  """
+  fn register_with_merge(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, merge_fn : (String, String) -> String) : Registry do
+    match reg do
+    Registry(handlers) ->
+      Registry(Cons(IslandHandler(name, update_fn, render_fn, Some(merge_fn)), handlers))
     end
   end
 
@@ -119,7 +133,7 @@ mod IslandSocket do
     Nil -> None
     Cons(h, rest) ->
       match h do
-      IslandHandler(n, _, _) ->
+      IslandHandler(n, _, _, _) ->
         if n == name then Some(h)
         else find_in_list(rest, name)
       end
@@ -239,9 +253,10 @@ mod IslandSocket do
       let island_id = json_string_field(msg, "island")
       let msg_type  = json_string_field(msg, "type")
       match msg_type do
-      "init"    -> handle_init(ws_sock, msg, island_id, store, registry)
-      "msg"     -> handle_msg(ws_sock, msg, island_id, store, registry)
-      "destroy" -> handle_destroy(island_id, store)
+      "init"       -> handle_init(ws_sock, msg, island_id, store, registry)
+      "msg"        -> handle_msg(ws_sock, msg, island_id, store, registry)
+      "optimistic" -> handle_optimistic(ws_sock, msg, island_id, store, registry)
+      "destroy"    -> handle_destroy(island_id, store)
       _         -> store
       end
     end
@@ -262,7 +277,7 @@ mod IslandSocket do
     match find_handler(registry, module_name) do
     Some(handler) -> do
       match handler do
-      IslandHandler(_, _, render_fn) -> do
+      IslandHandler(_, _, render_fn, _) -> do
         let html = render_fn(payload)
         -- Send rendered HTML
         send_render(ws_sock, island_id, html)
@@ -291,7 +306,7 @@ mod IslandSocket do
         match find_handler(registry, module_name) do
         Some(handler) -> do
           match handler do
-          IslandHandler(_, update_fn, render_fn) -> do
+          IslandHandler(_, update_fn, render_fn, _) -> do
             -- Run update: (current_state_json, msg_json) -> new_state_json
             let new_state = update_fn(current_state, msg_payload)
             -- Store updated state
@@ -321,6 +336,51 @@ mod IslandSocket do
     end
   end
 
+  -- ── Optimistic state handler (Phase 5 CRDT) ─────────────────────────
+  -- Client sends its locally-computed optimistic state for reconciliation.
+  -- Server merges with its own state using the island's merge function
+  -- (or server-wins if no merge function is registered).
+  -- Sends back a "merge" response so the client can reconcile.
+
+  pfn handle_optimistic(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
+    let client_state = json_field_raw(msg, "payload")
+    match get_island(store, island_id) do
+    Some(entry) -> do
+      match entry do
+      IslandEntry(module_name, server_state) -> do
+        match find_handler(registry, module_name) do
+        Some(handler) -> do
+          match handler do
+          IslandHandler(_, _, render_fn, merge_opt) -> do
+            -- Apply merge: use custom merge fn if registered, else server-wins
+            let merged_state = match merge_opt do
+              Some(merge_fn) -> merge_fn(client_state, server_state)
+              None           -> server_state
+              end
+            -- Update server state to merged result
+            let new_store = put_island(store, island_id, IslandEntry(module_name, merged_state))
+            -- Render with merged state and send back
+            let html = render_fn(merged_state)
+            send_render(ws_sock, island_id, html)
+            -- Send merge response so client can reconcile
+            send_merge(ws_sock, island_id, merged_state)
+            new_store
+          end
+          end
+        end
+        None -> do
+          -- No handler; just echo client state back
+          send_merge(ws_sock, island_id, client_state)
+          store
+        end
+        end
+      end
+      end
+    end
+    None -> store
+    end
+  end
+
   -- ── Destroy handler ────────────────────────────────────────────────────
 
   pfn handle_destroy(island_id : String, store : IslandState) : IslandState do
@@ -336,6 +396,11 @@ mod IslandSocket do
 
   pfn send_state(ws_sock : WebSocket.WsSocket, island_id : String, state_json : String) : Unit do
     let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ state_json ++ "}"
+    WebSocket.send_frame(ws_sock, TextFrame(response))
+  end
+
+  pfn send_merge(ws_sock : WebSocket.WsSocket, island_id : String, state_json : String) : Unit do
+    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"merge\",\"payload\":" ++ state_json ++ "}"
     WebSocket.send_frame(ws_sock, TextFrame(response))
   end
 

@@ -58,9 +58,11 @@
      */
     onStateUpdate(newState) {
       this.state = newState;
-      // Phase 2: don't rerender locally; server sends 'render' messages.
-      // Phase 4 (client WASM): uncomment this to rerender client-side.
-      // this.rerender();
+      // Phase 4: if WASM is loaded, render client-side without waiting for
+      // a separate 'render' message from the server.
+      if (this.wasmModule) {
+        this.rerender();
+      }
     }
 
     /**
@@ -71,7 +73,11 @@
      */
     onMerge(remoteState) {
       this.state = remoteState;
-      // Phase 2: don't rerender locally; server sends 'render' messages.
+      // Phase 5: pass to WASM merge function (currently server-wins).
+      if (this.wasmModule) {
+        this.wasmModule.merge(remoteState);
+        this.rerender();
+      }
     }
 
     /**
@@ -88,8 +94,18 @@
      * @param {string|Object} msgPayload
      */
     dispatch(msgPayload) {
-      // Phase 2: send to server, wait for render response.
-      // No optimistic local update — all state lives on the server.
+      // Phase 4: if WASM is loaded, apply update optimistically and
+      // re-render locally without waiting for a server round-trip.
+      // We also send to the server for persistence and reconciliation.
+      if (this.wasmModule) {
+        const updated = this.wasmModule.update(msgPayload);
+        if (updated) {
+          const html = this.wasmModule.render();
+          if (html !== null) this.morph(html);
+        }
+      }
+
+      // Always send to server (for persistence, auth, side-effects).
       this.manager.send({
         island: this.instanceId,
         type: 'msg',
@@ -196,6 +212,20 @@
           module: instance.moduleName,
           payload: instance.state
         });
+
+        // Start loading WASM module asynchronously (Phase 4)
+        if (window.__bastionWasm) {
+          window.__bastionWasm.loadModule(instance.moduleName).then(wasmMod => {
+            if (wasmMod) {
+              instance.wasmModule = wasmMod;
+              // Re-render using WASM if we already have server state
+              if (instance.statePtr || wasmMod.statePtr) {
+                const html = wasmMod.render();
+                if (html !== null) instance.morph(html);
+              }
+            }
+          });
+        }
       });
     }
 

@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# forge — Bastion build tool
+#
+# Usage:
+#   forge build            Build the app and compile all island WASM modules
+#   forge build --wasm     Compile island WASM modules only
+#   forge build --server   Build server binary only (skip WASM)
+#
+# Island detection: scans all .march files under lib/ and examples/ for
+# <island module="ModuleName"> references and compiles each to WASM.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+MARCH="${MARCH_BIN:-march}"
+WASM_OUT_DIR="${APP_DIR}/priv/static/islands"
+WASM_TARGET="wasm32-unknown-unknown"
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+log() { echo "[forge] $*"; }
+die() { echo "[forge] ERROR: $*" >&2; exit 1; }
+
+# Find all island module names referenced in .march source files.
+# Looks for patterns like: <island module="Counter"> or module="Counter"
+find_islands() {
+  local search_dirs=("${APP_DIR}/lib" "${APP_DIR}/examples" "${APP_DIR}/test")
+  local names=()
+  for dir in "${search_dirs[@]}"; do
+    [ -d "$dir" ] || continue
+    while IFS= read -r line; do
+      # Extract module name from: module="Name" or module='Name'
+      local name
+      name=$(echo "$line" | grep -oP '(?<=module=")[^"]+|(?<=module='"'"')[^'"'"']+' || true)
+      [ -n "$name" ] && names+=("$name")
+    done < <(grep -rh 'island module=' "$dir" --include='*.march' 2>/dev/null || true)
+  done
+  # Deduplicate
+  printf '%s\n' "${names[@]}" | sort -u
+}
+
+# Compile a single island module to WASM.
+# $1 = module name (e.g. "Counter")
+# The source file must be lib/{name_lower}.march or lib/{Name}.march.
+compile_island() {
+  local name="$1"
+  local lower_name
+  lower_name=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+
+  # Find the source file
+  local src=""
+  for candidate in \
+    "${APP_DIR}/lib/${name}.march" \
+    "${APP_DIR}/lib/${lower_name}.march" \
+    "${APP_DIR}/lib/islands/${name}.march" \
+    "${APP_DIR}/lib/islands/${lower_name}.march"
+  do
+    if [ -f "$candidate" ]; then
+      src="$candidate"
+      break
+    fi
+  done
+
+  if [ -z "$src" ]; then
+    log "WARNING: source for island '${name}' not found, skipping"
+    return 0
+  fi
+
+  mkdir -p "${WASM_OUT_DIR}"
+  local out="${WASM_OUT_DIR}/${name}.wasm"
+
+  log "Compiling island ${name} → ${out}"
+  if ! "${MARCH}" --compile --target "${WASM_TARGET}" -o "${out}" "${src}"; then
+    die "Failed to compile island ${name}"
+  fi
+  log "  compiled ${name}.wasm ($(du -h "${out}" | cut -f1))"
+}
+
+# ── Commands ─────────────────────────────────────────────────────────────────
+
+cmd_build_wasm() {
+  log "Detecting islands..."
+  local islands
+  islands=$(find_islands)
+  if [ -z "$islands" ]; then
+    log "No islands found."
+    return 0
+  fi
+  log "Found islands: $(echo "$islands" | tr '\n' ' ')"
+  while IFS= read -r name; do
+    [ -n "$name" ] && compile_island "$name"
+  done <<< "$islands"
+  log "WASM build complete."
+}
+
+cmd_build_server() {
+  log "Building server binary..."
+  if command -v dune &>/dev/null; then
+    (cd "${APP_DIR}" && dune build)
+  elif command -v march &>/dev/null; then
+    local main_file="${APP_DIR}/lib/bastion.march"
+    [ -f "$main_file" ] || die "Cannot find server entry point: ${main_file}"
+    march --compile "${main_file}"
+  else
+    die "No build tool found. Install dune or ensure march is in PATH."
+  fi
+  log "Server build complete."
+}
+
+cmd_build() {
+  local skip_wasm=false
+  local skip_server=false
+  for arg in "$@"; do
+    case "$arg" in
+      --wasm)   skip_server=true ;;
+      --server) skip_wasm=true ;;
+    esac
+  done
+
+  $skip_server || cmd_build_server
+  $skip_wasm   || cmd_build_wasm
+}
+
+# ── Entry point ──────────────────────────────────────────────────────────────
+
+COMMAND="${1:-build}"
+shift || true
+
+case "$COMMAND" in
+  build) cmd_build "$@" ;;
+  *)
+    echo "Usage: forge <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  build [--wasm|--server]   Build app (default: server + WASM)"
+    exit 1
+    ;;
+esac
