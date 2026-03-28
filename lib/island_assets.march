@@ -89,7 +89,7 @@ mod IslandAssets do
         serve_wasm_file(conn, filename)
       else
         conn
-      end end end
+      end end end end
     end
   end
 
@@ -156,15 +156,17 @@ mod IslandAssets do
         end
       end
     match content_opt do
-    Some(bytes) ->
+    Some(bytes) -> do
       let cc = wasm_cache_control(filename)
       conn
       |> HttpServer.put_resp_header("content-type", "application/wasm")
       |> HttpServer.put_resp_header("cache-control", cc)
       |> HttpServer.send_resp(200, bytes)
-    None ->
+    end
+    None -> do
       conn
       |> HttpServer.send_resp(404, "Island WASM not found: " ++ filename)
+    end
     end
   end
 
@@ -222,10 +224,10 @@ mod IslandAssets do
 
   -- Files with an 8-char hash before the extension get immutable caching.
   -- Unhashed files (e.g. during development) get a short 60-second cache.
-  pfn wasm_cache_control(filename : String) : String do
+  fn wasm_cache_control(filename : String) : String do
     -- Strip .wasm extension to isolate the stem, e.g. "counter-a1b2c3d4"
     let stem = match String.split_first(filename, ".") do
-      Some(s, _) -> s
+      Some((s, _)) -> s
       None       -> filename
       end
     -- Check if the last hyphen-segment of the stem is 8 bytes (content hash).

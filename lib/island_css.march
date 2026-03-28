@@ -112,14 +112,16 @@ mod IslandCss do
     false ->
       match String.split_first(trimmed, "{") do
       None -> block
-      Some(selector_raw, body) ->
+      Some((selector_raw, body)) -> do
         let selector = String.trim(selector_raw)
         match should_skip(selector) do
         true  -> block
-        false ->
+        false -> do
           let scoped_sel = scope_selector(selector, attr)
           "\n" ++ scoped_sel ++ " {" ++ body
         end
+        end
+      end
       end
     end
   end
@@ -145,18 +147,20 @@ mod IslandCss do
   pfn kebab_go(name : String, i : Int, n : Int, acc : String) : String do
     match i >= n do
     true -> acc
-    false ->
+    false -> do
       let ch = String.slice_bytes(name, i, 1)
       match is_upper_ascii(ch) do
-      true ->
+      true -> do
         let lower = String.to_lowercase(ch)
         match String.is_empty(acc) do
         true  -> kebab_go(name, i + 1, n, lower)
         false -> kebab_go(name, i + 1, n, acc ++ "-" ++ lower)
         end
+      end
       false ->
         kebab_go(name, i + 1, n, acc ++ ch)
       end
+    end
     end
   end
 

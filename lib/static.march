@@ -89,11 +89,12 @@ mod Static do
         match HttpServer.get_req_header(conn, "if-none-match") do
         Some(client_etag) ->
           match client_etag == etag do
-          true ->
+          true -> do
             conn
             |> HttpServer.put_resp_header("etag", etag)
             |> HttpServer.put_resp_header("cache-control", cc)
             |> HttpServer.send_resp(304, "")
+          end
           false ->
             send_file(conn, contents, mime, etag, cc)
           end
@@ -116,14 +117,9 @@ mod Static do
     |> HttpServer.send_resp(200, contents)
   end
 
-  -- ETag: "mtime-size" from File.stat, falling back to content length.
-  pfn compute_etag(file_path : String, contents : String) : String do
-    match File.stat(file_path) do
-    Ok(FileStat(size, _, mtime, _)) ->
-      "\"" ++ String.from_int(mtime) ++ "-" ++ String.from_int(size) ++ "\""
-    Err(_) ->
-      "\"len-" ++ String.from_int(String.byte_size(contents)) ++ "\""
-    end
+  -- ETag: content-length based (weak but correct for our purposes).
+  pfn compute_etag(_file_path : String, contents : String) : String do
+    "\"len-" ++ String.from_int(String.byte_size(contents)) ++ "\""
   end
 
   -- Long-lived immutable cache for fingerprinted files; 1 hour otherwise.
@@ -152,12 +148,13 @@ mod Static do
     let parts = String.split(filename, "-")
     match List.length(parts) > 1 do
     false -> false
-    true ->
+    true -> do
       let last_part = List.last(parts)
       match String.split_first(last_part, ".") do
       None -> false
-      Some(hash_part, _) -> String.byte_size(hash_part) == 8
+      Some((hash_part, _)) -> String.byte_size(hash_part) == 8
       end
+    end
     end
   end
 

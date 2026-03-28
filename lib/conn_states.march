@@ -1,0 +1,129 @@
+-- Bastion.ConnStates — phantom type state tags for the typed middleware pipeline.
+--
+-- These singleton types are used as type parameters in Conn(a) to track
+-- which middleware transformations have been applied at compile time.
+--
+-- The intended pipeline state machine:
+--
+--   Raw  ->  Parsed  ->  WithSession  ->  Authenticated
+--                              |
+--                            WithDB (composable at any stage)
+--
+-- When the March type system supports parameterized types, the compiler
+-- will enforce ordering: passing Conn(Raw) to load_session is a type error.
+-- Functions document their intended type signatures in comments for now.
+--
+-- Example pipeline:
+--
+--   conn
+--   |> TypedMiddleware.parse_body()           -- Conn(Raw) -> Conn(Parsed)
+--   |> TypedMiddleware.load_session(secret)   -- Conn(Parsed) -> Conn(WithSession)
+--   |> TypedMiddleware.with_db(pool)          -- Conn(WithSession) -> Conn(WithSession & WithDB)
+--   |> MyApp.Router.route()
+
+mod ConnStates do
+
+  -- ── Type state tags ───────────────────────────────────────────────
+  --
+  -- Each tag represents a point in the middleware pipeline.
+  -- Used as the type parameter in Conn(a).
+
+  type Raw           = Raw
+  type Parsed        = Parsed
+  type WithSession   = WithSession
+  type Authenticated = Authenticated
+  type WithDB        = WithDB
+
+  -- ── Session ───────────────────────────────────────────────────────
+  --
+  -- A Session holds the decoded contents of the signed session cookie.
+  -- Fields (positional): id, key-value data pairs.
+  type Session = Session(String, List((String, String)))
+
+  doc "Returns the session ID string."
+  fn session_id(session) do
+    match session do
+    Session(id, _) -> id
+    end
+  end
+
+  doc "Look up a value in the session by key. Returns None if absent."
+  fn session_get(session, key) do
+    match session do
+    Session(_, pairs) -> kv_lookup(pairs, key)
+    end
+  end
+
+  doc "Returns all session data as a list of (key, value) pairs."
+  fn session_pairs(session) do
+    match session do
+    Session(_, pairs) -> pairs
+    end
+  end
+
+  doc "Returns a new Session with an additional key/value pair."
+  fn session_put(session, key, value) do
+    match session do
+    Session(id, pairs) -> Session(id, Cons((key, value), pairs))
+    end
+  end
+
+  doc "Returns a new Session with the given key removed."
+  fn session_delete(session, key) do
+    match session do
+    Session(id, pairs) ->
+      Session(id, List.filter(pairs, fn p ->
+        match p do (k, _) -> k != key end))
+    end
+  end
+
+  doc "Build a new empty session with the given ID."
+  fn empty_session(id) do
+    Session(id, Nil)
+  end
+
+  -- ── User ──────────────────────────────────────────────────────────
+  --
+  -- A loaded user record. Fields (positional): id, email, name.
+  type User = User(Int, String, String)
+
+  doc "Returns the user's integer ID."
+  fn user_id(user) do
+    match user do
+    User(id, _, _) -> id
+    end
+  end
+
+  doc "Returns the user's email address."
+  fn user_email(user) do
+    match user do
+    User(_, email, _) -> email
+    end
+  end
+
+  doc "Returns the user's display name."
+  fn user_name(user) do
+    match user do
+    User(_, _, name) -> name
+    end
+  end
+
+  doc "Build a User from its component parts."
+  fn make_user(id, email, name) do
+    User(id, email, name)
+  end
+
+  -- ── Internal ──────────────────────────────────────────────────────
+
+  pfn kv_lookup(pairs, key) do
+    match pairs do
+    Nil -> None
+    Cons((k, v), rest) ->
+      match k == key do
+      true  -> Some(v)
+      false -> kv_lookup(rest, key)
+      end
+    end
+  end
+
+end

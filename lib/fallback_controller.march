@@ -37,10 +37,10 @@ mod FallbackController do
   Example:
     FallbackController.call(conn, my_action(conn))
   """
-  fn call(conn : Conn, result : Controller.ActionResult) : Conn do
+  fn call(conn : Conn, result : ActionResult) : Conn do
     match result do
-    Controller.Ok(c) -> c
-    Controller.Error(status, message) ->
+    Ok(c) -> c
+    Error(status, message) ->
       Response.html(conn, status, ErrorView.render(status, message))
     end
   end
@@ -53,12 +53,12 @@ mod FallbackController do
   Example:
     FallbackController.call_json(conn, my_action(conn))
   """
-  fn call_json(conn : Conn, result : Controller.ActionResult) : Conn do
+  fn call_json(conn : Conn, result : ActionResult) : Conn do
     match result do
-    Controller.Ok(c) -> c
-    Controller.Error(status, message) -> do
+    Ok(c) -> c
+    Error(status, message) -> do
       let body = "{\"error\":{\"status\":" ++ int_to_string(status) ++
-                 ",\"message\":" ++ Json.encode_string(message) ++ "}}"
+                 ",\"message\":" ++ Json.to_string(Str(message)) ++ "}}"
       Response.json(conn, status, body)
     end
     end
@@ -82,7 +82,7 @@ mod FallbackController do
     -- Later, in a handler:
     my_fallback(conn, some_action(conn))
   """
-  fn new(handler : (Conn, Controller.ActionResult) -> Conn) : (Conn, Controller.ActionResult) -> Conn do
+  fn new(handler : Conn -> ActionResult -> Conn) : Conn -> ActionResult -> Conn do
     handler
   end
 

@@ -1,0 +1,53 @@
+-- Islands — helpers for wrapping server-rendered HTML with client island metadata.
+--
+-- Islands are interactive components that are hydrated on the client. Each island
+-- includes its CSS scoped, its initial state as JSON, and its hydration strategy.
+
+mod Islands do
+
+  -- Hydration strategy for islands.
+  type LoadStrategy = Eager | Lazy | OnVisible | OnIdle
+
+  pfn escape_attr(s) do
+    let s1 = String.replace(s, "&",  "&amp;")
+    let s2 = String.replace(s1, "\"", "&quot;")
+    let s3 = String.replace(s2, "<",  "&lt;")
+    String.replace(s3, ">", "&gt;")
+  end
+
+  pfn strategy_str(strategy) do
+    match strategy do
+    Eager     -> "eager"
+    Lazy      -> "lazy"
+    OnVisible -> "on-visible"
+    OnIdle    -> "on-idle"
+    end
+  end
+
+  doc """
+  Wrap server-rendered HTML with island metadata for client hydration.
+
+  Produces a <div> with data attributes that the client runtime reads to
+  hydrate the island component with the given CSS and state.
+
+  Example:
+    Islands.wrap_with_css("Counter", Islands.Eager, "{\"count\":0}", ".c { color: red }", "<span>0</span>")
+  """
+  fn wrap_with_css(name, strategy, state_json, css, ssr_html) do
+    let escaped_css = escape_attr(css)
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-hydrate=\"" ++ strategy_str(strategy) ++ "\""
+    ++ " data-march-state=\"" ++ escape_attr(state_json) ++ "\""
+    ++ " data-march-island-css=\"" ++ escaped_css ++ "\""
+    ++ ">"
+    ++ ssr_html
+    ++ "</div>"
+  end
+
+  doc "Convenience wrapper using the Eager hydration strategy."
+  fn wrap_eager_with_css(name, state_json, css, ssr_html) do
+    wrap_with_css(name, Eager, state_json, css, ssr_html)
+  end
+
+end

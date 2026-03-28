@@ -44,7 +44,7 @@ mod Router do
 
   -- Fallback handler: receives conn + ActionResult, returns Conn.
   -- Default renders ErrorView HTML pages.
-  type Fallback = Fallback(Conn -> Controller.ActionResult -> Conn)
+  type Fallback = Fallback(Conn -> ActionResult -> Conn)
 
   -- A Router is an ordered list of routes plus a fallback handler.
   type Router = Router(List(Route), Fallback)
@@ -53,8 +53,8 @@ mod Router do
   pfn default_fallback() : Fallback do
     Fallback(fn conn -> fn result ->
       match result do
-      Controller.Ok(c) -> c
-      Controller.Error(status, message) ->
+      ActionResult.Ok(c) -> c
+      ActionResult.Error(status, message) ->
         HttpServer.html(conn, status, ErrorView.render(status, message))
       end
     )
@@ -82,7 +82,7 @@ mod Router do
       end
     )
   """
-  fn fallback(router : Router, handler : Conn -> Controller.ActionResult -> Conn) : Router do
+  fn fallback(router : Router, handler : Conn -> ActionResult -> Conn) : Router do
     match router do
     Router(routes, _) -> Router(routes, Fallback(handler))
     end
@@ -133,7 +133,7 @@ mod Router do
   Example:
     Router.action(router, Get, "/users/:id", fn conn -> UserController.show(conn))
   """
-  fn action(router : Router, method : Method, pattern : String, handler : Conn -> Controller.ActionResult) : Router do
+  fn action(router : Router, method : Method, pattern : String, handler : Conn -> ActionResult) : Router do
     match router do
     Router(routes, fb) -> do
       let segs = split_path(pattern)
@@ -202,10 +202,13 @@ mod Router do
   end
 
   -- Wrap an ActionResult-returning handler by applying the fallback.
-  pfn wrap_action(fb : Fallback, handler : Conn -> Controller.ActionResult) : Conn -> Conn do
+  pfn wrap_action(fb : Fallback, handler : Conn -> ActionResult) : Conn -> Conn do
     match fb do
     Fallback(apply_fb) ->
-      fn conn -> apply_fb(conn)(handler(conn))
+      fn conn -> do
+        let f = apply_fb(conn)
+        f(handler(conn))
+      end
     end
   end
 
@@ -228,16 +231,19 @@ mod Router do
   pfn find_and_call(routes : List(Route), method : Method, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
     match routes do
     Nil ->
-      apply_fallback(fb, conn, Controller.Error(404, "Not Found"))
+      apply_fallback(fb, conn, ActionResult.Error(404, "Not Found"))
     Cons(Route(m, pattern, handler), rest) ->
       try_route(m, pattern, handler, rest, method, path_segs, conn, fb)
     end
   end
 
   -- Apply the fallback handler to an ActionResult.
-  pfn apply_fallback(fb : Fallback, conn : Conn, result : Controller.ActionResult) : Conn do
+  pfn apply_fallback(fb : Fallback, conn : Conn, result : ActionResult) : Conn do
     match fb do
-    Fallback(handler) -> handler(conn)(result)
+    Fallback(handler) -> do
+      let f = handler(conn)
+      f(result)
+    end
     end
   end
 

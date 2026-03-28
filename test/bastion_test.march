@@ -9,6 +9,11 @@ import Response
 import FallbackController
 import ErrorView
 import Controller
+import Static
+import IslandCss
+import IslandAssets
+import Islands
+import Test
 
 -- ── Conn construction helpers (for Router / Middleware / etc. tests) ──
 --
@@ -61,6 +66,22 @@ end
 
 pfn make_method(meth, path_) do
   make_conn(meth, path_, "", Nil, "")
+end
+
+-- Helper: check that an Option(String) is Some with a specific value.
+pfn opt_eq(opt : Option(String), v : String) : Bool do
+  match opt do
+  Some(s) -> s == v
+  None    -> false
+  end
+end
+
+-- Helper: check that an Option(String) is None.
+pfn opt_none(opt : Option(String)) : Bool do
+  match opt do
+  None    -> true
+  Some(_) -> false
+  end
 end
 
 -- ── Static.mime_type ──────────────────────────────────────────────
@@ -392,7 +413,7 @@ end
   fn test_wrap_with_css_has_data_attr() : Unit do
     let html = Islands.wrap_with_css(
       "Counter",
-      Islands.Eager,
+      Eager,
       "{\"count\":0}",
       ".counter { display: flex; }",
       "<span>0</span>"
@@ -417,7 +438,7 @@ end
 
   fn test_wrap_with_css_escapes_double_quotes() : Unit do
     let css  = ".x { content: \"hello\"; }"
-    let html = Islands.wrap_with_css("A", Islands.Eager, "{}", css, "")
+    let html = Islands.wrap_with_css("A", Eager, "{}", css, "")
     Test.assert_true(
       String.contains(html, "&quot;"),
       "double quotes in CSS are HTML-escaped in the attribute"
@@ -463,6 +484,969 @@ end
       "short non-hash suffix → short cache"
     )
   end
+
+  -- ── ErrorView ─────────────────────────────────────────────────────
+
+describe "ErrorView.status_text" do
+  test "400 returns Bad Request" do
+    assert (ErrorView.status_text(400) == "Bad Request")
+  end
+  test "401 returns Unauthorized" do
+    assert (ErrorView.status_text(401) == "Unauthorized")
+  end
+  test "403 returns Forbidden" do
+    assert (ErrorView.status_text(403) == "Forbidden")
+  end
+  test "404 returns Not Found" do
+    assert (ErrorView.status_text(404) == "Not Found")
+  end
+  test "405 returns Method Not Allowed" do
+    assert (ErrorView.status_text(405) == "Method Not Allowed")
+  end
+  test "422 returns Unprocessable Entity" do
+    assert (ErrorView.status_text(422) == "Unprocessable Entity")
+  end
+  test "500 returns Internal Server Error" do
+    assert (ErrorView.status_text(500) == "Internal Server Error")
+  end
+  test "503 returns Service Unavailable" do
+    assert (ErrorView.status_text(503) == "Service Unavailable")
+  end
+  test "unknown code returns Error" do
+    assert (ErrorView.status_text(999) == "Error")
+  end
+end
+
+describe "ErrorView.render" do
+  test "includes status code" do
+    let html = ErrorView.render(404, "Not Found")
+    assert (String.contains(html, "404"))
+  end
+  test "includes user message" do
+    let html = ErrorView.render(500, "Something broke")
+    assert (String.contains(html, "Something broke"))
+  end
+  test "is a complete HTML document" do
+    let html = ErrorView.render(404, "Gone")
+    assert (String.contains(html, "<!DOCTYPE html>"))
+    assert (String.contains(html, "<html"))
+    assert (String.contains(html, "</html>"))
+  end
+  test "includes status text in title" do
+    let html = ErrorView.render(404, "x")
+    assert (String.contains(html, "Not Found"))
+  end
+  test "render_default 404 contains Not Found" do
+    let html = ErrorView.render_default(404)
+    assert (String.contains(html, "404"))
+    assert (String.contains(html, "Not Found"))
+  end
+  test "default_message is non-empty for all common codes" do
+    assert (not (string_is_empty(ErrorView.default_message(404))))
+    assert (not (string_is_empty(ErrorView.default_message(500))))
+    assert (not (string_is_empty(ErrorView.default_message(999))))
+  end
+end
+
+-- ── FallbackController ────────────────────────────────────────────
+
+describe "FallbackController.call" do
+  test "Ok result returns conn unchanged" do
+    let conn = make_get("/")
+    let sent = HttpServer.send_resp(conn, 200, "body text")
+    let out  = FallbackController.call(conn, Ok(sent))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "body text")
+  end
+  test "Error result renders HTML error page with correct status" do
+    let conn = make_get("/")
+    let out  = FallbackController.call(conn, Error(404, "Not Found"))
+    assert (HttpServer.status(out) == 404)
+    assert (HttpServer.halted(out))
+    assert (String.contains(HttpServer.resp_body(out), "404"))
+  end
+  test "Error 500 renders 500 page" do
+    let conn = make_get("/")
+    let out  = FallbackController.call(conn, Error(500, "crash"))
+    assert (HttpServer.status(out) == 500)
+    assert (HttpServer.halted(out))
+  end
+end
+
+describe "FallbackController.call_json" do
+  test "Ok result returns conn unchanged" do
+    let conn    = make_get("/")
+    let out_conn = HttpServer.json(conn, 200, "{\"ok\":true}")
+    let out     = FallbackController.call_json(conn, Ok(out_conn))
+    assert (HttpServer.status(out) == 200)
+  end
+  test "Error result renders JSON with correct status" do
+    let conn = make_get("/")
+    let out  = FallbackController.call_json(conn, Error(422, "invalid"))
+    assert (HttpServer.status(out) == 422)
+    assert (HttpServer.halted(out))
+    assert (String.contains(HttpServer.resp_body(out), "422"))
+    assert (String.contains(HttpServer.resp_body(out), "error"))
+  end
+  test "JSON error body contains the message" do
+    let conn = make_get("/")
+    let out  = FallbackController.call_json(conn, Error(400, "bad input"))
+    assert (String.contains(HttpServer.resp_body(out), "bad input"))
+  end
+end
+
+describe "FallbackController.new" do
+  test "custom fallback receives conn and result on Error" do
+    let my_fallback = FallbackController.new(fn c -> fn result ->
+      match result do
+      Ok(c2) -> c2
+      Error(status, msg) ->
+        HttpServer.text(c, status, "ERR:" ++ msg)
+      end)
+    let conn    = make_get("/")
+    let apply   = my_fallback(conn)
+    let out     = apply(Error(403, "nope"))
+    assert (HttpServer.status(out)    == 403)
+    assert (HttpServer.resp_body(out) == "ERR:nope")
+  end
+  test "custom fallback passes through Ok" do
+    let my_fallback = FallbackController.new(fn c -> fn result ->
+      match result do
+      Ok(c2)           -> c2
+      Error(s, m)      -> HttpServer.text(c, s, m)
+      end)
+    let conn    = make_get("/")
+    let ok_conn = HttpServer.send_resp(conn, 201, "created")
+    let apply   = my_fallback(conn)
+    let out     = apply(Ok(ok_conn))
+    assert (HttpServer.status(out)    == 201)
+    assert (HttpServer.resp_body(out) == "created")
+  end
+end
+
+-- ── Controller ────────────────────────────────────────────────────
+
+describe "Controller.action" do
+  test "Ok result returns the conn" do
+    let conn = make_get("/")
+    let out  = Controller.action(conn, fn c ->
+      Ok(HttpServer.text(c, 200, "hello")))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "hello")
+  end
+  test "Error result renders HTML error" do
+    let conn = make_get("/")
+    let out  = Controller.action(conn, fn _c -> Error(404, "missing"))
+    assert (HttpServer.status(out) == 404)
+    assert (HttpServer.halted(out))
+    assert (String.contains(HttpServer.resp_body(out), "404"))
+  end
+end
+
+describe "Controller response helpers" do
+  test "json sends JSON with correct status and body" do
+    let conn = make_get("/")
+    let out  = Controller.json(conn, 200, "{\"id\":1}")
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "{\"id\":1}")
+    assert (HttpServer.halted(out))
+  end
+  test "text sends plain text" do
+    let conn = make_get("/")
+    let out  = Controller.text(conn, 200, "plain")
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "plain")
+  end
+  test "render calls template and sends HTML" do
+    let conn = make_get("/")
+    let out  = Controller.render(conn, 200, fn _c -> "<p>hello</p>")
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "<p>hello</p>")
+    assert (HttpServer.halted(out))
+  end
+  test "render_ok uses 200 status" do
+    let conn = make_get("/")
+    let out  = Controller.render_ok(conn, fn _c -> "<p>ok</p>")
+    assert (HttpServer.status(out) == 200)
+  end
+  test "redirect sends 302 and halts" do
+    let conn = make_get("/old")
+    let out  = Controller.redirect(conn, "/new")
+    assert (HttpServer.status(out) == 302)
+    assert (HttpServer.halted(out))
+  end
+  test "render_iolist renders IOList template" do
+    let conn = make_get("/")
+    let out  = Controller.render_iolist(conn, 200,
+      fn _c -> IOList.from_string("<h1>hi</h1>"))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "<h1>hi</h1>")
+  end
+end
+
+-- ── Response ──────────────────────────────────────────────────────
+
+describe "Response content-type helpers" do
+  test "html sets status, body, and halts" do
+    let conn = make_get("/")
+    let out  = Response.html(conn, 200, "<h1>Hi</h1>")
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "<h1>Hi</h1>")
+    assert (HttpServer.halted(out))
+  end
+  test "json sets status, body, and halts" do
+    let conn = make_get("/")
+    let out  = Response.json(conn, 201, "{\"ok\":true}")
+    assert (HttpServer.status(out)    == 201)
+    assert (HttpServer.resp_body(out) == "{\"ok\":true}")
+    assert (HttpServer.halted(out))
+  end
+  test "text sets status, body, and halts" do
+    let conn = make_get("/")
+    let out  = Response.text(conn, 200, "hello")
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "hello")
+    assert (HttpServer.halted(out))
+  end
+  test "redirect sends 302 and halts" do
+    let conn = make_get("/old")
+    let out  = Response.redirect(conn, "/new")
+    assert (HttpServer.status(out) == 302)
+    assert (HttpServer.halted(out))
+  end
+  test "redirect_permanent sends 301 and halts" do
+    let conn = make_get("/old")
+    let out  = Response.redirect_permanent(conn, "/new")
+    assert (HttpServer.status(out) == 301)
+    assert (HttpServer.halted(out))
+  end
+end
+
+describe "Response status shortcuts" do
+  test "ok sends 200" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.ok(conn, "done")) == 200)
+  end
+  test "created sends 201" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.created(conn, "made")) == 201)
+  end
+  test "no_content sends 204 with empty body" do
+    let conn = make_get("/")
+    let out  = Response.no_content(conn)
+    assert (HttpServer.status(out)    == 204)
+    assert (HttpServer.resp_body(out) == "")
+  end
+  test "bad_request sends 400" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.bad_request(conn, "bad")) == 400)
+  end
+  test "unauthorized sends 401" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.unauthorized(conn, "no")) == 401)
+  end
+  test "forbidden sends 403" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.forbidden(conn, "no")) == 403)
+  end
+  test "not_found sends 404" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.not_found(conn, "gone")) == 404)
+  end
+  test "not_found_ sends 404 with Not Found body" do
+    let conn = make_get("/")
+    let out  = Response.not_found_(conn)
+    assert (HttpServer.status(out)    == 404)
+    assert (HttpServer.resp_body(out) == "Not Found")
+  end
+  test "method_not_allowed sends 405" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.method_not_allowed(conn)) == 405)
+  end
+  test "unprocessable sends 422" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.unprocessable(conn, "bad")) == 422)
+  end
+  test "internal_error sends 500" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.internal_error(conn, "oops")) == 500)
+  end
+  test "internal_error_ sends 500 with Internal Server Error body" do
+    let conn = make_get("/")
+    let out  = Response.internal_error_(conn)
+    assert (HttpServer.status(out)    == 500)
+    assert (HttpServer.resp_body(out) == "Internal Server Error")
+  end
+  test "service_unavailable sends 503" do
+    let conn = make_get("/")
+    assert (HttpServer.status(Response.service_unavailable(conn)) == 503)
+  end
+end
+
+-- ── Request ───────────────────────────────────────────────────────
+
+describe "Request.query_params" do
+  test "empty list when no query string" do
+    let conn = make_get("/users")
+    assert (is_nil(query_params(conn)))
+  end
+  test "parses single param" do
+    let conn = make_get_qs("/search", "q=hello")
+    let p    = query_params(conn)
+    assert (not (is_nil(p)))
+    assert (List.length(p) == 1)
+  end
+  test "parses multiple params" do
+    let conn = make_get_qs("/s", "q=hello&page=2&limit=10")
+    assert (List.length(query_params(conn)) == 3)
+  end
+end
+
+describe "Request.get_query_param" do
+  test "returns Some for existing param" do
+    let conn = make_get_qs("/", "q=hello")
+    assert (opt_eq(get_query_param(conn, "q"), "hello"))
+  end
+  test "returns None for missing param" do
+    let conn = make_get_qs("/", "q=hello")
+    assert (opt_none(get_query_param(conn, "missing")))
+  end
+  test "returns second param correctly" do
+    let conn = make_get_qs("/", "a=1&b=2")
+    assert (opt_eq(get_query_param(conn, "b"), "2"))
+  end
+  test "param with no value returns empty string" do
+    let conn = make_get_qs("/", "flag")
+    assert (opt_eq(get_query_param(conn, "flag"), ""))
+  end
+end
+
+describe "Request.path_param" do
+  test "returns None when no param set" do
+    let conn = make_get("/users")
+    assert (opt_none(path_param(conn, "id")))
+  end
+  test "returns Some when param set in assigns" do
+    let conn  = make_get("/users/42")
+    let conn2 = HttpServer.assign(conn, "id", "42")
+    assert (opt_eq(path_param(conn2, "id"), "42"))
+  end
+end
+
+describe "Request.body" do
+  test "returns raw request body" do
+    let conn = make_post("/", "{\"foo\":1}")
+    assert (body(conn) == "{\"foo\":1}")
+  end
+  test "returns empty string for GET" do
+    let conn = make_get("/")
+    assert (body(conn) == "")
+  end
+end
+
+describe "Request.body_params" do
+  test "returns empty list for empty body" do
+    let conn = make_get("/")
+    assert (is_nil(body_params(conn)))
+  end
+  test "parses multiple form fields" do
+    let conn = make_post_form("/", "a=1&b=2&c=3")
+    assert (List.length(body_params(conn)) == 3)
+  end
+end
+
+describe "Request header helpers" do
+  test "get_header finds content-type" do
+    let conn = make_post("/", "{}")
+    assert (not (opt_none(get_header(conn, "content-type"))))
+  end
+  test "get_header returns None for missing header" do
+    let conn = make_get("/")
+    assert (opt_none(get_header(conn, "authorization")))
+  end
+  test "authorization returns None when not set" do
+    let conn = make_get("/")
+    assert (opt_none(authorization(conn)))
+  end
+  test "user_agent returns None when not set" do
+    let conn = make_get("/")
+    assert (opt_none(user_agent(conn)))
+  end
+end
+
+-- ── Middleware ────────────────────────────────────────────────────
+
+describe "Middleware.pipeline" do
+  test "empty pipeline leaves conn unchanged" do
+    let conn = make_get("/test")
+    let out  = pipeline(Nil, conn)
+    assert (HttpServer.path(out) == "/test")
+    assert (not (HttpServer.halted(out)))
+  end
+  test "single plug is applied" do
+    let conn = make_get("/")
+    let plug = fn c -> HttpServer.assign(c, "ran", "yes")
+    let out  = pipeline(Cons(plug, Nil), conn)
+    assert (opt_eq(HttpServer.get_assign(out, "ran"), "yes"))
+  end
+  test "multiple plugs run in order" do
+    let conn = make_get("/")
+    let p1   = fn c -> HttpServer.assign(c, "step", "1")
+    let p2   = fn c -> HttpServer.assign(c, "done", "true")
+    let out  = pipeline(Cons(p1, Cons(p2, Nil)), conn)
+    assert (opt_eq(HttpServer.get_assign(out, "step"), "1"))
+    assert (opt_eq(HttpServer.get_assign(out, "done"), "true"))
+  end
+  test "pipeline stops when conn is halted" do
+    let conn      = make_get("/")
+    let halt_plug = fn c -> HttpServer.halt(c)
+    let bad_plug  = fn c -> HttpServer.assign(c, "after_halt", "oops")
+    let out       = pipeline(Cons(halt_plug, Cons(bad_plug, Nil)), conn)
+    assert (HttpServer.halted(out))
+    assert (opt_none(HttpServer.get_assign(out, "after_halt")))
+  end
+  test "pipeline stops after send_resp" do
+    let conn      = make_get("/")
+    let send_plug = fn c -> HttpServer.send_resp(c, 200, "done")
+    let bad_plug  = fn c -> HttpServer.assign(c, "after_send", "oops")
+    let out       = pipeline(Cons(send_plug, Cons(bad_plug, Nil)), conn)
+    assert (HttpServer.halted(out))
+    assert (HttpServer.status(out) == 200)
+    assert (opt_none(HttpServer.get_assign(out, "after_send")))
+  end
+end
+
+describe "Middleware.compose" do
+  test "chains two plugs left-to-right" do
+    let conn     = make_get("/")
+    let a        = fn c -> HttpServer.assign(c, "a", "1")
+    let b        = fn c -> HttpServer.assign(c, "b", "2")
+    let composed = compose(a, b)
+    let out      = composed(conn)
+    assert (opt_eq(HttpServer.get_assign(out, "a"), "1"))
+    assert (opt_eq(HttpServer.get_assign(out, "b"), "2"))
+  end
+  test "stops when first plug halts" do
+    let conn     = make_get("/")
+    let a        = fn c -> HttpServer.halt(c)
+    let b        = fn c -> HttpServer.assign(c, "b", "bad")
+    let composed = compose(a, b)
+    let out      = composed(conn)
+    assert (HttpServer.halted(out))
+    assert (opt_none(HttpServer.get_assign(out, "b")))
+  end
+end
+
+describe "Middleware.logger" do
+  test "passes conn through with path intact" do
+    let conn = make_get("/the/path")
+    let out  = logger(conn)
+    assert (HttpServer.path(out) == "/the/path")
+    assert (not (HttpServer.halted(out)))
+  end
+end
+
+describe "Middleware.cors" do
+  test "adds Access-Control-Allow-Origin: *" do
+    let conn = make_get("/")
+    let out  = cors(conn)
+    let hdrs = HttpServer.resp_headers(out)
+    let ok   = List.any(hdrs, fn h ->
+      match h do
+      Header(n, v) ->
+        string_to_lowercase(n) == "access-control-allow-origin" && v == "*"
+      end)
+    assert (ok)
+  end
+  test "adds Access-Control-Allow-Methods header" do
+    let conn = make_get("/")
+    let out  = cors(conn)
+    let hdrs = HttpServer.resp_headers(out)
+    let ok   = List.any(hdrs, fn h ->
+      match h do
+      Header(n, _) -> string_to_lowercase(n) == "access-control-allow-methods"
+      end)
+    assert (ok)
+  end
+  test "does not halt the conn" do
+    let conn = make_get("/")
+    assert (not (HttpServer.halted(cors(conn))))
+  end
+end
+
+describe "Middleware.allow_methods" do
+  test "passes request with allowed method" do
+    let conn = make_get("/")
+    let plug = allow_methods(Cons(Get, Nil))
+    assert (not (HttpServer.halted(plug(conn))))
+  end
+  test "blocks disallowed method with 405" do
+    let conn = make_post("/", "")
+    let plug = allow_methods(Cons(Get, Nil))
+    let out  = plug(conn)
+    assert (HttpServer.halted(out))
+    assert (HttpServer.status(out) == 405)
+  end
+  test "allows any method in a multi-method list" do
+    let conn = make_method(Put, "/")
+    let plug = allow_methods(Cons(Get, Cons(Post, Cons(Put, Nil))))
+    assert (not (HttpServer.halted(plug(conn))))
+  end
+  test "blocks method not in multi-method list" do
+    let conn = make_method(Delete, "/")
+    let plug = allow_methods(Cons(Get, Cons(Post, Nil)))
+    let out  = plug(conn)
+    assert (HttpServer.halted(out))
+    assert (HttpServer.status(out) == 405)
+  end
+end
+
+describe "Middleware.request_id" do
+  test "uses x-request-id header value when present" do
+    let conn = make_conn(Get, "/", "",
+      Cons(Header("x-request-id", "my-id"), Nil), "")
+    let out  = request_id(conn)
+    assert (opt_eq(HttpServer.get_assign(out, "request_id"), "my-id"))
+  end
+  test "generates an id when header absent" do
+    let conn = make_get("/")
+    let out  = request_id(conn)
+    match HttpServer.get_assign(out, "request_id") do
+    Some(_) -> ()
+    None    -> assert false
+    end
+  end
+  test "does not halt the conn" do
+    let conn = make_get("/")
+    assert (not (HttpServer.halted(request_id(conn))))
+  end
+end
+
+-- ── TypedMiddleware ───────────────────────────────────────────────
+
+describe "TypedMiddleware.parse_body" do
+  test "assigns body string to _body key" do
+    let conn = make_post("/", "{\"x\":1}")
+    let out  = parse_body(conn)
+    assert (get_body_string(out) == "{\"x\":1}")
+  end
+  test "empty string for GET with no body" do
+    let conn = make_get("/")
+    let out  = parse_body(conn)
+    assert (get_body_string(out) == "")
+  end
+  test "does not halt the conn" do
+    let conn = make_post("/", "data")
+    assert (not (HttpServer.halted(parse_body(conn))))
+  end
+end
+
+describe "TypedMiddleware.require_auth" do
+  test "halts conn when no user is set" do
+    let conn   = make_get("/protected")
+    let result = require_auth(conn)
+    assert (HttpServer.halted(result))
+  end
+  test "halted conn has 401 status" do
+    let conn   = make_get("/protected")
+    let result = require_auth(conn)
+    assert (HttpServer.status(result) == 401)
+  end
+  test "returns non-halted conn when current_user_id is set" do
+    let conn   = make_get("/protected")
+    let conn2  = set_current_user(conn, "42")
+    let result = require_auth(conn2)
+    assert (not (HttpServer.halted(result)))
+  end
+  test "authenticated conn preserves the path" do
+    let conn   = make_get("/protected")
+    let conn2  = set_current_user(conn, "99")
+    let result = require_auth(conn2)
+    assert (HttpServer.path(result) == "/protected")
+  end
+end
+
+describe "TypedMiddleware user helpers" do
+  test "get_current_user_id returns None when not set" do
+    let conn = make_get("/")
+    assert (opt_none(get_current_user_id(conn)))
+  end
+  test "set_current_user then get_current_user_id returns Some" do
+    let conn  = make_get("/")
+    let conn2 = set_current_user(conn, "77")
+    assert (opt_eq(get_current_user_id(conn2), "77"))
+  end
+end
+
+describe "TypedMiddleware.with_db" do
+  test "get_db returns None before with_db" do
+    let conn = make_get("/")
+    assert (opt_none(get_db(conn)))
+  end
+  test "with_db attaches pool and get_db returns Some" do
+    let conn = make_get("/")
+    let out  = with_db(conn, "pool-ref")
+    match get_db(out) do
+    Some(_) -> ()
+    None    -> assert false
+    end
+  end
+end
+
+describe "TypedMiddleware content-type detection" do
+  test "is_json_request true for application/json" do
+    let conn = make_post("/", "{}")
+    assert (is_json_request(conn))
+  end
+  test "is_json_request false for GET (no content-type)" do
+    let conn = make_get("/")
+    assert (not (is_json_request(conn)))
+  end
+  test "is_form_request true for urlencoded" do
+    let conn = make_post_form("/", "a=b")
+    assert (is_form_request(conn))
+  end
+  test "is_form_request false for JSON request" do
+    let conn = make_post("/", "{}")
+    assert (not (is_form_request(conn)))
+  end
+  test "is_multipart_request false for JSON" do
+    let conn = make_post("/", "{}")
+    assert (not (is_multipart_request(conn)))
+  end
+end
+
+describe "TypedMiddleware pipeline shortcuts" do
+  test "web_pipeline applies parse_body and load_session without halting" do
+    let conn = make_post("/", "{\"x\":1}")
+    let out  = web_pipeline(conn, "secret-key")
+    assert (get_body_string(out) == "{\"x\":1}")
+    assert (not (HttpServer.halted(out)))
+  end
+  test "full_pipeline applies parse_body, load_session, with_db" do
+    let conn = make_post("/", "data")
+    let out  = full_pipeline(conn, "secret", "db-pool")
+    assert (get_body_string(out) == "data")
+    match get_db(out) do
+    Some(_) -> ()
+    None    -> assert false
+    end
+  end
+end
+
+-- ── ConnStates — Session and User ─────────────────────────────────
+
+describe "ConnStates.Session" do
+  test "empty_session has given id and no data" do
+    let s = ConnStates.empty_session("sess-1")
+    assert (ConnStates.session_id(s) == "sess-1")
+    assert (is_nil(ConnStates.session_pairs(s)))
+  end
+  test "session_get returns None on empty session" do
+    let s = ConnStates.empty_session("s1")
+    assert (opt_none(ConnStates.session_get(s, "user_id")))
+  end
+  test "session_put adds a key-value pair" do
+    let s  = ConnStates.empty_session("s1")
+    let s2 = ConnStates.session_put(s, "user_id", "42")
+    assert (opt_eq(ConnStates.session_get(s2, "user_id"), "42"))
+  end
+  test "session_put for multiple keys" do
+    let s  = ConnStates.empty_session("s1")
+    let s2 = ConnStates.session_put(s, "a", "1")
+    let s3 = ConnStates.session_put(s2, "b", "2")
+    assert (opt_eq(ConnStates.session_get(s3, "a"), "1"))
+    assert (opt_eq(ConnStates.session_get(s3, "b"), "2"))
+  end
+  test "session_delete removes a key" do
+    let s  = ConnStates.empty_session("s1")
+    let s2 = ConnStates.session_put(s, "key", "val")
+    let s3 = ConnStates.session_delete(s2, "key")
+    assert (opt_none(ConnStates.session_get(s3, "key")))
+  end
+  test "session_delete leaves other keys intact" do
+    let s  = ConnStates.empty_session("s1")
+    let s2 = ConnStates.session_put(s, "a", "1")
+    let s3 = ConnStates.session_put(s2, "b", "2")
+    let s4 = ConnStates.session_delete(s3, "a")
+    assert (opt_none(ConnStates.session_get(s4, "a")))
+    assert (opt_eq(ConnStates.session_get(s4, "b"), "2"))
+  end
+end
+
+describe "ConnStates.User" do
+  test "make_user creates user with correct fields" do
+    let u = ConnStates.make_user(1, "alice@example.com", "Alice")
+    assert (ConnStates.user_id(u)    == 1)
+    assert (ConnStates.user_email(u) == "alice@example.com")
+    assert (ConnStates.user_name(u)  == "Alice")
+  end
+  test "two users have independent fields" do
+    let u1 = ConnStates.make_user(1, "a@a.com", "A")
+    let u2 = ConnStates.make_user(2, "b@b.com", "B")
+    assert (ConnStates.user_id(u1) != ConnStates.user_id(u2))
+    assert (ConnStates.user_email(u1) != ConnStates.user_email(u2))
+  end
+end
+
+-- ── Router ────────────────────────────────────────────────────────
+
+describe "Router basic dispatch" do
+  test "empty router returns 404 for any request" do
+    let router = Router.new()
+    let out    = Router.dispatch(router, make_get("/no-match"))
+    assert (HttpServer.status(out) == 404)
+    assert (HttpServer.halted(out))
+  end
+  test "registered GET route matches and calls handler" do
+    let router = Router.new()
+                 |> Router.get("/hello", fn conn ->
+                      HttpServer.text(conn, 200, "world"))
+    let out    = Router.dispatch(router, make_get("/hello"))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "world")
+  end
+  test "GET route does not match POST request" do
+    let router = Router.new()
+                 |> Router.get("/hello", fn conn ->
+                      HttpServer.text(conn, 200, "world"))
+    let out    = Router.dispatch(router, make_post("/hello", ""))
+    assert (HttpServer.status(out) == 404)
+  end
+  test "first matching route wins" do
+    let router = Router.new()
+                 |> Router.get("/item", fn conn -> HttpServer.text(conn, 200, "first"))
+                 |> Router.get("/item", fn conn -> HttpServer.text(conn, 200, "second"))
+    let out    = Router.dispatch(router, make_get("/item"))
+    assert (HttpServer.resp_body(out) == "first")
+  end
+end
+
+describe "Router HTTP methods" do
+  test "post route matches POST" do
+    let router = Router.new()
+                 |> Router.post("/users", fn conn -> HttpServer.text(conn, 201, "created"))
+    let out    = Router.dispatch(router, make_post("/users", ""))
+    assert (HttpServer.status(out) == 201)
+  end
+  test "put route matches PUT" do
+    let router = Router.new()
+                 |> Router.put("/users/1", fn conn -> HttpServer.text(conn, 200, "updated"))
+    let out    = Router.dispatch(router, make_method(Put, "/users/1"))
+    assert (HttpServer.status(out) == 200)
+  end
+  test "patch route matches PATCH" do
+    let router = Router.new()
+                 |> Router.patch("/users/1", fn conn -> HttpServer.text(conn, 200, "patched"))
+    let out    = Router.dispatch(router, make_method(Patch, "/users/1"))
+    assert (HttpServer.status(out) == 200)
+  end
+  test "delete route matches DELETE" do
+    let router = Router.new()
+                 |> Router.delete("/users/1", fn conn -> HttpServer.send_resp(conn, 204, ""))
+    let out    = Router.dispatch(router, make_method(Delete, "/users/1"))
+    assert (HttpServer.status(out) == 204)
+  end
+  test "different methods on same path dispatch to correct handler" do
+    let router = Router.new()
+                 |> Router.get("/x",    fn conn -> HttpServer.text(conn, 200, "get"))
+                 |> Router.post("/x",   fn conn -> HttpServer.text(conn, 200, "post"))
+                 |> Router.delete("/x", fn conn -> HttpServer.text(conn, 200, "delete"))
+    assert (HttpServer.resp_body(Router.dispatch(router, make_get("/x")))               == "get")
+    assert (HttpServer.resp_body(Router.dispatch(router, make_post("/x", "")))           == "post")
+    assert (HttpServer.resp_body(Router.dispatch(router, make_method(Delete, "/x")))    == "delete")
+  end
+end
+
+describe "Router path parameters" do
+  test "single :param is captured in assigns" do
+    let router = Router.new()
+                 |> Router.get("/users/:id", fn conn -> do
+                      match HttpServer.get_assign(conn, "id") do
+                      Some(id) -> HttpServer.text(conn, 200, "user:" ++ id)
+                      None     -> HttpServer.text(conn, 404, "no id")
+                      end
+                    end)
+    let out    = Router.dispatch(router, make_get("/users/42"))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "user:42")
+  end
+  test "multiple params are all captured" do
+    let router = Router.new()
+                 |> Router.get("/orgs/:org/repos/:repo", fn conn -> do
+                      let org_val  = HttpServer.get_assign(conn, "org")
+                      let repo_val = HttpServer.get_assign(conn, "repo")
+                      match org_val do
+                      Some(o) ->
+                        match repo_val do
+                        Some(r) -> HttpServer.text(conn, 200, o ++ "/" ++ r)
+                        None    -> HttpServer.text(conn, 404, "no repo")
+                        end
+                      None -> HttpServer.text(conn, 404, "no org")
+                      end
+                    end)
+    let out = Router.dispatch(router, make_get("/orgs/acme/repos/app"))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "acme/app")
+  end
+  test "literal segments must match exactly" do
+    let router = Router.new()
+                 |> Router.get("/users/:id/settings", fn conn ->
+                      HttpServer.text(conn, 200, "settings"))
+    let out = Router.dispatch(router, make_get("/users/42/profile"))
+    assert (HttpServer.status(out) == 404)
+  end
+  test "different length paths do not match" do
+    let router = Router.new()
+                 |> Router.get("/users/:id", fn conn ->
+                      HttpServer.text(conn, 200, "user"))
+    let out = Router.dispatch(router, make_get("/users/42/details"))
+    assert (HttpServer.status(out) == 404)
+  end
+end
+
+describe "Router.action" do
+  test "Ok result is returned as conn" do
+    let router = Router.new()
+                 |> Router.action(Get, "/items", fn conn ->
+                      Ok(HttpServer.text(conn, 200, "list")))
+    let out = Router.dispatch(router, make_get("/items"))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "list")
+  end
+  test "Error result goes through default fallback (HTML error)" do
+    let router = Router.new()
+                 |> Router.action(Get, "/items/:id", fn _conn ->
+                      Error(404, "Item not found"))
+    let out = Router.dispatch(router, make_get("/items/99"))
+    assert (HttpServer.status(out) == 404)
+    assert (HttpServer.halted(out))
+    assert (String.contains(HttpServer.resp_body(out), "404"))
+  end
+end
+
+describe "Router.fallback" do
+  test "custom fallback is called on 404 no-match" do
+    let router = Router.new()
+                 |> Router.fallback(fn conn -> fn result ->
+                      match result do
+                      Ok(c) -> c
+                      Error(status, msg) ->
+                        HttpServer.json(conn, status, "{\"err\":\"" ++ msg ++ "\"}")
+                      end)
+    let out = Router.dispatch(router, make_get("/not-here"))
+    assert (HttpServer.status(out) == 404)
+    assert (String.contains(HttpServer.resp_body(out), "err"))
+  end
+  test "custom fallback is called on action Error" do
+    let router = Router.new()
+                 |> Router.fallback(fn conn -> fn result ->
+                      match result do
+                      Ok(c) -> c
+                      Error(s, m) ->
+                        HttpServer.text(conn, s, "CUSTOM:" ++ m)
+                      end)
+                 |> Router.action(Get, "/fail", fn _conn ->
+                      Error(400, "bad request"))
+    let out = Router.dispatch(router, make_get("/fail"))
+    assert (HttpServer.status(out)    == 400)
+    assert (HttpServer.resp_body(out) == "CUSTOM:bad request")
+  end
+end
+
+describe "Router.scope" do
+  test "scoped routes have prefix prepended" do
+    let sub    = Router.new()
+                 |> Router.get("/users", fn conn ->
+                      HttpServer.text(conn, 200, "users"))
+    let router = Router.new()
+                 |> Router.scope("/api", sub)
+    let out    = Router.dispatch(router, make_get("/api/users"))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "users")
+  end
+  test "scoped route without prefix returns 404" do
+    let sub    = Router.new()
+                 |> Router.get("/users", fn conn ->
+                      HttpServer.text(conn, 200, "users"))
+    let router = Router.new()
+                 |> Router.scope("/api", sub)
+    let out    = Router.dispatch(router, make_get("/users"))
+    assert (HttpServer.status(out) == 404)
+  end
+  test "multiple scopes dispatch independently" do
+    let v1 = Router.new()
+             |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "v1"))
+    let v2 = Router.new()
+             |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "v2"))
+    let router = Router.new()
+                 |> Router.scope("/api/v1", v1)
+                 |> Router.scope("/api/v2", v2)
+    assert (HttpServer.resp_body(Router.dispatch(router, make_get("/api/v1/ping"))) == "v1")
+    assert (HttpServer.resp_body(Router.dispatch(router, make_get("/api/v2/ping"))) == "v2")
+  end
+  test "scoped routes with params work" do
+    let sub    = Router.new()
+                 |> Router.get("/posts/:id", fn conn -> do
+                      match HttpServer.get_assign(conn, "id") do
+                      Some(id) -> HttpServer.text(conn, 200, id)
+                      None     -> HttpServer.text(conn, 404, "")
+                      end
+                    end)
+    let router = Router.new()
+                 |> Router.scope("/blog", sub)
+    let out    = Router.dispatch(router, make_get("/blog/posts/hello"))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "hello")
+  end
+end
+
+describe "Router.to_plug" do
+  test "converts router to a Conn -> Conn function" do
+    let router = Router.new()
+                 |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "pong"))
+    let plug   = Router.to_plug(router)
+    let out    = plug(make_get("/ping"))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "pong")
+  end
+  test "plug returns 404 for unmatched routes" do
+    let router = Router.new()
+                 |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "pong"))
+    let plug   = Router.to_plug(router)
+    let out    = plug(make_get("/other"))
+    assert (HttpServer.status(out) == 404)
+  end
+end
+
+describe "Router + Middleware integration" do
+  test "request_id middleware assigns id before router sees conn" do
+    let router = Router.new()
+                 |> Router.get("/", fn conn -> do
+                      match HttpServer.get_assign(conn, "request_id") do
+                      Some(_) -> HttpServer.text(conn, 200, "with-id")
+                      None    -> HttpServer.text(conn, 200, "no-id")
+                      end
+                    end)
+    let plug   = Router.to_plug(router)
+    let conn   = make_get("/")
+    let out    = plug(request_id(conn))
+    assert (HttpServer.status(out)    == 200)
+    assert (HttpServer.resp_body(out) == "with-id")
+  end
+  test "halted conn is not dispatched to router by pipeline" do
+    let router = Router.new()
+                 |> Router.get("/", fn conn -> HttpServer.text(conn, 200, "reached"))
+    let plug   = Router.to_plug(router)
+    let conn   = make_get("/")
+    -- Pre-halt the conn
+    let halted = HttpServer.send_resp(conn, 401, "Unauthorized")
+    let out    = pipeline(Cons(plug, Nil), halted)
+    -- Router was not called; original response stands
+    assert (HttpServer.status(out)    == 401)
+    assert (HttpServer.resp_body(out) == "Unauthorized")
+  end
+end
 
   -- ── Runner ────────────────────────────────────────────────────────
 
