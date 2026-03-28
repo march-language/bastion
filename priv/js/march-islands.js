@@ -197,6 +197,9 @@
         const instance = new IslandInstance(el, this);
         this.instances.set(instance.instanceId, instance);
 
+        // Inject scoped CSS if the island has styles embedded in its element.
+        this._injectScopedCss(instance);
+
         // Attempt to load WASM module (Phase 2)
         if (window.__bastionWasm) {
           const mod = window.__bastionWasm.getModule(instance.moduleName);
@@ -227,6 +230,30 @@
           });
         }
       });
+    }
+
+    /**
+     * Inject an island's scoped CSS into the document <head> on first hydration.
+     *
+     * Reads the data-march-island-css attribute set by Islands.wrap_with_css on
+     * the server.  Creates a single <style> tag per island module (keyed by
+     * id="bastion-css-{moduleName}"), so multiple instances of the same island
+     * on one page only inject once.
+     *
+     * @param {IslandInstance} instance
+     */
+    _injectScopedCss(instance) {
+      const css = instance.el.dataset.marchIslandCss;
+      if (!css) return;
+
+      const styleId = `bastion-css-${instance.moduleName}`;
+      if (document.getElementById(styleId)) return;  // already injected
+
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.setAttribute('data-bastion-island', instance.moduleName);
+      style.textContent = css;
+      document.head.appendChild(style);
     }
 
     /**

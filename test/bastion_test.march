@@ -1,12 +1,527 @@
 mod BastionTest do
 
-  fn test_placeholder() : Bool do
-    true
+import Router
+import Middleware
+import TypedMiddleware
+import ConnStates
+import Request
+import Response
+import FallbackController
+import ErrorView
+import Controller
+
+-- ── Conn construction helpers (for Router / Middleware / etc. tests) ──
+--
+-- Structural mirror of HttpServer.Conn so we can build test values
+-- without a live TCP socket.  All HttpServer accessors work on these
+-- because March matches types structurally at runtime.
+
+ptype Upgrade = NoUpgrade | WebSocketUpgrade(a)
+
+ptype Conn = Conn(
+  Int,                    -- fd
+  Method,                 -- request method
+  String,                 -- path (raw)
+  List(String),           -- path_info (split segments, empty filtered)
+  String,                 -- query_string
+  List(Header),           -- request headers
+  String,                 -- request body
+  Int,                    -- response status (0 = not set)
+  List(Header),           -- response headers
+  String,                 -- response body
+  Bool,                   -- halted?
+  List((String, String)), -- assigns
+  Upgrade                 -- websocket upgrade
+)
+
+pfn make_conn(meth, path_, qs, req_hdrs, req_body) do
+  let parts = List.filter(string_split(path_, "/"), fn s -> not(string_is_empty(s)))
+  Conn(0, meth, path_, parts, qs, req_hdrs, req_body, 0, Nil, "", false, Nil, NoUpgrade)
+end
+
+pfn make_get(path_) do
+  make_conn(Get, path_, "", Nil, "")
+end
+
+pfn make_get_qs(path_, qs) do
+  make_conn(Get, path_, qs, Nil, "")
+end
+
+pfn make_post(path_, body) do
+  make_conn(Post, path_, "",
+    Cons(Header("content-type", "application/json"), Nil),
+    body)
+end
+
+pfn make_post_form(path_, body) do
+  make_conn(Post, path_, "",
+    Cons(Header("content-type", "application/x-www-form-urlencoded"), Nil),
+    body)
+end
+
+pfn make_method(meth, path_) do
+  make_conn(meth, path_, "", Nil, "")
+end
+
+-- ── Static.mime_type ──────────────────────────────────────────────
+
+  fn test_mime_html() : Unit do
+    Test.assert_eq_str(
+      Static.mime_type("index.html"),
+      "text/html; charset=utf-8",
+      "html"
+    )
+  end
+
+  fn test_mime_css() : Unit do
+    Test.assert_eq_str(Static.mime_type("app.css"),  "text/css",             "css")
+  end
+
+  fn test_mime_js() : Unit do
+    Test.assert_eq_str(Static.mime_type("app.js"),   "application/javascript", "js")
+  end
+
+  fn test_mime_mjs() : Unit do
+    Test.assert_eq_str(Static.mime_type("app.mjs"),  "application/javascript", "mjs")
+  end
+
+  fn test_mime_json() : Unit do
+    Test.assert_eq_str(Static.mime_type("data.json"), "application/json",    "json")
+  end
+
+  fn test_mime_png() : Unit do
+    Test.assert_eq_str(Static.mime_type("logo.png"),  "image/png",           "png")
+  end
+
+  fn test_mime_jpg() : Unit do
+    Test.assert_eq_str(Static.mime_type("photo.jpg"), "image/jpeg",          "jpg")
+  end
+
+  fn test_mime_jpeg() : Unit do
+    Test.assert_eq_str(Static.mime_type("photo.jpeg"), "image/jpeg",         "jpeg")
+  end
+
+  fn test_mime_svg() : Unit do
+    Test.assert_eq_str(Static.mime_type("icon.svg"),  "image/svg+xml",       "svg")
+  end
+
+  fn test_mime_ico() : Unit do
+    Test.assert_eq_str(Static.mime_type("favicon.ico"), "image/x-icon",      "ico")
+  end
+
+  fn test_mime_wasm() : Unit do
+    Test.assert_eq_str(Static.mime_type("counter.wasm"), "application/wasm", "wasm")
+  end
+
+  fn test_mime_woff2() : Unit do
+    Test.assert_eq_str(Static.mime_type("font.woff2"), "font/woff2",         "woff2")
+  end
+
+  fn test_mime_gif() : Unit do
+    Test.assert_eq_str(Static.mime_type("anim.gif"), "image/gif",            "gif")
+  end
+
+  fn test_mime_webp() : Unit do
+    Test.assert_eq_str(Static.mime_type("photo.webp"), "image/webp",         "webp")
+  end
+
+  fn test_mime_unknown() : Unit do
+    Test.assert_eq_str(
+      Static.mime_type("archive.tar.gz"),
+      "application/octet-stream",
+      "unknown extension"
+    )
+  end
+
+  fn test_mime_full_path() : Unit do
+    -- Extension detection works on full paths, not just filenames.
+    Test.assert_eq_str(
+      Static.mime_type("priv/static/css/app.css"),
+      "text/css",
+      "full path"
+    )
+  end
+
+  -- ── Static.looks_fingerprinted ────────────────────────────────────
+
+  fn test_fingerprinted_8char_hash() : Unit do
+    Test.assert_true(
+      Static.looks_fingerprinted("app-a1b2c3d4.css"),
+      "8-char hash should be fingerprinted"
+    )
+  end
+
+  fn test_fingerprinted_wasm() : Unit do
+    Test.assert_true(
+      Static.looks_fingerprinted("counter-ab12cd34.wasm"),
+      "wasm with 8-char hash"
+    )
+  end
+
+  fn test_fingerprinted_component_name() : Unit do
+    Test.assert_true(
+      Static.looks_fingerprinted("search-bar-e5f6g7h8.css"),
+      "multi-word name with 8-char hash"
+    )
+  end
+
+  fn test_not_fingerprinted_no_hyphen() : Unit do
+    Test.assert_false(
+      Static.looks_fingerprinted("app.css"),
+      "no hyphen — not fingerprinted"
+    )
+  end
+
+  fn test_not_fingerprinted_short_hash() : Unit do
+    -- "islands" is 7 chars — not 8.
+    Test.assert_false(
+      Static.looks_fingerprinted("march-islands.js"),
+      "7-char suffix is not a Forge content hash"
+    )
+  end
+
+  fn test_not_fingerprinted_long_hash() : Unit do
+    Test.assert_false(
+      Static.looks_fingerprinted("app-a1b2c3d4e5.css"),
+      "10-char suffix is not a Forge content hash"
+    )
+  end
+
+  fn test_not_fingerprinted_no_extension() : Unit do
+    Test.assert_false(
+      Static.looks_fingerprinted("app-a1b2c3d4"),
+      "no extension — no hash detection"
+    )
+  end
+
+  -- ── Static.path ───────────────────────────────────────────────────
+
+  fn test_path_fallback_no_manifest() : Unit do
+    -- No manifest exists in test environment → fallback to /static/{filename}
+    Test.assert_eq_str(
+      Static.path("css/app.css"),
+      "/static/css/app.css",
+      "fallback when manifest absent"
+    )
+  end
+
+  fn test_path_fallback_missing_key() : Unit do
+    Test.assert_eq_str(
+      Static.path("favicon.ico"),
+      "/static/favicon.ico",
+      "fallback for unlisted key"
+    )
+  end
+
+  -- ── Static.css_tag ────────────────────────────────────────────────
+
+  fn test_css_tag_produces_link() : Unit do
+    let tag = Static.css_tag("css/app.css")
+    Test.assert_true(
+      String.starts_with(tag, "<link rel=\"stylesheet\" href=\""),
+      "css_tag starts with link element"
+    )
+    Test.assert_true(
+      String.ends_with(tag, "\" />"),
+      "css_tag self-closes"
+    )
+    Test.assert_true(
+      String.contains(tag, "css/app.css"),
+      "css_tag contains the filename"
+    )
+  end
+
+  -- ── Static.js_tag ─────────────────────────────────────────────────
+
+  fn test_js_tag_produces_script() : Unit do
+    let tag = Static.js_tag("bastion.js")
+    Test.assert_true(
+      String.starts_with(tag, "<script src=\""),
+      "js_tag starts with script element"
+    )
+    Test.assert_true(
+      String.ends_with(tag, "\"></script>"),
+      "js_tag closes script"
+    )
+    Test.assert_true(
+      String.contains(tag, "bastion.js"),
+      "js_tag contains the filename"
+    )
+  end
+
+  -- ── IslandCss.to_kebab ────────────────────────────────────────────
+
+  fn test_kebab_single_word() : Unit do
+    Test.assert_eq_str(IslandCss.to_kebab("Counter"),         "counter",            "single word")
+  end
+
+  fn test_kebab_two_words() : Unit do
+    Test.assert_eq_str(IslandCss.to_kebab("SearchBar"),       "search-bar",         "two words")
+  end
+
+  fn test_kebab_three_words() : Unit do
+    Test.assert_eq_str(IslandCss.to_kebab("UserProfileCard"), "user-profile-card",  "three words")
+  end
+
+  fn test_kebab_my_island() : Unit do
+    Test.assert_eq_str(IslandCss.to_kebab("MyIsland"),        "my-island",          "My prefix")
+  end
+
+  fn test_kebab_already_lowercase() : Unit do
+    Test.assert_eq_str(IslandCss.to_kebab("counter"),         "counter",            "already lowercase")
+  end
+
+  fn test_kebab_chat_widget() : Unit do
+    Test.assert_eq_str(IslandCss.to_kebab("ChatWidget"),      "chat-widget",        "ChatWidget")
+  end
+
+  -- ── IslandCss.attribute_for ───────────────────────────────────────
+
+  fn test_attribute_for_counter() : Unit do
+    Test.assert_eq_str(
+      IslandCss.attribute_for("Counter"),
+      "[data-b-counter]",
+      "Counter → [data-b-counter]"
+    )
+  end
+
+  fn test_attribute_for_search_bar() : Unit do
+    Test.assert_eq_str(
+      IslandCss.attribute_for("SearchBar"),
+      "[data-b-search-bar]",
+      "SearchBar → [data-b-search-bar]"
+    )
+  end
+
+  fn test_attr_name_no_brackets() : Unit do
+    Test.assert_eq_str(
+      IslandCss.attr_name("ChatWidget"),
+      "data-b-chat-widget",
+      "attr_name returns name without brackets"
+    )
+  end
+
+  -- ── IslandCss.scope_css ───────────────────────────────────────────
+
+  fn test_scope_simple_class() : Unit do
+    let scoped = IslandCss.scope_css(".btn { color: red; }", "Counter")
+    Test.assert_true(
+      String.contains(scoped, "[data-b-counter]"),
+      "scoped CSS contains attribute selector"
+    )
+    Test.assert_true(
+      String.contains(scoped, ".btn"),
+      "original class selector preserved"
+    )
+    Test.assert_true(
+      String.contains(scoped, "color: red"),
+      "CSS body preserved"
+    )
+  end
+
+  fn test_scope_two_rules() : Unit do
+    let css    = ".a { margin: 0; } .b { padding: 0; }"
+    let scoped = IslandCss.scope_css(css, "Card")
+    Test.assert_true(
+      String.contains(scoped, "[data-b-card] .a"),
+      "first rule scoped"
+    )
+    Test.assert_true(
+      String.contains(scoped, "[data-b-card] .b"),
+      "second rule scoped"
+    )
+  end
+
+  fn test_scope_at_rule_passthrough() : Unit do
+    let css    = "@media (max-width: 600px) { .x { display: none; } }"
+    let scoped = IslandCss.scope_css(css, "Widget")
+    Test.assert_true(
+      String.contains(scoped, "@media"),
+      "@ rule text preserved"
+    )
+    Test.assert_false(
+      String.contains(scoped, "[data-b-widget] @media"),
+      "@ rule not attribute-prefixed"
+    )
+  end
+
+  fn test_scope_root_passthrough() : Unit do
+    let scoped = IslandCss.scope_css(":root { --color: blue; }", "Theme")
+    Test.assert_false(
+      String.contains(scoped, "[data-b-theme] :root"),
+      ":root selector not scoped"
+    )
+  end
+
+  fn test_scope_body_passthrough() : Unit do
+    let scoped = IslandCss.scope_css("body { margin: 0; }", "Layout")
+    Test.assert_false(
+      String.contains(scoped, "[data-b-layout] body"),
+      "body selector not scoped"
+    )
+  end
+
+  fn test_scope_comma_selector() : Unit do
+    let scoped = IslandCss.scope_css(".a, .b { color: red; }", "Counter")
+    Test.assert_true(
+      String.contains(scoped, "[data-b-counter] .a"),
+      "comma-selector part 1 scoped"
+    )
+    Test.assert_true(
+      String.contains(scoped, "[data-b-counter] .b"),
+      "comma-selector part 2 scoped"
+    )
+  end
+
+  fn test_scope_empty_css() : Unit do
+    let scoped = IslandCss.scope_css("", "Counter")
+    Test.assert_true(String.is_empty(scoped), "empty CSS stays empty")
+  end
+
+  fn test_scope_whitespace_only() : Unit do
+    let scoped = IslandCss.scope_css("   ", "Counter")
+    -- Whitespace-only string has no rules to scope; result should not contain selector.
+    Test.assert_false(
+      String.contains(scoped, "[data-b-counter]"),
+      "whitespace-only CSS has no selectors to scope"
+    )
+  end
+
+  -- ── Islands.wrap_with_css ─────────────────────────────────────────
+
+  fn test_wrap_with_css_has_data_attr() : Unit do
+    let html = Islands.wrap_with_css(
+      "Counter",
+      Islands.Eager,
+      "{\"count\":0}",
+      ".counter { display: flex; }",
+      "<span>0</span>"
+    )
+    Test.assert_true(
+      String.contains(html, "data-march-island-css="),
+      "wrap_with_css embeds CSS attribute"
+    )
+    Test.assert_true(
+      String.contains(html, "data-march-island=\"Counter\""),
+      "island name preserved"
+    )
+    Test.assert_true(
+      String.contains(html, "data-march-hydrate=\"eager\""),
+      "hydration strategy preserved"
+    )
+    Test.assert_true(
+      String.contains(html, "<span>0</span>"),
+      "inner HTML preserved"
+    )
+  end
+
+  fn test_wrap_with_css_escapes_double_quotes() : Unit do
+    let css  = ".x { content: \"hello\"; }"
+    let html = Islands.wrap_with_css("A", Islands.Eager, "{}", css, "")
+    Test.assert_true(
+      String.contains(html, "&quot;"),
+      "double quotes in CSS are HTML-escaped in the attribute"
+    )
+  end
+
+  fn test_wrap_eager_with_css_convenience() : Unit do
+    let html = Islands.wrap_eager_with_css(
+      "SearchBar", "{}", ".sb { flex: 1; }", "<input />"
+    )
+    Test.assert_true(
+      String.contains(html, "data-march-hydrate=\"eager\""),
+      "wrap_eager_with_css uses eager strategy"
+    )
+    Test.assert_true(
+      String.contains(html, "data-march-island=\"SearchBar\""),
+      "wrap_eager_with_css sets island name"
+    )
+  end
+
+  -- ── IslandAssets.wasm_cache_control ───────────────────────────────
+
+  fn test_wasm_immutable_for_8char_hash() : Unit do
+    Test.assert_eq_str(
+      IslandAssets.wasm_cache_control("counter-a1b2c3d4.wasm"),
+      "public, max-age=31536000, immutable",
+      "8-char hash → immutable"
+    )
+  end
+
+  fn test_wasm_short_for_unhashed() : Unit do
+    Test.assert_eq_str(
+      IslandAssets.wasm_cache_control("counter.wasm"),
+      "public, max-age=60",
+      "no hash → short cache (dev)"
+    )
+  end
+
+  fn test_wasm_short_for_dev_short_hash() : Unit do
+    Test.assert_eq_str(
+      IslandAssets.wasm_cache_control("search-bar-v1.wasm"),
+      "public, max-age=60",
+      "short non-hash suffix → short cache"
+    )
+  end
+
+  -- ── Runner ────────────────────────────────────────────────────────
+
+  fn run_all() : Unit do
+    test_mime_html()
+    test_mime_css()
+    test_mime_js()
+    test_mime_mjs()
+    test_mime_json()
+    test_mime_png()
+    test_mime_jpg()
+    test_mime_jpeg()
+    test_mime_svg()
+    test_mime_ico()
+    test_mime_wasm()
+    test_mime_woff2()
+    test_mime_gif()
+    test_mime_webp()
+    test_mime_unknown()
+    test_mime_full_path()
+    test_fingerprinted_8char_hash()
+    test_fingerprinted_wasm()
+    test_fingerprinted_component_name()
+    test_not_fingerprinted_no_hyphen()
+    test_not_fingerprinted_short_hash()
+    test_not_fingerprinted_long_hash()
+    test_not_fingerprinted_no_extension()
+    test_path_fallback_no_manifest()
+    test_path_fallback_missing_key()
+    test_css_tag_produces_link()
+    test_js_tag_produces_script()
+    test_kebab_single_word()
+    test_kebab_two_words()
+    test_kebab_three_words()
+    test_kebab_my_island()
+    test_kebab_already_lowercase()
+    test_kebab_chat_widget()
+    test_attribute_for_counter()
+    test_attribute_for_search_bar()
+    test_attr_name_no_brackets()
+    test_scope_simple_class()
+    test_scope_two_rules()
+    test_scope_at_rule_passthrough()
+    test_scope_root_passthrough()
+    test_scope_body_passthrough()
+    test_scope_comma_selector()
+    test_scope_empty_css()
+    test_scope_whitespace_only()
+    test_wrap_with_css_has_data_attr()
+    test_wrap_with_css_escapes_double_quotes()
+    test_wrap_eager_with_css_convenience()
+    test_wasm_immutable_for_8char_hash()
+    test_wasm_short_for_unhashed()
+    test_wasm_short_for_dev_short_hash()
+    println("All BastionTest tests passed.")
   end
 
   fn main() do
-    let result = test_placeholder()
-    if result then println("All tests passed.") else println("Tests failed.")
+    run_all()
   end
 
 end

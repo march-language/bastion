@@ -1,8 +1,21 @@
--- Bastion.Static — static file serving middleware.
+-- Bastion.Static — static file serving middleware and asset tag helpers.
 --
 -- Serves files from a directory on disk.  Designed to be inserted into a
 -- Bastion pipeline before the router so that asset requests are handled
 -- without hitting application code.
+--
+-- Cache behaviour:
+--   - Files with an 8-character content-hash suffix (e.g. app-a1b2c3d4.css)
+--     are served with "public, max-age=31536000, immutable".
+--   - All other files get "public, max-age=3600".
+--   - ETag headers are computed from mtime + size (via File.stat).
+--   - Conditional GET (If-None-Match) is honoured; 304 is returned when
+--     the client's ETag matches.
+--
+-- Asset manifest:
+--   Forge writes priv/static/manifest.json mapping logical asset names to
+--   their fingerprinted URLs.  Static.path/1, Static.css_tag/1, and
+--   Static.js_tag/1 consult this manifest to produce correct URLs.
 --
 -- Usage:
 --
@@ -16,6 +29,7 @@ mod Static do
   import HttpServer
 
   -- Configuration for the static file server.
+  --   Config(root_dir, url_prefix)
   type Config = Config(String, String)
 
   doc "Create a Config that serves files from root with no URL prefix."
@@ -32,7 +46,8 @@ mod Static do
   Return a plug that serves static files from the given directory.
 
   Requests that resolve to a readable file are served and the conn is halted.
-  Unmatched requests are passed through unchanged.
+  Unmatched requests (file not found) are passed through unchanged so the
+  router can handle them.
 
   Example:
     HttpServer.plug(server, Static.serve("priv/static"))
@@ -57,19 +72,34 @@ mod Static do
     fn conn -> handle(cfg, conn)
   end
 
-  -- ── Internal helpers ──────────────────────────────────────────────
+  -- ── Internal request handling ──────────────────────────────────────
 
   pfn handle(cfg : Config, conn : Conn) : Conn do
     match cfg do
     Config(root, prefix) -> do
-      let path      = HttpServer.path(conn)
-      let file_path = root ++ "/" ++ strip_and_normalise(url_path(path, prefix))
+      let req_path  = HttpServer.path(conn)
+      let rel_path  = strip_and_normalise(url_path(req_path, prefix))
+      let file_path = root ++ "/" ++ rel_path
       match File.read(file_path) do
       Ok(contents) -> do
         let mime = mime_type(file_path)
-        conn
-        |> HttpServer.put_resp_header("content-type", mime)
-        |> HttpServer.send_resp(200, contents)
+        let etag = compute_etag(file_path, contents)
+        let cc   = cache_control_for(file_path)
+        -- Honour conditional GET: return 304 when ETag matches.
+        match HttpServer.get_req_header(conn, "if-none-match") do
+        Some(client_etag) ->
+          match client_etag == etag do
+          true ->
+            conn
+            |> HttpServer.put_resp_header("etag", etag)
+            |> HttpServer.put_resp_header("cache-control", cc)
+            |> HttpServer.send_resp(304, "")
+          false ->
+            send_file(conn, contents, mime, etag, cc)
+          end
+        None ->
+          send_file(conn, contents, mime, etag, cc)
+        end
       end
       Err(_) ->
         conn
@@ -77,6 +107,61 @@ mod Static do
     end
     end
   end
+
+  pfn send_file(conn : Conn, contents : String, mime : String, etag : String, cc : String) : Conn do
+    conn
+    |> HttpServer.put_resp_header("content-type", mime)
+    |> HttpServer.put_resp_header("cache-control", cc)
+    |> HttpServer.put_resp_header("etag", etag)
+    |> HttpServer.send_resp(200, contents)
+  end
+
+  -- ETag: "mtime-size" from File.stat, falling back to content length.
+  pfn compute_etag(file_path : String, contents : String) : String do
+    match File.stat(file_path) do
+    Ok(FileStat(size, _, mtime, _)) ->
+      "\"" ++ String.from_int(mtime) ++ "-" ++ String.from_int(size) ++ "\""
+    Err(_) ->
+      "\"len-" ++ String.from_int(String.byte_size(contents)) ++ "\""
+    end
+  end
+
+  -- Long-lived immutable cache for fingerprinted files; 1 hour otherwise.
+  pfn cache_control_for(file_path : String) : String do
+    let segments = String.split(file_path, "/")
+    let filename  = List.last(segments)
+    match looks_fingerprinted(filename) do
+    true  -> "public, max-age=31536000, immutable"
+    false -> "public, max-age=3600"
+    end
+  end
+
+  doc """
+  Return true if `filename` appears to carry a Forge content-hash suffix.
+
+  A fingerprinted filename ends with "-XXXXXXXX.ext" where XXXXXXXX is
+  exactly 8 characters (the first 8 hex digits of the content hash).
+
+  Example:
+    Static.looks_fingerprinted("app-a1b2c3d4.css")   -- true
+    Static.looks_fingerprinted("app.css")             -- false
+    Static.looks_fingerprinted("march-islands.js")    -- false  (7-char stem "islands")
+    Static.looks_fingerprinted("c-12345678.wasm")     -- true
+  """
+  fn looks_fingerprinted(filename : String) : Bool do
+    let parts = String.split(filename, "-")
+    match List.length(parts) > 1 do
+    false -> false
+    true ->
+      let last_part = List.last(parts)
+      match String.split_first(last_part, ".") do
+      None -> false
+      Some(hash_part, _) -> String.byte_size(hash_part) == 8
+      end
+    end
+  end
+
+  -- ── URL path helpers ──────────────────────────────────────────────
 
   -- Strip prefix from url_path if present; otherwise return url_path unchanged.
   pfn url_path(path : String, prefix : String) : String do
@@ -98,22 +183,39 @@ mod Static do
     end
   end
 
-  -- MIME type lookup table implemented as a list walk.
-  pfn mime_type(path : String) : String do
+  -- ── MIME type detection ───────────────────────────────────────────
+
+  doc """
+  Return the MIME type for a file path based on its extension.
+
+  Example:
+    Static.mime_type("priv/static/app.css")   -- "text/css"
+    Static.mime_type("priv/static/logo.png")  -- "image/png"
+    Static.mime_type("counter.wasm")          -- "application/wasm"
+    Static.mime_type("data.bin")              -- "application/octet-stream"
+  """
+  fn mime_type(path : String) : String do
     let table = [
-      (".html", "text/html; charset=utf-8"),
-      (".css",  "text/css"),
-      (".js",   "application/javascript"),
-      (".json", "application/json"),
-      (".png",  "image/png"),
-      (".jpg",  "image/jpeg"),
-      (".jpeg", "image/jpeg"),
-      (".svg",  "image/svg+xml"),
-      (".ico",  "image/x-icon"),
-      (".woff", "font/woff"),
-      (".woff2","font/woff2"),
-      (".wasm", "application/wasm"),
-      (".txt",  "text/plain; charset=utf-8")
+      (".html",  "text/html; charset=utf-8"),
+      (".css",   "text/css"),
+      (".js",    "application/javascript"),
+      (".mjs",   "application/javascript"),
+      (".json",  "application/json"),
+      (".png",   "image/png"),
+      (".jpg",   "image/jpeg"),
+      (".jpeg",  "image/jpeg"),
+      (".gif",   "image/gif"),
+      (".webp",  "image/webp"),
+      (".svg",   "image/svg+xml"),
+      (".ico",   "image/x-icon"),
+      (".woff",  "font/woff"),
+      (".woff2", "font/woff2"),
+      (".ttf",   "font/ttf"),
+      (".wasm",  "application/wasm"),
+      (".map",   "application/json"),
+      (".txt",   "text/plain; charset=utf-8"),
+      (".xml",   "application/xml"),
+      (".pdf",   "application/pdf")
     ]
     mime_lookup(path, table)
   end
@@ -127,6 +229,63 @@ mod Static do
       false -> mime_lookup(path, rest)
       end
     end
+  end
+
+  -- ── Asset tag helpers ─────────────────────────────────────────────
+
+  doc """
+  Return the URL for a static asset, looking up the fingerprinted path from
+  the asset manifest at priv/static/manifest.json.  Falls back to
+  /static/{filename} when the manifest is absent or the key is not found.
+
+  Manifest format (written by Forge at build time):
+    {
+      "css/app.css":  "/static/css/app-a1b2c3d4.css",
+      "bastion.js":   "/static/bastion-e5f6g7h8.js"
+    }
+
+  Example:
+    Static.path("css/app.css")  -- "/static/css/app-a1b2c3d4.css" (manifest hit)
+    Static.path("favicon.ico")  -- "/static/favicon.ico"           (fallback)
+  """
+  fn path(filename : String) : String do
+    let manifest_file = "priv/static/manifest.json"
+    match File.read(manifest_file) do
+    Ok(content) ->
+      match Json.parse(content) do
+      Ok(json) ->
+        match Json.get(json, filename) do
+        Some(Str(url)) -> url
+        _              -> "/static/" ++ filename
+        end
+      Err(_) -> "/static/" ++ filename
+      end
+    Err(_) -> "/static/" ++ filename
+    end
+  end
+
+  doc """
+  Return an HTML <link rel="stylesheet"> tag pointing at the fingerprinted
+  URL for the given CSS asset.
+
+  Example:
+    Static.css_tag("css/app.css")
+    -- "<link rel=\"stylesheet\" href=\"/static/css/app-a1b2c3d4.css\" />"
+  """
+  fn css_tag(filename : String) : String do
+    "<link rel=\"stylesheet\" href=\"" ++ path(filename) ++ "\" />"
+  end
+
+  doc """
+  Return an HTML <script src="..."> tag pointing at the fingerprinted URL for
+  the given JS asset.
+
+  Example:
+    Static.js_tag("bastion.js")
+    -- "<script src=\"/static/bastion.js\"></script>"
+  """
+  fn js_tag(filename : String) : String do
+    "<script src=\"" ++ path(filename) ++ "\"></script>"
   end
 
 end

@@ -1,0 +1,168 @@
+-- Bastion.IslandCss — scoped CSS for WASM islands.
+--
+-- Transforms flat CSS into attribute-scoped CSS so island styles don't leak
+-- to the rest of the page or to other islands.
+--
+-- Scoping mechanism:
+--   1. Generate a unique data attribute for each island module.
+--      e.g. "SearchBar" → data-b-search-bar
+--   2. Prefix every CSS selector with the attribute selector.
+--      e.g. ".btn { … }" → "[data-b-search-bar] .btn { … }"
+--   3. Islands.wrap/4 adds the data attribute to the island's root element,
+--      so the scoped selectors match.
+--
+-- @ rules (media queries, keyframes, etc.) and special selectors (:root, html,
+-- body, *) are passed through unmodified.
+--
+-- Usage:
+--
+--   let css    = ".counter { display: flex; }\n.count { font-size: 2rem; }"
+--   let scoped = IslandCss.scope_css(css, "Counter")
+--   -- "[data-b-counter] .counter { display: flex; }\n[data-b-counter] .count { font-size: 2rem; }"
+--
+--   let attr = IslandCss.attr_name("SearchBar")  -- "data-b-search-bar"
+--
+-- Island declaration (Bastion convention):
+--
+--   mod MyApp.Islands.Counter do
+--     import Bastion.Island
+--
+--     fn styles() : String do
+--       ".counter { display: flex; gap: 8px; }" ++
+--       ".count { font-size: 2rem; font-weight: bold; }"
+--     end
+--
+--     -- ... init, update, view ...
+--   end
+
+mod IslandCss do
+
+  doc """
+  Scope all CSS selectors in `css` to the island named `island_name`.
+
+  Each CSS selector is prefixed with `[data-b-{kebab-name}]` so rules only
+  apply inside that island's DOM subtree.  Comma-separated selector lists are
+  each prefixed individually.  @ rules and global selectors (:root, html,
+  body, *) are passed through without modification.
+
+  Example:
+    IslandCss.scope_css(".btn { color: red; }", "MyButton")
+    -- "[data-b-my-button] .btn { color: red; }"
+
+    IslandCss.scope_css(".a, .b { margin: 0; }", "Card")
+    -- "[data-b-card] .a,\n[data-b-card] .b { margin: 0; }"
+  """
+  fn scope_css(css : String, island_name : String) : String do
+    let attr   = attribute_for(island_name)
+    let blocks = String.split(css, "}")
+    let scoped  = List.map(blocks, fn block -> scope_block(block, attr))
+    String.join(scoped, "}")
+  end
+
+  doc """
+  Return the CSS attribute selector used to scope an island's styles.
+
+  Example:
+    IslandCss.attribute_for("SearchBar")  -- "[data-b-search-bar]"
+    IslandCss.attribute_for("Counter")    -- "[data-b-counter]"
+    IslandCss.attribute_for("ChatWidget") -- "[data-b-chat-widget]"
+  """
+  fn attribute_for(island_name : String) : String do
+    "[data-b-" ++ to_kebab(island_name) ++ "]"
+  end
+
+  doc """
+  Return the HTML attribute name (without brackets) for an island.
+
+  This is the attribute added to the island's root element by Islands.wrap.
+
+  Example:
+    IslandCss.attr_name("Counter")    -- "data-b-counter"
+    IslandCss.attr_name("SearchBar")  -- "data-b-search-bar"
+  """
+  fn attr_name(island_name : String) : String do
+    "data-b-" ++ to_kebab(island_name)
+  end
+
+  doc """
+  Convert a PascalCase or CamelCase identifier to kebab-case.
+
+  Each uppercase letter that is not the first character is preceded by a "-".
+  Digits and already-lowercase characters are preserved.
+
+  Example:
+    IslandCss.to_kebab("SearchBar")       -- "search-bar"
+    IslandCss.to_kebab("MyIsland")        -- "my-island"
+    IslandCss.to_kebab("Counter")         -- "counter"
+    IslandCss.to_kebab("ChatWidget")      -- "chat-widget"
+    IslandCss.to_kebab("UserProfileCard") -- "user-profile-card"
+  """
+  fn to_kebab(name : String) : String do
+    let n = String.byte_size(name)
+    kebab_go(name, 0, n, "")
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────
+
+  -- Scope one CSS block: the text appearing before a single "}".
+  pfn scope_block(block : String, attr : String) : String do
+    let trimmed = String.trim(block)
+    match String.is_empty(trimmed) do
+    true  -> block
+    false ->
+      match String.split_first(trimmed, "{") do
+      None -> block
+      Some(selector_raw, body) ->
+        let selector = String.trim(selector_raw)
+        match should_skip(selector) do
+        true  -> block
+        false ->
+          let scoped_sel = scope_selector(selector, attr)
+          "\n" ++ scoped_sel ++ " {" ++ body
+        end
+      end
+    end
+  end
+
+  -- @ rules and universal/root selectors must not be attribute-prefixed.
+  pfn should_skip(selector : String) : Bool do
+    String.starts_with(selector, "@") ||
+    selector == ":root"               ||
+    selector == "html"                ||
+    selector == "body"                ||
+    selector == "*"
+  end
+
+  -- Scope each part of a comma-separated compound selector.
+  pfn scope_selector(selector : String, attr : String) : String do
+    let parts  = String.split(selector, ",")
+    let scoped = List.map(parts, fn part -> attr ++ " " ++ String.trim(part))
+    String.join(scoped, ",\n")
+  end
+
+  -- Walk `name` byte by byte; insert "-" before each uppercase ASCII letter
+  -- (except at position 0) and lowercase it.
+  pfn kebab_go(name : String, i : Int, n : Int, acc : String) : String do
+    match i >= n do
+    true -> acc
+    false ->
+      let ch = String.slice_bytes(name, i, 1)
+      match is_upper_ascii(ch) do
+      true ->
+        let lower = String.to_lowercase(ch)
+        match String.is_empty(acc) do
+        true  -> kebab_go(name, i + 1, n, lower)
+        false -> kebab_go(name, i + 1, n, acc ++ "-" ++ lower)
+        end
+      false ->
+        kebab_go(name, i + 1, n, acc ++ ch)
+      end
+    end
+  end
+
+  -- True iff `ch` is a single ASCII uppercase letter (A–Z).
+  pfn is_upper_ascii(ch : String) : Bool do
+    String.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch)
+  end
+
+end

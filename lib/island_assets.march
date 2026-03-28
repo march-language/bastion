@@ -1,9 +1,20 @@
--- IslandAssets — serves the island client runtime JavaScript.
+-- IslandAssets — serves the island client runtime and compiled WASM bundles.
 --
--- For Phase 1 the JS is embedded as string literals in March code, avoiding
--- the need for a separate build step or file serving setup.  The actual JS
--- runtime will be injected by a separate agent; for now a placeholder is
--- served that logs a startup message.
+-- Reads compiled WASM files and a Forge-generated manifest from disk.
+-- The manifest (priv/static/islands/manifest.json) maps island module names
+-- to content-hash filenames, enabling long-lived immutable caching:
+--
+--   {
+--     "MyApp.Islands.Counter":   { "file": "counter-a1b2c3d4.wasm",   "hash": "a1b2c3d4" },
+--     "MyApp.Islands.SearchBar": { "file": "search_bar-e5f6g7h8.wasm", "hash": "e5f6g7h8" }
+--   }
+--
+-- URL routes (under the configured base_path, default "/_bastion"):
+--
+--   /_bastion/islands.js              — bundled island client runtime
+--   /_bastion/islands-ws.js           — WebSocket connection script
+--   /_bastion/islands/manifest.json   — WASM manifest (served with short cache)
+--   /_bastion/islands/{file}.wasm     — compiled island WASM (immutable if hashed)
 --
 -- Usage (as a plug):
 --
@@ -12,7 +23,7 @@
 --   |> HttpServer.plug(Router.to_plug(router))
 --   |> HttpServer.listen()
 --
--- Or serve manually from a controller:
+-- Or serve specific assets from a controller:
 --
 --   fn js_handler(conn : Conn) : Conn do
 --     IslandAssets.serve_js(conn)
@@ -43,43 +54,52 @@ mod IslandAssets do
     end
   end
 
-  -- ── Plug ────────────────────────────────────────────────────────────────
+  -- ── Plug ──────────────────────────────────────────────────────────
 
   doc """
   Build a Conn -> Conn plug that serves island asset files.
 
-  Routes:
-    {base_path}/islands.js    — main island client runtime
-    {base_path}/islands-ws.js — WebSocket connection script
+  Routes handled (relative to base_path):
+    /islands.js            — main island client runtime (JS + WASM bridge)
+    /islands-ws.js         — WebSocket connection script
+    /islands/manifest.json — WASM manifest (module name → hashed filename)
+    /islands/{file}.wasm   — compiled island WASM bundle
 
   Non-matching requests pass through unchanged.
   """
   fn plug(cfg : Config) : Conn -> Conn do
-    let base = config_base_path(cfg)
-    let js_path      = base ++ "/islands.js"
-    let ws_js_path   = base ++ "/islands-ws.js"
-    let wasm_prefix  = base ++ "/islands/"
+    let base          = config_base_path(cfg)
+    let js_path       = base ++ "/islands.js"
+    let ws_js_path    = base ++ "/islands-ws.js"
+    let manifest_path = base ++ "/islands/manifest.json"
+    let wasm_prefix   = base ++ "/islands/"
     fn conn -> do
       let req_path = HttpServer.path(conn)
       if req_path == js_path do
         serve_js(conn)
       else if req_path == ws_js_path do
         serve_ws_js(conn)
+      else if req_path == manifest_path do
+        serve_manifest(conn)
       else if String.starts_with(req_path, wasm_prefix) && String.ends_with(req_path, ".wasm") do
-        let name = String.slice(req_path, String.byte_length(wasm_prefix), String.byte_length(req_path) - String.byte_length(wasm_prefix) - 5)
-        serve_wasm(conn, name)
+        let prefix_len = String.byte_size(wasm_prefix)
+        let total_len  = String.byte_size(req_path)
+        -- filename without the leading prefix (e.g. "counter-a1b2c3d4.wasm")
+        let filename = String.slice_bytes(req_path, prefix_len, total_len - prefix_len)
+        serve_wasm_file(conn, filename)
       else
         conn
       end end end
     end
   end
 
-  -- ── Direct serving ──────────────────────────────────────────────────────
+  -- ── Direct serving ────────────────────────────────────────────────
 
   doc """
   Serve the main island client runtime JS.
 
-  Sets content-type and cache-control headers, then sends the embedded JS.
+  Concatenates idiomorph.js + march-islands.js + wasm-bridge.js from
+  priv/js/ and serves them as a single response.
   """
   fn serve_js(conn : Conn) : Conn do
     conn
@@ -88,9 +108,7 @@ mod IslandAssets do
     |> HttpServer.send_resp(200, client_runtime_js())
   end
 
-  doc """
-  Serve the WebSocket connection JS.
-  """
+  doc "Serve the WebSocket connection JS."
   fn serve_ws_js(conn : Conn) : Conn do
     conn
     |> HttpServer.put_resp_header("content-type", "application/javascript")
@@ -98,12 +116,91 @@ mod IslandAssets do
     |> HttpServer.send_resp(200, client_ws_js())
   end
 
-  -- ── JS file loading ────────────────────────────────────────────────────
-  -- Reads the JS runtime from priv/js/ files on disk.
-  -- Falls back to a minimal placeholder if the files aren't found.
+  doc """
+  Serve the WASM island manifest (priv/static/islands/manifest.json).
+
+  The manifest maps island module names to hashed WASM filenames.  It is
+  intentionally served with a short cache (60 s) so clients pick up new
+  deploys quickly, while individual .wasm files get immutable caching.
+  Returns 200 with an empty JSON object if the manifest file is not found.
+  """
+  fn serve_manifest(conn : Conn) : Conn do
+    let manifest_file = "priv/static/islands/manifest.json"
+    let body = match File.read(manifest_file) do
+      Ok(content) -> content
+      Err(_)      -> "{}"
+      end
+    conn
+    |> HttpServer.put_resp_header("content-type", "application/json")
+    |> HttpServer.put_resp_header("cache-control", "public, max-age=60")
+    |> HttpServer.send_resp(200, body)
+  end
+
+  doc """
+  Serve a compiled island WASM file by its filename (e.g. "counter-a1b2c3d4.wasm").
+
+  Looks up the file under priv/static/islands/{filename}, falling back to
+  islands/{filename}.  Files with an 8-char content hash (e.g. name-a1b2c3d4.wasm)
+  are served with immutable Cache-Control; unhashed files get a short cache.
+  Returns 404 if the WASM file is not present.
+  """
+  fn serve_wasm_file(conn : Conn, filename : String) : Conn do
+    let primary_path  = "priv/static/islands/" ++ filename
+    let fallback_path = "islands/" ++ filename
+    let content_opt = match File.read(primary_path) do
+      Ok(bytes) -> Some(bytes)
+      Err(_) ->
+        match File.read(fallback_path) do
+        Ok(bytes) -> Some(bytes)
+        Err(_)    -> None
+        end
+      end
+    match content_opt do
+    Some(bytes) ->
+      let cc = wasm_cache_control(filename)
+      conn
+      |> HttpServer.put_resp_header("content-type", "application/wasm")
+      |> HttpServer.put_resp_header("cache-control", cc)
+      |> HttpServer.send_resp(200, bytes)
+    None ->
+      conn
+      |> HttpServer.send_resp(404, "Island WASM not found: " ++ filename)
+    end
+  end
+
+  doc """
+  Look up the hashed filename for an island module in the manifest, and return
+  its full URL path under the given base.
+
+  Returns None if the manifest is absent or the island is not listed.
+
+  Example:
+    IslandAssets.wasm_url("/_bastion", "MyApp.Islands.Counter")
+    -- Some("/_bastion/islands/counter-a1b2c3d4.wasm")
+  """
+  fn wasm_url(base : String, module_name : String) : Option(String) do
+    let manifest_file = "priv/static/islands/manifest.json"
+    match File.read(manifest_file) do
+    Ok(content) ->
+      match Json.parse(content) do
+      Ok(json) ->
+        match Json.get(json, module_name) do
+        Some(entry) ->
+          match Json.get(entry, "file") do
+          Some(Str(filename)) -> Some(base ++ "/islands/" ++ filename)
+          _                   -> None
+          end
+        _ -> None
+        end
+      Err(_) -> None
+      end
+    Err(_) -> None
+    end
+  end
+
+  -- ── JS file loading ───────────────────────────────────────────────
 
   pfn client_runtime_js() : String do
-    -- idiomorph + islands runtime + wasm bridge, concatenated
     let idiomorph = read_js_file("priv/js/idiomorph.js")
     let islands   = read_js_file("priv/js/march-islands.js")
     let wasm      = read_js_file("priv/js/wasm-bridge.js")
@@ -121,35 +218,25 @@ mod IslandAssets do
     end
   end
 
-  -- ── WASM file serving ──────────────────────────────────────────────────
+  -- ── Cache control ─────────────────────────────────────────────────
 
-  doc """
-  Serve a compiled island WASM file.
-
-  The file is looked up under priv/static/islands/{name}.wasm.
-  Falls back to the build output directory islands/{name}.wasm if not found.
-  Returns 404 if the WASM file is not present (island not yet compiled).
-  """
-  fn serve_wasm(conn : Conn, name : String) : Conn do
-    let primary_path = "priv/static/islands/" ++ name ++ ".wasm"
-    let fallback_path = "islands/" ++ name ++ ".wasm"
-    let content_opt = match File.read(primary_path) do
-      Ok(bytes) -> Some(bytes)
-      Err(_) ->
-        match File.read(fallback_path) do
-        Ok(bytes) -> Some(bytes)
-        Err(_) -> None
-        end
+  -- Files with an 8-char hash before the extension get immutable caching.
+  -- Unhashed files (e.g. during development) get a short 60-second cache.
+  pfn wasm_cache_control(filename : String) : String do
+    -- Strip .wasm extension to isolate the stem, e.g. "counter-a1b2c3d4"
+    let stem = match String.split_first(filename, ".") do
+      Some(s, _) -> s
+      None       -> filename
       end
-    match content_opt do
-    Some(bytes) ->
-      conn
-      |> HttpServer.put_resp_header("content-type", "application/wasm")
-      |> HttpServer.put_resp_header("cache-control", "public, max-age=3600")
-      |> HttpServer.send_resp(200, bytes)
-    None ->
-      conn
-      |> HttpServer.send_resp(404, "Island WASM not found: " ++ name)
+    -- Check if the last hyphen-segment of the stem is 8 bytes (content hash).
+    let parts = String.split(stem, "-")
+    let hashed = match List.length(parts) > 1 do
+      false -> false
+      true  -> String.byte_size(List.last(parts)) == 8
+      end
+    match hashed do
+    true  -> "public, max-age=31536000, immutable"
+    false -> "public, max-age=60"
     end
   end
 
