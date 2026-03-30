@@ -554,20 +554,20 @@ describe "FallbackController.call" do
   test "Ok result returns conn unchanged" do
     let conn = make_get("/")
     let sent = HttpServer.send_resp(conn, 200, "body text")
-    let out  = FallbackController.call(conn, Ok(sent))
+    let out  = FallbackController.call(conn, Handled(sent))
     assert (HttpServer.status(out)    == 200)
     assert (HttpServer.resp_body(out) == "body text")
   end
   test "Error result renders HTML error page with correct status" do
     let conn = make_get("/")
-    let out  = FallbackController.call(conn, Error(404, "Not Found"))
+    let out  = FallbackController.call(conn, Failed(404, "Not Found"))
     assert (HttpServer.status(out) == 404)
     assert (HttpServer.halted(out))
     assert (String.contains(HttpServer.resp_body(out), "404"))
   end
   test "Error 500 renders 500 page" do
     let conn = make_get("/")
-    let out  = FallbackController.call(conn, Error(500, "crash"))
+    let out  = FallbackController.call(conn, Failed(500, "crash"))
     assert (HttpServer.status(out) == 500)
     assert (HttpServer.halted(out))
   end
@@ -577,12 +577,12 @@ describe "FallbackController.call_json" do
   test "Ok result returns conn unchanged" do
     let conn    = make_get("/")
     let out_conn = HttpServer.json(conn, 200, "{\"ok\":true}")
-    let out     = FallbackController.call_json(conn, Ok(out_conn))
+    let out     = FallbackController.call_json(conn, Handled(out_conn))
     assert (HttpServer.status(out) == 200)
   end
   test "Error result renders JSON with correct status" do
     let conn = make_get("/")
-    let out  = FallbackController.call_json(conn, Error(422, "invalid"))
+    let out  = FallbackController.call_json(conn, Failed(422, "invalid"))
     assert (HttpServer.status(out) == 422)
     assert (HttpServer.halted(out))
     assert (String.contains(HttpServer.resp_body(out), "422"))
@@ -590,7 +590,7 @@ describe "FallbackController.call_json" do
   end
   test "JSON error body contains the message" do
     let conn = make_get("/")
-    let out  = FallbackController.call_json(conn, Error(400, "bad input"))
+    let out  = FallbackController.call_json(conn, Failed(400, "bad input"))
     assert (String.contains(HttpServer.resp_body(out), "bad input"))
   end
 end
@@ -599,26 +599,26 @@ describe "FallbackController.new" do
   test "custom fallback receives conn and result on Error" do
     let my_fallback = FallbackController.new(fn c -> fn result ->
       match result do
-      Ok(c2) -> c2
-      Error(status, msg) ->
+      Handled(c2) -> c2
+      Failed(status, msg) ->
         HttpServer.text(c, status, "ERR:" ++ msg)
       end)
     let conn    = make_get("/")
     let apply   = my_fallback(conn)
-    let out     = apply(Error(403, "nope"))
+    let out     = apply(Failed(403, "nope"))
     assert (HttpServer.status(out)    == 403)
     assert (HttpServer.resp_body(out) == "ERR:nope")
   end
   test "custom fallback passes through Ok" do
     let my_fallback = FallbackController.new(fn c -> fn result ->
       match result do
-      Ok(c2)           -> c2
-      Error(s, m)      -> HttpServer.text(c, s, m)
+      Handled(c2)      -> c2
+      Failed(s, m)     -> HttpServer.text(c, s, m)
       end)
     let conn    = make_get("/")
     let ok_conn = HttpServer.send_resp(conn, 201, "created")
     let apply   = my_fallback(conn)
-    let out     = apply(Ok(ok_conn))
+    let out     = apply(Handled(ok_conn))
     assert (HttpServer.status(out)    == 201)
     assert (HttpServer.resp_body(out) == "created")
   end
@@ -630,13 +630,13 @@ describe "Controller.action" do
   test "Ok result returns the conn" do
     let conn = make_get("/")
     let out  = Controller.action(conn, fn c ->
-      Ok(HttpServer.text(c, 200, "hello")))
+      Handled(HttpServer.text(c, 200, "hello")))
     assert (HttpServer.status(out)    == 200)
     assert (HttpServer.resp_body(out) == "hello")
   end
   test "Error result renders HTML error" do
     let conn = make_get("/")
-    let out  = Controller.action(conn, fn _c -> Error(404, "missing"))
+    let out  = Controller.action(conn, fn _c -> Failed(404, "missing"))
     assert (HttpServer.status(out) == 404)
     assert (HttpServer.halted(out))
     assert (String.contains(HttpServer.resp_body(out), "404"))
@@ -1309,7 +1309,7 @@ describe "Router.action" do
   test "Ok result is returned as conn" do
     let router = Router.new()
                  |> Router.action(Get, "/items", fn conn ->
-                      Ok(HttpServer.text(conn, 200, "list")))
+                      Handled(HttpServer.text(conn, 200, "list")))
     let out = Router.dispatch(router, make_get("/items"))
     assert (HttpServer.status(out)    == 200)
     assert (HttpServer.resp_body(out) == "list")
@@ -1317,7 +1317,7 @@ describe "Router.action" do
   test "Error result goes through default fallback (HTML error)" do
     let router = Router.new()
                  |> Router.action(Get, "/items/:id", fn _conn ->
-                      Error(404, "Item not found"))
+                      Failed(404, "Item not found"))
     let out = Router.dispatch(router, make_get("/items/99"))
     assert (HttpServer.status(out) == 404)
     assert (HttpServer.halted(out))
@@ -1330,8 +1330,8 @@ describe "Router.fallback" do
     let router = Router.new()
                  |> Router.fallback(fn conn -> fn result ->
                       match result do
-                      Ok(c) -> c
-                      Error(status, msg) ->
+                      Handled(c) -> c
+                      Failed(status, msg) ->
                         HttpServer.json(conn, status, "{\"err\":\"" ++ msg ++ "\"}")
                       end)
     let out = Router.dispatch(router, make_get("/not-here"))
@@ -1342,12 +1342,12 @@ describe "Router.fallback" do
     let router = Router.new()
                  |> Router.fallback(fn conn -> fn result ->
                       match result do
-                      Ok(c) -> c
-                      Error(s, m) ->
+                      Handled(c) -> c
+                      Failed(s, m) ->
                         HttpServer.text(conn, s, "CUSTOM:" ++ m)
                       end)
                  |> Router.action(Get, "/fail", fn _conn ->
-                      Error(400, "bad request"))
+                      Failed(400, "bad request"))
     let out = Router.dispatch(router, make_get("/fail"))
     assert (HttpServer.status(out)    == 400)
     assert (HttpServer.resp_body(out) == "CUSTOM:bad request")
