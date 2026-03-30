@@ -134,8 +134,7 @@ mod IslandSocket do
     Cons(h, rest) ->
       match h do
       IslandHandler(n, _, _, _) ->
-        if n == name then Some(h)
-        else find_in_list(rest, name)
+        if n == name then Some(h) else find_in_list(rest, name)
       end
     end
   end
@@ -166,8 +165,7 @@ mod IslandSocket do
     match entries do
     Nil -> Cons((id, entry), Nil)
     Cons((k, v), rest) ->
-      if k == id then Cons((id, entry), rest)
-      else Cons((k, v), put_entry(rest, id, entry))
+      if k == id then Cons((id, entry), rest) else Cons((k, v), put_entry(rest, id, entry))
     end
   end
 
@@ -181,8 +179,7 @@ mod IslandSocket do
     match entries do
     Nil -> None
     Cons((k, v), rest) ->
-      if k == id then Some(v)
-      else get_entry(rest, id)
+      if k == id then Some(v) else get_entry(rest, id)
     end
   end
 
@@ -197,8 +194,7 @@ mod IslandSocket do
     match entries do
     Nil -> Nil
     Cons((k, v), rest) ->
-      if k == id then rest
-      else Cons((k, v), remove_entry(rest, id))
+      if k == id then rest else Cons((k, v), remove_entry(rest, id))
     end
   end
 
@@ -230,7 +226,7 @@ mod IslandSocket do
 
   -- ── WebSocket loop ──────────────────────────────────────────────────────
 
-  pfn ws_loop(ws_sock : WebSocket.WsSocket, store : IslandState, registry : Registry) : Unit do
+  pfn ws_loop(ws_sock : WsSocket, store : IslandState, registry : Registry) : Unit do
     match WebSocket.recv(ws_sock) do
     TextFrame(text) -> do
       let new_store = handle_text(ws_sock, text, store, registry)
@@ -247,7 +243,7 @@ mod IslandSocket do
 
   -- ── Message dispatch ────────────────────────────────────────────────────
 
-  pfn handle_text(ws_sock : WebSocket.WsSocket, text : String, store : IslandState, registry : Registry) : IslandState do
+  pfn handle_text(ws_sock : WsSocket, text : String, store : IslandState, registry : Registry) : IslandState do
     match Json.parse(text) do
     Ok(msg) -> do
       let island_id = json_string_field(msg, "island")
@@ -267,7 +263,7 @@ mod IslandSocket do
   -- ── Init handler ────────────────────────────────────────────────────────
   -- Store initial state, render the island, send back rendered HTML.
 
-  pfn handle_init(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
+  pfn handle_init(ws_sock : WsSocket, msg : JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
     let module_name = json_string_field(msg, "module")
     let payload     = json_field_raw(msg, "payload")
     -- Store the island state
@@ -297,7 +293,7 @@ mod IslandSocket do
   -- ── Msg handler ─────────────────────────────────────────────────────────
   -- Look up current state, run update, store new state, render, send HTML.
 
-  pfn handle_msg(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
+  pfn handle_msg(ws_sock : WsSocket, msg : JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
     let msg_payload = json_field_raw(msg, "payload")
     match get_island(store, island_id) do
     Some(entry) -> do
@@ -308,7 +304,7 @@ mod IslandSocket do
           match handler do
           IslandHandler(_, update_fn, render_fn, _) -> do
             -- Run update: (current_state_json, msg_json) -> new_state_json
-            let new_state = update_fn(current_state, msg_payload)
+            let new_state = update_fn((current_state, msg_payload))
             -- Store updated state
             let new_store = put_island(store, island_id, IslandEntry(module_name, new_state))
             -- Render with new state
@@ -342,7 +338,7 @@ mod IslandSocket do
   -- (or server-wins if no merge function is registered).
   -- Sends back a "merge" response so the client can reconcile.
 
-  pfn handle_optimistic(ws_sock : WebSocket.WsSocket, msg : Json.JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
+  pfn handle_optimistic(ws_sock : WsSocket, msg : JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
     let client_state = json_field_raw(msg, "payload")
     match get_island(store, island_id) do
     Some(entry) -> do
@@ -354,7 +350,7 @@ mod IslandSocket do
           IslandHandler(_, _, render_fn, merge_opt) -> do
             -- Apply merge: use custom merge fn if registered, else server-wins
             let merged_state = match merge_opt do
-              Some(merge_fn) -> merge_fn(client_state, server_state)
+              Some(merge_fn) -> merge_fn((client_state, server_state))
               None           -> server_state
               end
             -- Update server state to merged result
@@ -389,31 +385,31 @@ mod IslandSocket do
 
   -- ── Response helpers ──────────────────────────────────────────────────
 
-  pfn send_render(ws_sock : WebSocket.WsSocket, island_id : String, html : String) : Unit do
+  pfn send_render(ws_sock : WsSocket, island_id : String, html : String) : Unit do
     let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"render\",\"payload\":" ++ Json.to_string(Str(html)) ++ "}"
     WebSocket.send_frame(ws_sock, TextFrame(response))
   end
 
-  pfn send_state(ws_sock : WebSocket.WsSocket, island_id : String, state_json : String) : Unit do
+  pfn send_state(ws_sock : WsSocket, island_id : String, state_json : String) : Unit do
     let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ state_json ++ "}"
     WebSocket.send_frame(ws_sock, TextFrame(response))
   end
 
-  pfn send_merge(ws_sock : WebSocket.WsSocket, island_id : String, state_json : String) : Unit do
+  pfn send_merge(ws_sock : WsSocket, island_id : String, state_json : String) : Unit do
     let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"merge\",\"payload\":" ++ state_json ++ "}"
     WebSocket.send_frame(ws_sock, TextFrame(response))
   end
 
   -- ── JSON helpers ────────────────────────────────────────────────────────
 
-  pfn json_string_field(obj : Json.JsonValue, key : String) : String do
+  pfn json_string_field(obj : JsonValue, key : String) : String do
     match Json.get(obj, key) do
     Some(Str(s)) -> s
     _            -> ""
     end
   end
 
-  pfn json_field_raw(obj : Json.JsonValue, key : String) : String do
+  pfn json_field_raw(obj : JsonValue, key : String) : String do
     match Json.get(obj, key) do
     Some(v) -> Json.to_string(v)
     None    -> "null"

@@ -51,15 +51,15 @@ mod IslandView do
 
   strategy is one of: "eager", "lazy", "idle", "interaction".
   """
-  fn island_with_strategy(name : String, state_json : String, strategy : String) : String do
-    "<div data-march-island=\"" ++ name ++ "\" data-march-hydrate=\"" ++ strategy ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'></div>"
+  fn island_with_strategy(name : String, state_json : String, strat : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-hydrate=\"" ++ strat ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'></div>"
   end
 
   doc """
   Render an island placeholder with SSR content and a hydration strategy.
   """
-  fn island_ssr_with_strategy(name : String, state_json : String, strategy : String, inner_html : String) : String do
-    "<div data-march-island=\"" ++ name ++ "\" data-march-hydrate=\"" ++ strategy ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'>" ++ inner_html ++ "</div>"
+  fn island_ssr_with_strategy(name : String, state_json : String, strat : String, inner_html : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-hydrate=\"" ++ strat ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'>" ++ inner_html ++ "</div>"
   end
 
   -- ── Script tags ─────────────────────────────────────────────────────────

@@ -26,6 +26,9 @@ mod Controller do
   import Response
   import ErrorView
 
+  -- Local alias so the type definition below can reference Conn.
+  type Conn = Conn(Map)
+
   -- What controller actions return: either a successful conn or an error
   -- with a status code and message.
   type ActionResult =

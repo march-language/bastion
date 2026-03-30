@@ -8,15 +8,15 @@ mod Islands do
   -- Hydration strategy for islands.
   type LoadStrategy = Eager | Lazy | OnVisible | OnIdle
 
-  pfn escape_attr(s) do
+  pfn escape_attr(s : String) : String do
     let s1 = String.replace(s, "&",  "&amp;")
     let s2 = String.replace(s1, "\"", "&quot;")
     let s3 = String.replace(s2, "<",  "&lt;")
     String.replace(s3, ">", "&gt;")
   end
 
-  pfn strategy_str(strategy) do
-    match strategy do
+  pfn strategy_str(strat : LoadStrategy) : String do
+    match strat do
     Eager     -> "eager"
     Lazy      -> "lazy"
     OnVisible -> "on-visible"
@@ -33,11 +33,11 @@ mod Islands do
   Example:
     Islands.wrap_with_css("Counter", Islands.Eager, "{\"count\":0}", ".c { color: red }", "<span>0</span>")
   """
-  fn wrap_with_css(name, strategy, state_json, css, ssr_html) do
+  fn wrap_with_css(name, strat, state_json, css, ssr_html) do
     let escaped_css = escape_attr(css)
     "<div"
     ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-hydrate=\"" ++ strategy_str(strategy) ++ "\""
+    ++ " data-march-hydrate=\"" ++ strategy_str(strat) ++ "\""
     ++ " data-march-state=\"" ++ escape_attr(state_json) ++ "\""
     ++ " data-march-island-css=\"" ++ escaped_css ++ "\""
     ++ ">"
