@@ -39,8 +39,8 @@ mod FallbackController do
   """
   fn call(conn : Conn, result : ActionResult) : Conn do
     match result do
-    Ok(c) -> c
-    Error(status, message) ->
+    ActionOk(c) -> c
+    ActionError(status, message) ->
       Response.html(conn, status, ErrorView.render(status, message))
     end
   end
@@ -55,8 +55,8 @@ mod FallbackController do
   """
   fn call_json(conn : Conn, result : ActionResult) : Conn do
     match result do
-    Ok(c) -> c
-    Error(status, message) -> do
+    ActionOk(c) -> c
+    ActionError(status, message) -> do
       let body = "{\"error\":{\"status\":" ++ int_to_string(status) ++
                  ",\"message\":" ++ Json.to_string(Str(message)) ++ "}}"
       Response.json(conn, status, body)
@@ -73,8 +73,8 @@ mod FallbackController do
   Example:
     let my_fallback = FallbackController.new(fn (conn, result) ->
       match result do
-      Controller.Ok(c) -> c
-      Controller.Error(status, msg) ->
+      Controller.ActionOk(c) -> c
+      Controller.ActionError(status, msg) ->
         Response.text(conn, status, msg)
       end
     )

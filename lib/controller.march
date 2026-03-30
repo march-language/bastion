@@ -29,8 +29,8 @@ mod Controller do
   -- What controller actions return: either a successful conn or an error
   -- with a status code and message.
   type ActionResult =
-    Ok(Conn)
-  | Error(Int, String)
+    ActionOk(Conn)
+  | ActionError(Int, String)
 
   doc """
   Execute a controller action with automatic error handling.
@@ -45,8 +45,8 @@ mod Controller do
   fn action(conn : Conn, handler : Conn -> ActionResult) : Conn do
     let result = handler(conn)
     match result do
-    Ok(c) -> c
-    Error(status, message) ->
+    ActionOk(c) -> c
+    ActionError(status, message) ->
       Response.html(conn, status, ErrorView.render(status, message))
     end
   end

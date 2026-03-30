@@ -321,14 +321,14 @@ mod Bastion do
     "      \"<h2>Interactive Counter (Island)</h2>\\n\" ++\n" ++
     "      \"<div data-march-island=\\\"Counter\\\" data-march-state='{\\\"count\\\":0}'></div>\"\n" ++
     "    )\n" ++
-    "    Controller.Ok(Response.html(conn, 200, html))\n" ++
+    "    Controller.ActionOk(Response.html(conn, 200, html))\n" ++
     "  end\n\n" ++
     "  fn about(conn : Conn) : Controller.ActionResult do\n" ++
     "    let html = layout(\"About\",\n" ++
     "      \"<h1>About</h1>\\n\" ++\n" ++
     "      \"<p>Built with <a href=\\\"https://github.com/march-lang/bastion\\\">Bastion</a>.</p>\"\n" ++
     "    )\n" ++
-    "    Controller.Ok(Response.html(conn, 200, html))\n" ++
+    "    Controller.ActionOk(Response.html(conn, 200, html))\n" ++
     "  end\n\n" ++
     "  -- ── Templates ──────────────────────────────────────────────────────\n\n" ++
     "  pfn layout(title : String, body : String) : String do\n" ++

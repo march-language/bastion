@@ -22,9 +22,9 @@ mod BastionServer do
   Example:
     BastionServer.start(router, Bastion.default_opts(4000))
   """
-  fn start(router : Router, opts : Bastion.Opts) : Unit do
+  fn start(router : Router, opts : Opts) : Unit do
     match opts do
-    Bastion.Opts(port, mc, it) -> do
+    Opts(port, mc, it) -> do
       let plug = Router.to_plug(router)
       HttpServer.new(port)
       |> HttpServer.max_connections(mc)
@@ -40,9 +40,9 @@ mod BastionServer do
   Returns an integer handle that can be passed to BastionServer.wait_for/1.
   Useful for integration tests — lets the test drive request count.
   """
-  fn spawn_n(router : Router, opts : Bastion.Opts, n : Int) : Int do
+  fn spawn_n(router : Router, opts : Opts, n : Int) : Int do
     match opts do
-    Bastion.Opts(port, mc, it) -> do
+    Opts(port, mc, it) -> do
       let plug = Router.to_plug(router)
       HttpServer.new(port)
       |> HttpServer.max_connections(mc)
