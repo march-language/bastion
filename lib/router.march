@@ -22,8 +22,8 @@
 --     Router.new()
 --     |> Router.fallback(fn conn -> fn result ->
 --       match result do
---       Controller.Handled(c) -> c
---       Controller.Failed(status, msg) ->
+--       Controller.Ok(c) -> c
+--       Controller.Error(status, msg) ->
 --         HttpServer.json(conn, status, "{\"error\":\"" ++ msg ++ "\"}")
 --       end
 --     )
@@ -53,8 +53,8 @@ mod Router do
   pfn default_fallback() : Fallback do
     Fallback(fn conn -> fn result ->
       match result do
-      ActionResult.Handled(c) -> c
-      ActionResult.Failed(status, message) ->
+      ActionOk(c) -> c
+      ActionError(status, message) ->
         HttpServer.html(conn, status, ErrorView.render(status, message))
       end
     )
@@ -68,7 +68,7 @@ mod Router do
   doc """
   Set the fallback handler for this router.
 
-  The fallback is called when a controller action returns Controller.Failed,
+  The fallback is called when a controller action returns Controller.Error,
   and also when no route matches (as a 404 error).
 
   Example:
@@ -76,8 +76,8 @@ mod Router do
     Router.new()
     |> Router.fallback(fn conn -> fn result ->
       match result do
-      Controller.Handled(c) -> c
-      Controller.Failed(status, msg) ->
+      Controller.ActionOk(c) -> c
+      Controller.ActionError(status, msg) ->
         HttpServer.json(conn, status, "{\"error\":\"" ++ msg ++ "\"}")
       end
     )
@@ -231,7 +231,7 @@ mod Router do
   pfn find_and_call(routes : List(Route), method : Method, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
     match routes do
     Nil ->
-      apply_fallback(fb, conn, ActionResult.Failed(404, "Not Found"))
+      apply_fallback(fb, conn, ActionError(404, "Not Found"))
     Cons(Route(m, pattern, handler), rest) ->
       try_route(m, pattern, handler, rest, method, path_segs, conn, fb)
     end

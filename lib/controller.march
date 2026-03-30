@@ -10,8 +10,8 @@
 --   fn show(conn : Conn) : Controller.ActionResult do
 --     let id_opt = Request.path_param(conn, "id")
 --     match id_opt do
---     None      -> Controller.Failed(404, "User not found")
---     Some(id)  -> Controller.Handled(Response.json(conn, 200, "{\"id\":\"" ++ id ++ "\"}"))
+--     None      -> Controller.Error(404, "User not found")
+--     Some(id)  -> Controller.Ok(Response.json(conn, 200, "{\"id\":\"" ++ id ++ "\"}"))
 --     end
 --   end
 --
@@ -29,14 +29,14 @@ mod Controller do
   -- What controller actions return: either a successful conn or an error
   -- with a status code and message.
   type ActionResult =
-    Handled(Conn)
-  | Failed(Int, String)
+    ActionOk(Conn)
+  | ActionError(Int, String)
 
   doc """
   Execute a controller action with automatic error handling.
 
-  Calls the handler function with the conn. If the handler returns Handled(conn),
-  the conn is returned as-is. If it returns Failed(status, message), an HTML
+  Calls the handler function with the conn. If the handler returns Ok(conn),
+  the conn is returned as-is. If it returns Error(status, message), an HTML
   error page is rendered using ErrorView.
 
   Example:
@@ -45,8 +45,8 @@ mod Controller do
   fn action(conn : Conn, handler : Conn -> ActionResult) : Conn do
     let result = handler(conn)
     match result do
-    Handled(c) -> c
-    Failed(status, message) ->
+    ActionOk(c) -> c
+    ActionError(status, message) ->
       Response.html(conn, status, ErrorView.render(status, message))
     end
   end

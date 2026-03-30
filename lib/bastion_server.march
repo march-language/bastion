@@ -22,13 +22,17 @@ mod BastionServer do
   Example:
     BastionServer.start(router, Bastion.default_opts(4000))
   """
-  fn start(router : Router, opts) : Unit do
-    let plug = Router.to_plug(router)
-    HttpServer.new(opts_port(opts))
-    |> HttpServer.max_connections(opts_max_connections(opts))
-    |> HttpServer.idle_timeout(opts_idle_timeout(opts))
-    |> HttpServer.plug(plug)
-    |> HttpServer.listen()
+  fn start(router : Router, opts : Opts) : Unit do
+    match opts do
+    Opts(port, mc, it) -> do
+      let plug = Router.to_plug(router)
+      HttpServer.new(port)
+      |> HttpServer.max_connections(mc)
+      |> HttpServer.idle_timeout(it)
+      |> HttpServer.plug(plug)
+      |> HttpServer.listen()
+    end
+    end
   end
 
   doc """
@@ -36,13 +40,17 @@ mod BastionServer do
   Returns an integer handle that can be passed to BastionServer.wait_for/1.
   Useful for integration tests — lets the test drive request count.
   """
-  fn spawn_n(router : Router, opts, n : Int) : Int do
-    let plug = Router.to_plug(router)
-    HttpServer.new(opts_port(opts))
-    |> HttpServer.max_connections(opts_max_connections(opts))
-    |> HttpServer.idle_timeout(opts_idle_timeout(opts))
-    |> HttpServer.plug(plug)
-    |> HttpServer.spawn_n(n)
+  fn spawn_n(router : Router, opts : Opts, n : Int) : Int do
+    match opts do
+    Opts(port, mc, it) -> do
+      let plug = Router.to_plug(router)
+      HttpServer.new(port)
+      |> HttpServer.max_connections(mc)
+      |> HttpServer.idle_timeout(it)
+      |> HttpServer.plug(plug)
+      |> HttpServer.spawn_n(n)
+    end
+    end
   end
 
   doc "Wait for a server subprocess returned by spawn_n to exit."

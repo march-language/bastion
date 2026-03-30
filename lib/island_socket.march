@@ -80,9 +80,9 @@ mod IslandSocket do
 
   type IslandHandler = IslandHandler(
     String,
-    String -> String -> String,
+    (String, String) -> String,
     String -> String,
-    Option(String -> String -> String)
+    Option((String, String) -> String)
   )
 
   type Registry = Registry(List(IslandHandler))
@@ -101,7 +101,7 @@ mod IslandSocket do
   Example:
     IslandSocket.register(registry, "Counter", counter_update, counter_render)
   """
-  fn register(reg : Registry, name : String, update_fn : String -> String -> String, render_fn : String -> String) : Registry do
+  fn register(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String) : Registry do
     match reg do
     Registry(handlers) ->
       Registry(Cons(IslandHandler(name, update_fn, render_fn, None), handlers))
@@ -114,7 +114,7 @@ mod IslandSocket do
   merge_fn takes (local_state_json, remote_state_json) and returns merged state_json.
   The default server-wins behavior is register/3; this variant enables real CRDT merges.
   """
-  fn register_with_merge(reg : Registry, name : String, update_fn : String -> String -> String, render_fn : String -> String, merge_fn : String -> String -> String) : Registry do
+  fn register_with_merge(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, merge_fn : (String, String) -> String) : Registry do
     match reg do
     Registry(handlers) ->
       Registry(Cons(IslandHandler(name, update_fn, render_fn, Some(merge_fn)), handlers))
@@ -134,9 +134,7 @@ mod IslandSocket do
     Cons(h, rest) ->
       match h do
       IslandHandler(n, _, _, _) ->
-        if n == name do Some(h)
-        else find_in_list(rest, name)
-        end
+        if n == name then Some(h) else find_in_list(rest, name)
       end
     end
   end
@@ -167,9 +165,7 @@ mod IslandSocket do
     match entries do
     Nil -> Cons((id, entry), Nil)
     Cons((k, v), rest) ->
-      if k == id do Cons((id, entry), rest)
-      else Cons((k, v), put_entry(rest, id, entry))
-      end
+      if k == id then Cons((id, entry), rest) else Cons((k, v), put_entry(rest, id, entry))
     end
   end
 
@@ -183,9 +179,7 @@ mod IslandSocket do
     match entries do
     Nil -> None
     Cons((k, v), rest) ->
-      if k == id do Some(v)
-      else get_entry(rest, id)
-      end
+      if k == id then Some(v) else get_entry(rest, id)
     end
   end
 
@@ -200,9 +194,7 @@ mod IslandSocket do
     match entries do
     Nil -> Nil
     Cons((k, v), rest) ->
-      if k == id do rest
-      else Cons((k, v), remove_entry(rest, id))
-      end
+      if k == id then rest else Cons((k, v), remove_entry(rest, id))
     end
   end
 
@@ -312,8 +304,7 @@ mod IslandSocket do
           match handler do
           IslandHandler(_, update_fn, render_fn, _) -> do
             -- Run update: (current_state_json, msg_json) -> new_state_json
-            let apply_update = update_fn(current_state)
-            let new_state = apply_update(msg_payload)
+            let new_state = update_fn((current_state, msg_payload))
             -- Store updated state
             let new_store = put_island(store, island_id, IslandEntry(module_name, new_state))
             -- Render with new state
@@ -358,7 +349,10 @@ mod IslandSocket do
           match handler do
           IslandHandler(_, _, render_fn, merge_opt) -> do
             -- Apply merge: use custom merge fn if registered, else server-wins
-            let merged_state = apply_merge(merge_opt, client_state, server_state)
+            let merged_state = match merge_opt do
+              Some(merge_fn) -> merge_fn((client_state, server_state))
+              None           -> server_state
+              end
             -- Update server state to merged result
             let new_store = put_island(store, island_id, IslandEntry(module_name, merged_state))
             -- Render with merged state and send back
@@ -404,16 +398,6 @@ mod IslandSocket do
   pfn send_merge(ws_sock : WsSocket, island_id : String, state_json : String) : Unit do
     let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"merge\",\"payload\":" ++ state_json ++ "}"
     WebSocket.send_frame(ws_sock, TextFrame(response))
-  end
-
-  pfn apply_merge(merge_opt : Option(String -> String -> String), client : String, server : String) : String do
-    match merge_opt do
-    Some(f) -> do
-      let g = f(client)
-      g(server)
-    end
-    None    -> server
-    end
   end
 
   -- ── JSON helpers ────────────────────────────────────────────────────────

@@ -43,20 +43,6 @@ mod Bastion do
     opts_port(opts)
   end
 
-  doc "Returns the max_connections from an Opts value."
-  fn opts_max_connections(opts : Opts) : Int do
-    match opts do
-    Opts(_, mc, _) -> mc
-    end
-  end
-
-  doc "Returns the idle_timeout from an Opts value."
-  fn opts_idle_timeout(opts : Opts) : Int do
-    match opts do
-    Opts(_, _, it) -> it
-    end
-  end
-
   doc "Returns a new Opts with the port replaced."
   fn with_port(opts : Opts, port : Int) : Opts do
     match opts do
@@ -326,7 +312,7 @@ mod Bastion do
     "  import Response\n\n" ++
     "  -- ── Actions ────────────────────────────────────────────────────────\n" ++
     "  -- Actions return Controller.ActionResult.  The router's fallback\n" ++
-    "  -- handles Failed results automatically — no per-handler wiring needed.\n\n" ++
+    "  -- handles Error results automatically — no per-handler wiring needed.\n\n" ++
     "  fn home(conn : Conn) : Controller.ActionResult do\n" ++
     "    let html = layout(\"Home\",\n" ++
     "      \"<h1>Welcome to " ++ pascal ++ "!</h1>\\n\" ++\n" ++
@@ -335,14 +321,14 @@ mod Bastion do
     "      \"<h2>Interactive Counter (Island)</h2>\\n\" ++\n" ++
     "      \"<div data-march-island=\\\"Counter\\\" data-march-state='{\\\"count\\\":0}'></div>\"\n" ++
     "    )\n" ++
-    "    Controller.Handled(Response.html(conn, 200, html))\n" ++
+    "    Controller.ActionOk(Response.html(conn, 200, html))\n" ++
     "  end\n\n" ++
     "  fn about(conn : Conn) : Controller.ActionResult do\n" ++
     "    let html = layout(\"About\",\n" ++
     "      \"<h1>About</h1>\\n\" ++\n" ++
     "      \"<p>Built with <a href=\\\"https://github.com/march-lang/bastion\\\">Bastion</a>.</p>\"\n" ++
     "    )\n" ++
-    "    Controller.Handled(Response.html(conn, 200, html))\n" ++
+    "    Controller.ActionOk(Response.html(conn, 200, html))\n" ++
     "  end\n\n" ++
     "  -- ── Templates ──────────────────────────────────────────────────────\n\n" ++
     "  pfn layout(title : String, body : String) : String do\n" ++

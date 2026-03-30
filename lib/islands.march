@@ -33,7 +33,7 @@ mod Islands do
   Example:
     Islands.wrap_with_css("Counter", Islands.Eager, "{\"count\":0}", ".c { color: red }", "<span>0</span>")
   """
-  fn wrap_with_css(name, strat, state_json, css, ssr_html) do
+  fn wrap_with_css(name : String, strat : LoadStrategy, state_json : String, css : String, ssr_html : String) : String do
     let escaped_css = escape_attr(css)
     "<div"
     ++ " data-march-island=\"" ++ name ++ "\""
@@ -46,7 +46,7 @@ mod Islands do
   end
 
   doc "Convenience wrapper using the Eager hydration strategy."
-  fn wrap_eager_with_css(name, state_json, css, ssr_html) do
+  fn wrap_eager_with_css(name : String, state_json : String, css : String, ssr_html : String) : String do
     wrap_with_css(name, Eager, state_json, css, ssr_html)
   end
 
