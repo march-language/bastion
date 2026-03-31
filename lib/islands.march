@@ -1,53 +1,400 @@
--- Islands — helpers for wrapping server-rendered HTML with client island metadata.
+-- Islands — hydration wrappers, registry, and dataflow helpers for Bastion WASM islands.
 --
--- Islands are interactive components that are hydrated on the client. Each island
--- includes its CSS scoped, its initial state as JSON, and its hydration strategy.
+-- Islands are interactive WASM components hydrated on the client. Each island
+-- wrapper div carries:
+--   data-march-island     — module name
+--   data-march-hydrate    — when to load the WASM module (see HydrateOn)
+--   data-march-dataflow   — "client" | "server" (see DataflowMode)
+--   data-march-state      — initial state JSON
+--   data-march-island-css — optional scoped CSS (injected into <head> on hydration)
+--   data-march-channel    — optional channel topic (Client mode, last-write-wins sync)
+--   data-march-parent     — parent island instance ID (child islands only)
+--   data-march-on-event   — event handler name on parent (child islands only)
+--
+-- Dataflow modes (spec: specs/islands-data-flow.md):
+--
+--   Client — island owns its own state, handles events locally via WASM.
+--            Optionally syncs to a channel topic (last-write-wins).
+--            No channel = purely local state.
+--
+--   Server — server owns state, client is a read-only projection.
+--            The JS runtime does NOT attach event listeners.
+--            State arrives only via the wired channel.
+--
+-- Parent-child binding:
+--
+--   Child islands carry data-march-parent (parent instance ID) and
+--   data-march-on-event (handler name). Children dispatch events upward
+--   through the JS runtime's tree-walk. There is no global send bus.
+--   Parents implement handle_child_event to receive dispatched events.
 
 mod Islands do
 
-  -- Hydration strategy for islands.
-  type LoadStrategy = Eager | Lazy | OnVisible | OnIdle
+  -- Hydration strategy — when the WASM module is loaded and the island activated.
+  type HydrateOn =
+    Eager          -- load immediately on page load
+    | Lazy         -- load after DOMContentLoaded
+    | OnIdle       -- load during requestIdleCallback
+    | OnInteraction -- load on first user interaction (click, focus, etc.)
+    | OnVisible    -- load when scrolled into view (IntersectionObserver)
 
-  pfn escape_attr(s : String) : String do
-    let s1 = String.replace(s, "&",  "&amp;")
-    let s2 = String.replace(s1, "\"", "&quot;")
-    let s3 = String.replace(s2, "<",  "&lt;")
-    String.replace(s3, ">", "&gt;")
-  end
+  -- Dataflow mode — describes who owns the island's state.
+  type DataflowMode = Server | Client
 
-  pfn strategy_str(strat : LoadStrategy) : String do
+  -- ── Hydration strategy helpers ──────────────────────────────────────────
+
+  doc "Convert a HydrateOn strategy to the data-march-hydrate attribute string."
+  fn hydrate_attr(strat : HydrateOn) : String do
     match strat do
-    Eager     -> "eager"
-    Lazy      -> "lazy"
-    OnVisible -> "on-visible"
-    OnIdle    -> "on-idle"
+    Eager         -> "eager"
+    Lazy          -> "lazy"
+    OnIdle        -> "idle"
+    OnInteraction -> "interaction"
+    OnVisible     -> "on-visible"
     end
   end
+
+  -- ── Core wrap helpers ───────────────────────────────────────────────────
+  --
+  -- The primary `wrap` function is the 4-arg form that takes only a strategy.
+  -- It defaults to Client dataflow mode (the common case).
+  --
+  -- Use wrap_with_dataflow/5 to specify an explicit DataflowMode.
+  -- Use wrap_with_channel/5 for Client islands with channel sync.
+  -- Use wrap_child/5 for islands nested inside a parent island.
 
   doc """
   Wrap server-rendered HTML with island metadata for client hydration.
 
-  Produces a <div> with data attributes that the client runtime reads to
-  hydrate the island component with the given CSS and state.
+  Defaults to Client dataflow mode. No channel wired (purely local state).
 
-  Example:
-    Islands.wrap_with_css("Counter", Islands.Eager, "{\"count\":0}", ".c { color: red }", "<span>0</span>")
+  Parameters:
+    name       — island module name (e.g. "Counter")
+    strat      — when to load the WASM module (HydrateOn)
+    state_json — initial state as JSON string
+    ssr_html   — server-rendered inner HTML (shown before WASM loads)
   """
-  fn wrap_with_css(name : String, strat : LoadStrategy, state_json : String, css : String, ssr_html : String) : String do
-    let escaped_css = escape_attr(css)
+  fn wrap(name : String, strat : HydrateOn, state_json : String, ssr_html : String) : String do
     "<div"
     ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-hydrate=\"" ++ strategy_str(strat) ++ "\""
-    ++ " data-march-state=\"" ++ escape_attr(state_json) ++ "\""
-    ++ " data-march-island-css=\"" ++ escaped_css ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
+    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
     ++ ">"
     ++ ssr_html
     ++ "</div>"
   end
 
-  doc "Convenience wrapper using the Eager hydration strategy."
+  doc "Convenience: Client-mode eager wrap."
+  fn wrap_eager(name : String, state_json : String, ssr_html : String) : String do
+    wrap(name, Eager, state_json, ssr_html)
+  end
+
+  doc """
+  Wrap with an explicit DataflowMode.
+
+  Use this when you need Server mode (read-only projection).
+  For Client mode, prefer wrap/4.
+  """
+  fn wrap_with_dataflow(name : String, mode : DataflowMode, strat : HydrateOn, state_json : String, ssr_html : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"" ++ dataflow_str(mode) ++ "\""
+    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
+    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
+    ++ ">"
+    ++ ssr_html
+    ++ "</div>"
+  end
+
+  doc """
+  Client-only island placeholder: no server-rendered inner HTML.
+
+  The island div is present in the DOM for hydration, but the visible content
+  is entirely produced by the client-side WASM render function.
+  """
+  fn client_only(name : String, strat : HydrateOn, state_json : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
+    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
+    ++ "></div>"
+  end
+
+  -- ── CSS helpers ─────────────────────────────────────────────────────────
+  --
+  -- These variants embed scoped CSS in data-march-island-css so the JS runtime
+  -- injects it into <head> on first hydration (one <style> per module).
+
+  doc """
+  Wrap with island metadata including scoped CSS.
+
+  The CSS string is HTML-escaped and embedded in the data-march-island-css
+  attribute. The JS runtime creates a <style> tag in <head> on first hydration.
+
+  Parameters:
+    name       — island module name
+    strat      — hydration strategy
+    state_json — initial state as JSON string
+    css        — scoped CSS (will be escaped for use in HTML attribute)
+    ssr_html   — server-rendered inner HTML
+  """
+  fn wrap_with_css(name : String, strat : HydrateOn, state_json : String, css : String, ssr_html : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
+    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
+    ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\""
+    ++ ">"
+    ++ ssr_html
+    ++ "</div>"
+  end
+
+  doc "Convenience: Client-mode eager wrap with scoped CSS."
   fn wrap_eager_with_css(name : String, state_json : String, css : String, ssr_html : String) : String do
     wrap_with_css(name, Eager, state_json, css, ssr_html)
+  end
+
+  -- ── Channel sync ─────────────────────────────────────────────────────────
+
+  doc """
+  Wrap a Client-mode island with a channel topic for state sync.
+
+  When a channel is wired, the JS runtime pushes new state to the channel
+  topic after each local update (last-write-wins). The channel can also push
+  state down at any time (e.g. another browser session updated state).
+
+  Use wrap/4 for purely local state with no server sync.
+
+  Parameters:
+    name          — island module name
+    strat         — hydration strategy
+    state_json    — initial state as JSON string
+    channel_topic — topic string (e.g. "counter:#{user_id}")
+    ssr_html      — server-rendered inner HTML
+  """
+  fn wrap_with_channel(name : String, strat : HydrateOn, state_json : String, channel_topic : String, ssr_html : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
+    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
+    ++ " data-march-channel=\"" ++ escape_dq(channel_topic) ++ "\""
+    ++ ">"
+    ++ ssr_html
+    ++ "</div>"
+  end
+
+  -- ── Parent-child binding ──────────────────────────────────────────────────
+
+  doc """
+  Wrap a child island slotted inside a parent island.
+
+  Children receive their initial state (props) from the parent and dispatch
+  events upward via the JS runtime's tree-walk. The parent must implement
+  handle_child_event to receive those events.
+
+  Parameters:
+    name       — child island module name
+    parent_id  — parent island's data-march-instance-id value
+    on_event   — event handler name the parent registered (via on_event= in template)
+    state_json — initial state JSON (derived from parent state)
+    ssr_html   — server-rendered inner HTML
+  """
+  fn wrap_child(name : String, parent_id : String, on_event : String, state_json : String, ssr_html : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
+    ++ " data-march-parent=\"" ++ escape_dq(parent_id) ++ "\""
+    ++ " data-march-on-event=\"" ++ escape_dq(on_event) ++ "\""
+    ++ ">"
+    ++ ssr_html
+    ++ "</div>"
+  end
+
+  doc "Wrap a child island with scoped CSS."
+  fn wrap_child_with_css(name : String, parent_id : String, on_event : String, state_json : String, css : String, ssr_html : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
+    ++ " data-march-parent=\"" ++ escape_dq(parent_id) ++ "\""
+    ++ " data-march-on-event=\"" ++ escape_dq(on_event) ++ "\""
+    ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\""
+    ++ ">"
+    ++ ssr_html
+    ++ "</div>"
+  end
+
+  doc "Convenience: Server-mode eager wrap (display-only island, no event listeners)."
+  fn wrap_server(name : String, state_json : String, ssr_html : String) : String do
+    wrap_with_dataflow(name, Server, Eager, state_json, ssr_html)
+  end
+
+  -- ── Bootstrap & preload ─────────────────────────────────────────────────
+
+  doc """
+  Generate the <script type="module"> tag that loads the island client runtime.
+
+  The runtime discovers data-march-island elements, opens the WebSocket, and
+  manages island lifecycle (hydration, event dispatch, DOM morphing).
+
+  Parameters:
+    base_url — URL prefix where island JS assets are served (e.g. "/_march/islands")
+  """
+  fn bootstrap_script(base_url : String) : String do
+    "<script type=\"module\" src=\"" ++ base_url ++ "/march-islands.js\"></script>"
+  end
+
+  doc """
+  Generate a <link rel="modulepreload"> hint for a specific island's WASM file.
+
+  Tells the browser to start fetching the WASM file early, before the runtime
+  requests it. Include one per island that appears above the fold.
+
+  Parameters:
+    base_url    — URL prefix for island assets
+    module_name — island module name (e.g. "Counter")
+  """
+  fn preload_hint(base_url : String, module_name : String) : String do
+    "<link rel=\"modulepreload\" href=\"" ++ base_url ++ "/" ++ module_name ++ ".wasm\">"
+  end
+
+  -- ── Island Registry ──────────────────────────────────────────────────────
+  --
+  -- The registry maps island module names to their WASM file paths and
+  -- hydration strategies. Typically built at app startup and used to
+  -- generate preload hints and drive the client-side WASM loader.
+
+  -- Descriptor for a registered island module.
+  --   Descriptor(name, strat, wasm_path)
+  type Descriptor = Descriptor(String, HydrateOn, String)
+
+  -- Registry is a list of Descriptors.
+  type Registry = Registry(List(Descriptor))
+
+  doc "Create an empty island registry."
+  fn empty_registry() : Registry do
+    Registry(Nil)
+  end
+
+  doc """
+  Register an island descriptor in the registry.
+
+  Example:
+    Islands.empty_registry()
+    |> Islands.register(Descriptor("Counter", Eager, "/_bastion/islands/counter.wasm"))
+    |> Islands.register(Descriptor("TodoList", Lazy, "/_bastion/islands/todo_list.wasm"))
+  """
+  fn register(reg : Registry, d : Descriptor) : Registry do
+    match reg do
+    Registry(ds) -> Registry(Cons(d, ds))
+    end
+  end
+
+  doc "Return the list of all registered island descriptors."
+  fn registry_descriptors(reg : Registry) : List(Descriptor) do
+    match reg do
+    Registry(ds) -> ds
+    end
+  end
+
+  doc """
+  Look up a registered island by module name.
+
+  Returns Some(Descriptor) if found, None otherwise.
+  """
+  fn find_island(reg : Registry, name : String) : Option(Descriptor) do
+    match reg do
+    Registry(ds) -> find_descriptor(ds, name)
+    end
+  end
+
+  pfn find_descriptor(ds : List(Descriptor), name : String) : Option(Descriptor) do
+    match ds do
+    Nil -> None
+    Cons(d, rest) ->
+      match d do
+      Descriptor(n, _, _) ->
+        if n == name do Some(d) else find_descriptor(rest, name) end
+      end
+    end
+  end
+
+  doc "Return the module name from a descriptor."
+  fn descriptor_name(d : Descriptor) : String do
+    match d do
+    Descriptor(name, _, _) -> name
+    end
+  end
+
+  doc "Return the hydration strategy from a descriptor."
+  fn descriptor_hydrate(d : Descriptor) : HydrateOn do
+    match d do
+    Descriptor(_, strat, _) -> strat
+    end
+  end
+
+  doc "Return the WASM file path from a descriptor."
+  fn descriptor_wasm_path(d : Descriptor) : String do
+    match d do
+    Descriptor(_, _, path) -> path
+    end
+  end
+
+  doc """
+  Generate a string of <link rel="modulepreload"> hints for all registered islands.
+
+  Returns an empty string if the registry is empty.
+  """
+  fn registry_preload_hints(reg : Registry, base_url : String) : String do
+    match reg do
+    Registry(ds) -> build_hints(ds, base_url, "")
+    end
+  end
+
+  pfn build_hints(ds : List(Descriptor), base_url : String, acc : String) : String do
+    match ds do
+    Nil -> acc
+    Cons(d, rest) ->
+      let hint = preload_hint(base_url, descriptor_name(d))
+      build_hints(rest, base_url, acc ++ hint)
+    end
+  end
+
+  -- ── Private helpers ─────────────────────────────────────────────────────
+
+  pfn dataflow_str(mode : DataflowMode) : String do
+    match mode do
+    Server -> "server"
+    Client -> "client"
+    end
+  end
+
+  -- escape_sq: for single-quoted HTML attributes (used for state JSON).
+  -- Only escapes & and ' since double quotes are safe inside single-quote delimiters.
+  pfn escape_sq(s : String) : String do
+    let s1 = String.replace_all(s, "&", "&amp;")
+    String.replace_all(s1, "'", "&#39;")
+  end
+
+  -- escape_dq: for double-quoted HTML attributes (CSS, channel, parent IDs, etc.).
+  -- Escapes &, ", < and >.
+  pfn escape_dq(s : String) : String do
+    let s1 = String.replace_all(s, "&",  "&amp;")
+    let s2 = String.replace_all(s1, "\"", "&quot;")
+    let s3 = String.replace_all(s2, "<",  "&lt;")
+    String.replace_all(s3, ">", "&gt;")
+  end
+
+  -- escape_attr is the legacy alias used in older call sites (double-quote escaping).
+  pfn escape_attr(s : String) : String do
+    escape_dq(s)
   end
 
 end
