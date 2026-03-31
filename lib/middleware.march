@@ -43,7 +43,7 @@ mod Middleware do
   Logs the request method and path on every request using Logger.info.
   """
   fn logger(conn : Conn) : Conn do
-    let method_str = Http.method_to_string(HttpServer.method(conn))
+    let method_str = HttpServer.method_to_string(HttpServer.method(conn))
     let path_str   = HttpServer.path(conn)
     println("${method_str} ${path_str}")
     conn
@@ -85,10 +85,10 @@ mod Middleware do
   Example:
     let only_get = Middleware.allow_methods([Get])
   """
-  fn allow_methods(allowed : List(Method)) : Conn -> Conn do
+  fn allow_methods(allowed : List(Atom)) : Conn -> Conn do
     fn conn -> do
       let m = HttpServer.method(conn)
-      match List.any(allowed, fn a -> Http.method_to_string(a) == Http.method_to_string(m)) do
+      match List.any(allowed, fn a -> a == m) do
       true  -> conn
       false -> HttpServer.text(conn, 405, "Method Not Allowed")
       end
