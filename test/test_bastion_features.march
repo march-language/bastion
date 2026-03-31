@@ -1,0 +1,864 @@
+-- test/stdlib/test_bastion_features.march
+-- Comprehensive tests for four Bastion features:
+--   1. Islands   — hydration markers, registry, CSS, bootstrap/preload
+--   2. ETags     — Bastion.Cache.etag + cache-control helpers + invalidation
+--   3. Partials  — Html.render_partial, render_collection, composition, fragment cache
+--   4. Fallback controller — router catch-all returning 404
+
+mod TestBastionFeatures do
+
+-- ── Conn helpers ───────────────────────────────────────────────────────────
+
+ptype Upgrade = NoUpgrade | WebSocketUpgrade(a)
+ptype Conn = Conn(
+  Int, Method, String, List(String), String,
+  List(Header), String, Int, List(Header), String,
+  Bool, List((String, String)), Upgrade
+)
+
+pfn make_conn(meth, path_, qs, req_hdrs, req_body) do
+  let parts = List.filter(string_split(path_, "/"), fn s -> not(string_is_empty(s)))
+  Conn(0, meth, path_, parts, qs, req_hdrs, req_body, 0, Nil, "", false, Nil, NoUpgrade)
+end
+
+pfn make_get(path_) do
+  make_conn(Get, path_, "", Cons(Header("host", "localhost"), Nil), "")
+end
+
+-- ETag helper: compute the ETag header value for a given body string.
+pfn compute_etag_for(body) do
+  let conn = make_get("/") |> HttpServer.send_resp(200, body)
+  let c2   = Bastion.Cache.etag(conn)
+  match HttpServer.get_resp_header(c2, "etag") do
+  Some(t) -> t
+  None    -> ""
+  end
+end
+
+-- Partial helpers (module-level so they can be referenced in describe blocks)
+type User = { name : String, role : String }
+
+pfn user_card_partial(user : User) : IOList do
+  ~H"<div class=\"user-card\"><span class=\"name\">${user.name}</span><span class=\"role\">${user.role}</span></div>"
+end
+
+pfn nav_item_partial(label : String) : IOList do
+  ~H"<li><a href=\"/${label}\">${label}</a></li>"
+end
+
+-- Typed wrapper for render_collection — keeps the type variable fixed to User
+pfn collect_users(items : List(User)) : IOList do
+  Html.render_collection(items, fn (u : User) -> user_card_partial(u))
+end
+
+-- Fallback controller helpers
+pfn page_index(conn) do
+  HttpServer.send_resp(conn, 200, "<h1>Home</h1>")
+end
+
+pfn page_about(conn) do
+  HttpServer.send_resp(conn, 200, "<h1>About</h1>")
+end
+
+pfn not_found(conn) do
+  HttpServer.send_resp(conn, 404, "Not Found")
+end
+
+pfn router(conn) do
+  let m = HttpServer.method(conn)
+  let p = HttpServer.path_info(conn)
+  match (m, p) do
+  (Get, []) ->
+    page_index(conn)
+  (Get, ["about"]) ->
+    page_about(conn)
+  _ ->
+    not_found(conn)
+  end
+end
+
+-- ── Islands ────────────────────────────────────────────────────────────────
+
+describe "Islands.hydrate_attr" do
+  test "Eager maps to eager" do
+    assert (Islands.hydrate_attr(Eager) == "eager")
+  end
+
+  test "Lazy maps to lazy" do
+    assert (Islands.hydrate_attr(Lazy) == "lazy")
+  end
+
+  test "OnIdle maps to idle" do
+    assert (Islands.hydrate_attr(OnIdle) == "idle")
+  end
+
+  test "OnInteraction maps to interaction" do
+    assert (Islands.hydrate_attr(OnInteraction) == "interaction")
+  end
+end
+
+describe "Islands.wrap" do
+  test "includes island name in data attribute" do
+    let html = Islands.wrap("Counter", Eager, "{\"count\":0}", "<button>0</button>")
+    assert (string_contains(html, "data-march-island=\"Counter\""))
+  end
+
+  test "includes hydration strategy attribute" do
+    let html = Islands.wrap("Counter", Lazy, "{}", "")
+    assert (string_contains(html, "data-march-hydrate=\"lazy\""))
+  end
+
+  test "includes state JSON" do
+    let html = Islands.wrap("Counter", Eager, "{\"count\":42}", "")
+    assert (string_contains(html, "{\"count\":42}"))
+  end
+
+  test "includes inner HTML" do
+    let html = Islands.wrap("Counter", Eager, "{}", "<span>hi</span>")
+    assert (string_contains(html, "<span>hi</span>"))
+  end
+
+  test "wraps in a div element" do
+    let html = Islands.wrap("Widget", Eager, "{}", "content")
+    assert (string_starts_with(html, "<div"))
+    assert (string_contains(html, "</div>"))
+  end
+
+  test "escapes single quotes in state JSON" do
+    let html = Islands.wrap("X", Eager, "{\"key\":\"it's\"}", "")
+    assert (not (string_contains(html, "it's")))
+    assert (string_contains(html, "it&#39;s"))
+  end
+
+  test "OnIdle strategy produces idle attribute" do
+    let html = Islands.wrap("Menu", OnIdle, "{}", "<ul></ul>")
+    assert (string_contains(html, "data-march-hydrate=\"idle\""))
+  end
+
+  test "OnInteraction strategy produces interaction attribute" do
+    let html = Islands.wrap("Dialog", OnInteraction, "{}", "")
+    assert (string_contains(html, "data-march-hydrate=\"interaction\""))
+  end
+end
+
+describe "Islands.wrap_eager" do
+  test "uses eager hydration strategy" do
+    let html = Islands.wrap_eager("Clock", "{}", "<time>now</time>")
+    assert (string_contains(html, "data-march-hydrate=\"eager\""))
+  end
+
+  test "includes inner HTML" do
+    let html = Islands.wrap_eager("Clock", "{}", "<time>now</time>")
+    assert (string_contains(html, "<time>now</time>"))
+  end
+
+  test "includes island name" do
+    let html = Islands.wrap_eager("Clock", "{}", "")
+    assert (string_contains(html, "data-march-island=\"Clock\""))
+  end
+end
+
+describe "Islands.client_only" do
+  test "no static inner HTML in output" do
+    let html = Islands.client_only("Spinner", OnIdle, "{}")
+    -- island div is present but with empty body
+    assert (string_contains(html, "data-march-island=\"Spinner\""))
+    assert (string_contains(html, "data-march-hydrate=\"idle\""))
+  end
+
+  test "inner content is empty" do
+    -- The only content should come from the wrapper div attributes
+    let html = Islands.client_only("Spinner", OnIdle, "{}")
+    -- Ends with an empty inner div: ></div>
+    assert (string_contains(html, "></div>"))
+  end
+
+  test "OnInteraction strategy works" do
+    let html = Islands.client_only("LazyMap", OnInteraction, "{\"zoom\":12}")
+    assert (string_contains(html, "data-march-hydrate=\"interaction\""))
+    assert (string_contains(html, "{\"zoom\":12}"))
+  end
+end
+
+describe "Islands.wrap_with_css" do
+  test "includes CSS data attribute" do
+    let html = Islands.wrap_with_css("Card", Eager, "{}", ".card { color: red; }", "<div>card</div>")
+    assert (string_contains(html, "data-march-island-css="))
+  end
+
+  test "CSS content appears in attribute" do
+    let html = Islands.wrap_with_css("Card", Eager, "{}", ".card { color: red; }", "")
+    assert (string_contains(html, ".card"))
+  end
+
+  test "includes island name" do
+    let html = Islands.wrap_with_css("Card", Eager, "{}", "", "<p>x</p>")
+    assert (string_contains(html, "data-march-island=\"Card\""))
+  end
+
+  test "includes inner HTML" do
+    let html = Islands.wrap_with_css("Card", Eager, "{}", "", "<p>content</p>")
+    assert (string_contains(html, "<p>content</p>"))
+  end
+
+  test "escapes angle brackets in CSS attribute" do
+    let html = Islands.wrap_with_css("X", Eager, "{}", ".x > p { }", "")
+    assert (string_contains(html, "&gt;"))
+  end
+
+  test "escapes ampersand in CSS attribute" do
+    let html = Islands.wrap_with_css("X", Eager, "{}", ".x &:hover { }", "")
+    assert (string_contains(html, "&amp;"))
+  end
+end
+
+describe "Islands.wrap_eager_with_css" do
+  test "uses eager strategy and includes CSS" do
+    let html = Islands.wrap_eager_with_css("Btn", "{}", ".btn { font-size: 1rem; }", "<button>ok</button>")
+    assert (string_contains(html, "data-march-hydrate=\"eager\""))
+    assert (string_contains(html, ".btn"))
+    assert (string_contains(html, "<button>ok</button>"))
+  end
+end
+
+describe "Islands.bootstrap_script" do
+  test "produces a script tag" do
+    let s = Islands.bootstrap_script("/_march/islands")
+    assert (string_contains(s, "<script"))
+    assert (string_contains(s, "</script>"))
+  end
+
+  test "is a module script" do
+    let s = Islands.bootstrap_script("/_march/islands")
+    assert (string_contains(s, "type=\"module\""))
+  end
+
+  test "references march-islands.js" do
+    let s = Islands.bootstrap_script("/_march/islands")
+    assert (string_contains(s, "march-islands.js"))
+  end
+
+  test "uses the provided base_url" do
+    let s = Islands.bootstrap_script("/custom/assets")
+    assert (string_contains(s, "/custom/assets"))
+  end
+end
+
+describe "Islands.preload_hint" do
+  test "produces a link tag" do
+    let s = Islands.preload_hint("/_march/islands", "Counter")
+    assert (string_contains(s, "<link"))
+  end
+
+  test "uses modulepreload rel" do
+    let s = Islands.preload_hint("/_march/islands", "Counter")
+    assert (string_contains(s, "modulepreload"))
+  end
+
+  test "includes island name in WASM path" do
+    let s = Islands.preload_hint("/_march/islands", "Counter")
+    assert (string_contains(s, "Counter.wasm"))
+  end
+
+  test "uses base_url as path prefix" do
+    let s = Islands.preload_hint("/assets/islands", "Widget")
+    assert (string_contains(s, "/assets/islands/Widget.wasm"))
+  end
+end
+
+describe "Islands.Registry" do
+  test "empty_registry has no descriptors" do
+    let r  = Islands.empty_registry()
+    let ds = Islands.registry_descriptors(r)
+    assert (is_nil(ds))
+  end
+
+  test "register adds a descriptor" do
+    let d = Descriptor("Counter", Eager, "/counter.wasm")
+    let r = Islands.register(Islands.empty_registry(), d)
+    assert (not (is_nil(Islands.registry_descriptors(r))))
+    assert (length(Islands.registry_descriptors(r)) == 1)
+  end
+
+  test "register accumulates multiple descriptors" do
+    let d1 = Descriptor("A", Eager, "/a.wasm")
+    let d2 = Descriptor("B", Lazy, "/b.wasm")
+    let r  = Islands.register(Islands.register(Islands.empty_registry(), d1), d2)
+    assert (length(Islands.registry_descriptors(r)) == 2)
+  end
+
+  test "find_island returns Some for registered island" do
+    let d = Descriptor("Counter", Eager, "/counter.wasm")
+    let r = Islands.register(Islands.empty_registry(), d)
+    assert (Islands.find_island(r, "Counter") != None)
+  end
+
+  test "find_island returns None for unregistered island" do
+    let r = Islands.empty_registry()
+    assert (Islands.find_island(r, "Unknown") == None)
+  end
+
+  test "find_island is case-sensitive" do
+    let d = Descriptor("Counter", Eager, "/counter.wasm")
+    let r = Islands.register(Islands.empty_registry(), d)
+    assert (Islands.find_island(r, "counter") == None)
+  end
+
+  test "descriptor_name accessor" do
+    let d = Descriptor("MyIsland", OnIdle, "/my.wasm")
+    assert (Islands.descriptor_name(d) == "MyIsland")
+  end
+
+  test "descriptor_hydrate accessor" do
+    let d = Descriptor("X", OnInteraction, "/x.wasm")
+    assert (Islands.descriptor_hydrate(d) == OnInteraction)
+  end
+
+  test "descriptor_wasm_path accessor" do
+    let d = Descriptor("Y", Eager, "/path/to/y.wasm")
+    assert (Islands.descriptor_wasm_path(d) == "/path/to/y.wasm")
+  end
+
+  test "registry_preload_hints generates hints for all islands" do
+    let d1 = Descriptor("Alpha", Eager, "/alpha.wasm")
+    let d2 = Descriptor("Beta", Eager, "/beta.wasm")
+    let r  = Islands.register(Islands.register(Islands.empty_registry(), d1), d2)
+    let h  = Islands.registry_preload_hints(r, "/_march/islands")
+    assert (string_contains(h, "Alpha.wasm"))
+    assert (string_contains(h, "Beta.wasm"))
+  end
+
+  test "registry_preload_hints empty registry returns empty string" do
+    let r = Islands.empty_registry()
+    let h = Islands.registry_preload_hints(r, "/_march/islands")
+    assert (h == "")
+  end
+end
+
+-- ── ETags ──────────────────────────────────────────────────────────────────
+
+describe "Bastion.Cache.etag: fresh response (no If-None-Match)" do
+  test "sets etag response header" do
+    let conn = make_get("/page") |> HttpServer.send_resp(200, "Hello World")
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.get_resp_header(c2, "etag") != None)
+  end
+
+  test "ETag value has 18 chars (16 hex + 2 surrounding quotes)" do
+    let conn = make_get("/") |> HttpServer.send_resp(200, "content")
+    let c2   = Bastion.Cache.etag(conn)
+    match HttpServer.get_resp_header(c2, "etag") do
+    Some(t) -> assert (string_length(t) == 18)
+    None    -> assert false
+    end
+  end
+
+  test "status is unchanged (still 200)" do
+    let conn = make_get("/") |> HttpServer.send_resp(200, "content")
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.status(c2) == 200)
+  end
+
+  test "response body is unchanged" do
+    let conn = make_get("/") |> HttpServer.send_resp(200, "my page")
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.resp_body(c2) == "my page")
+  end
+
+  test "same body produces same ETag on separate conns" do
+    let c1 = Bastion.Cache.etag(make_get("/a") |> HttpServer.send_resp(200, "shared body"))
+    let c2 = Bastion.Cache.etag(make_get("/b") |> HttpServer.send_resp(200, "shared body"))
+    assert (HttpServer.get_resp_header(c1, "etag") == HttpServer.get_resp_header(c2, "etag"))
+  end
+
+  test "different bodies produce different ETags" do
+    let c1 = Bastion.Cache.etag(make_get("/") |> HttpServer.send_resp(200, "page version A"))
+    let c2 = Bastion.Cache.etag(make_get("/") |> HttpServer.send_resp(200, "page version B"))
+    let t1 = HttpServer.get_resp_header(c1, "etag")
+    let t2 = HttpServer.get_resp_header(c2, "etag")
+    assert (t1 != t2)
+  end
+
+  test "empty body gets an ETag" do
+    let conn = make_get("/") |> HttpServer.send_resp(200, "")
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.get_resp_header(c2, "etag") != None)
+  end
+end
+
+describe "Bastion.Cache.etag: 304 short-circuit" do
+  test "returns 304 when If-None-Match matches ETag" do
+    let body = "the page body"
+    let tag  = compute_etag_for(body)
+    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+               |> HttpServer.send_resp(200, body)
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.status(c2) == 304)
+  end
+
+  test "304 response body is empty" do
+    let body = "page content"
+    let tag  = compute_etag_for(body)
+    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+               |> HttpServer.send_resp(200, body)
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.resp_body(c2) == "")
+  end
+
+  test "304 conn is halted" do
+    let body = "data"
+    let tag  = compute_etag_for(body)
+    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+               |> HttpServer.send_resp(200, body)
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.halted(c2))
+  end
+
+  test "ETag header is still set on 304 response" do
+    let body = "data"
+    let tag  = compute_etag_for(body)
+    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+               |> HttpServer.send_resp(200, body)
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.get_resp_header(c2, "etag") != None)
+  end
+
+  test "no 304 when If-None-Match does not match" do
+    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", "\"stale-etag\""), Nil), "")
+               |> HttpServer.send_resp(200, "fresh body")
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.status(c2) == 200)
+  end
+
+  test "no 304 when If-None-Match is absent" do
+    let conn = make_get("/") |> HttpServer.send_resp(200, "any body")
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.status(c2) == 200)
+  end
+
+  test "304 with empty body still produces matching ETag" do
+    let body = ""
+    let tag  = compute_etag_for(body)
+    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+               |> HttpServer.send_resp(200, body)
+    let c2   = Bastion.Cache.etag(conn)
+    assert (HttpServer.status(c2) == 304)
+  end
+end
+
+describe "Bastion.Cache.cache_control" do
+  test "sets Cache-Control header" do
+    let conn = Bastion.Cache.cache_control(make_get("/"), "public, max-age=3600")
+    let h    = HttpServer.get_resp_header(conn, "cache-control")
+    assert (h != None)
+  end
+
+  test "Cache-Control value is verbatim" do
+    let conn = Bastion.Cache.cache_control(make_get("/"), "public, max-age=3600")
+    match HttpServer.get_resp_header(conn, "cache-control") do
+    Some(v) -> assert (v == "public, max-age=3600")
+    None    -> assert false
+    end
+  end
+
+  test "arbitrary directive string is accepted" do
+    let conn = Bastion.Cache.cache_control(make_get("/"), "private, no-store")
+    match HttpServer.get_resp_header(conn, "cache-control") do
+    Some(v) -> assert (string_contains(v, "private"))
+    None    -> assert false
+    end
+  end
+end
+
+describe "Bastion.Cache.no_cache" do
+  test "sets Cache-Control header" do
+    let conn = Bastion.Cache.no_cache(make_get("/"))
+    assert (HttpServer.get_resp_header(conn, "cache-control") != None)
+  end
+
+  test "includes no-store directive" do
+    let conn = Bastion.Cache.no_cache(make_get("/"))
+    match HttpServer.get_resp_header(conn, "cache-control") do
+    Some(v) -> assert (string_contains(v, "no-store"))
+    None    -> assert false
+    end
+  end
+
+  test "includes no-cache directive" do
+    let conn = Bastion.Cache.no_cache(make_get("/"))
+    match HttpServer.get_resp_header(conn, "cache-control") do
+    Some(v) -> assert (string_contains(v, "no-cache"))
+    None    -> assert false
+    end
+  end
+
+  test "includes must-revalidate directive" do
+    let conn = Bastion.Cache.no_cache(make_get("/"))
+    match HttpServer.get_resp_header(conn, "cache-control") do
+    Some(v) -> assert (string_contains(v, "must-revalidate"))
+    None    -> assert false
+    end
+  end
+end
+
+describe "Bastion.Cache.public_cache" do
+  test "sets Cache-Control header" do
+    let conn = Bastion.Cache.public_cache(make_get("/"), 3600)
+    assert (HttpServer.get_resp_header(conn, "cache-control") != None)
+  end
+
+  test "includes public directive" do
+    let conn = Bastion.Cache.public_cache(make_get("/"), 3600)
+    match HttpServer.get_resp_header(conn, "cache-control") do
+    Some(v) -> assert (string_contains(v, "public"))
+    None    -> assert false
+    end
+  end
+
+  test "includes correct max-age value" do
+    let conn = Bastion.Cache.public_cache(make_get("/"), 86400)
+    match HttpServer.get_resp_header(conn, "cache-control") do
+    Some(v) -> assert (string_contains(v, "86400"))
+    None    -> assert false
+    end
+  end
+
+  test "max-age=0 is accepted" do
+    let conn = Bastion.Cache.public_cache(make_get("/"), 0)
+    match HttpServer.get_resp_header(conn, "cache-control") do
+    Some(v) -> assert (string_contains(v, "max-age=0"))
+    None    -> assert false
+    end
+  end
+end
+
+describe "Bastion.Cache.invalidate" do
+  test "removes a key from a named vault table" do
+    let tbl = Vault.new("test_bf_invalidate_1")
+    Vault.set(tbl, "foo", "bar")
+    assert (Vault.get(tbl, "foo") != None)
+    Bastion.Cache.invalidate("test_bf_invalidate_1", "foo")
+    assert (Vault.get(tbl, "foo") == None)
+  end
+
+  test "no-op for a nonexistent table does not panic" do
+    Bastion.Cache.invalidate("test_bf_nonexistent_table_xyz", "any_key")
+    assert true
+  end
+
+  test "removing absent key from existing table is a no-op" do
+    let tbl = Vault.new("test_bf_invalidate_2")
+    Vault.set(tbl, "present", "value")
+    Bastion.Cache.invalidate("test_bf_invalidate_2", "absent")
+    assert (Vault.get(tbl, "present") != None)
+  end
+end
+
+describe "Bastion.Cache.invalidate_prefix" do
+  test "removes all keys with the given prefix" do
+    let tbl = Vault.new("test_bf_inv_prefix_1")
+    Vault.set(tbl, "user:42:posts", "v1")
+    Vault.set(tbl, "user:42:comments", "v2")
+    Vault.set(tbl, "user:99:posts", "v3")
+    Bastion.Cache.invalidate_prefix("test_bf_inv_prefix_1", "user:42:")
+    assert (Vault.get(tbl, "user:42:posts") == None)
+    assert (Vault.get(tbl, "user:42:comments") == None)
+  end
+
+  test "keeps keys that do not match prefix" do
+    let tbl = Vault.new("test_bf_inv_prefix_2")
+    Vault.set(tbl, "user:42:posts", "gone")
+    Vault.set(tbl, "user:99:posts", "kept")
+    Bastion.Cache.invalidate_prefix("test_bf_inv_prefix_2", "user:42:")
+    assert (Vault.get(tbl, "user:99:posts") != None)
+  end
+
+  test "no-op for nonexistent table" do
+    Bastion.Cache.invalidate_prefix("test_bf_no_table_xyz_123", "prefix:")
+    assert true
+  end
+end
+
+-- ── Partials ───────────────────────────────────────────────────────────────
+
+describe "partials: Html.render_partial with records" do
+  test "renders user card with correct name" do
+    let user   = { name = "Alice", role = "admin" }
+    let result = Html.render_partial(fn u -> user_card_partial(u), user)
+    assert (string_contains(IOList.to_string(result), "Alice"))
+  end
+
+  test "renders user card with correct role" do
+    let user   = { name = "Alice", role = "admin" }
+    let result = Html.render_partial(fn u -> user_card_partial(u), user)
+    assert (string_contains(IOList.to_string(result), "admin"))
+  end
+
+  test "partial escapes unsafe content in name" do
+    let user   = { name = "<script>xss</script>", role = "guest" }
+    let result = Html.render_partial(fn u -> user_card_partial(u), user)
+    let s      = IOList.to_string(result)
+    assert (not (string_contains(s, "<script>")))
+    assert (string_contains(s, "&lt;script&gt;"))
+  end
+
+  test "partial escapes unsafe content in role" do
+    let user   = { name = "Bob", role = "a & b" }
+    let result = Html.render_partial(fn u -> user_card_partial(u), user)
+    let s      = IOList.to_string(result)
+    assert (string_contains(s, "a &amp; b"))
+  end
+
+  test "render_partial returns IOList" do
+    let user   = { name = "Carol", role = "editor" }
+    let result = Html.render_partial(fn u -> user_card_partial(u), user)
+    -- Embedding in ~H must not double-escape
+    let page   = ~H"<section>${result}</section>"
+    assert (string_contains(IOList.to_string(page), "Carol"))
+  end
+end
+
+describe "partials: Html.render_collection with records" do
+  test "renders all items in collection" do
+    let users = [
+      { name = "Alice", role = "admin" },
+      { name = "Bob",   role = "user"  },
+      { name = "Carol", role = "mod"   }
+    ]
+    let result = collect_users(users)
+    let s      = IOList.to_string(result)
+    assert (string_contains(s, "Alice"))
+    assert (string_contains(s, "Bob"))
+    assert (string_contains(s, "Carol"))
+  end
+
+  test "escapes XSS content in name and role fields" do
+    let users  = [
+      { name = "A & B",        role = "user" },
+      { name = "<em>C</em>",   role = "user" }
+    ]
+    let result = collect_users(users)
+    let s      = IOList.to_string(result)
+    assert (string_contains(s, "A &amp; B"))
+    assert (string_contains(s, "&lt;em&gt;"))
+  end
+
+  test "empty collection returns empty IOList" do
+    let result = collect_users([])
+    assert (IOList.to_string(result) == "")
+  end
+
+  test "single-element collection renders correctly" do
+    let result = collect_users([{ name = "Solo", role = "admin" }])
+    assert (string_contains(IOList.to_string(result), "Solo"))
+  end
+end
+
+describe "partials: composition" do
+  test "partial embedded in layout" do
+    let user   = { name = "Carol", role = "editor" }
+    let card   = user_card_partial(user)
+    let layout = Html.layout("Profile", IOList.empty(), card)
+    let s      = IOList.to_string(layout)
+    assert (string_contains(s, "<!DOCTYPE html>"))
+    assert (string_contains(s, "Carol"))
+    assert (string_contains(s, "editor"))
+  end
+
+  test "partial embedded in ~H does not double-escape" do
+    let user    = { name = "Dave <CEO>", role = "admin" }
+    let card    = user_card_partial(user)
+    let wrapper = ~H"<section>${card}</section>"
+    let s       = IOList.to_string(wrapper)
+    -- <CEO> escaped once by ~H in the partial; must NOT be double-escaped
+    assert (string_contains(s, "&lt;CEO&gt;"))
+    assert (not (string_contains(s, "&amp;lt;")))
+  end
+
+  test "render_collection inside layout" do
+    let users   = [
+      { name = "Alice", role = "admin"  },
+      { name = "Bob",   role = "editor" }
+    ]
+    let cards   = collect_users(users)
+    let page    = Html.layout("Users", IOList.empty(), cards)
+    let s       = IOList.to_string(page)
+    assert (string_contains(s, "<!DOCTYPE html>"))
+    assert (string_contains(s, "Alice"))
+    assert (string_contains(s, "Bob"))
+  end
+
+  test "nav_item_partial generates link" do
+    let result = nav_item_partial("home")
+    let s      = IOList.to_string(result)
+    assert (string_contains(s, "<a"))
+    assert (string_contains(s, "home"))
+  end
+
+  test "nested partials compose without double-escaping" do
+    let inner = Html.render_partial(fn n -> ~H"<b>${n}</b>", "World <3")
+    let outer = ~H"<p>${inner}</p>"
+    let s     = IOList.to_string(outer)
+    assert (string_contains(s, "<b>World &lt;3</b>"))
+    assert (not (string_contains(s, "&amp;lt;")))
+  end
+
+  test "Html.tag with partial content" do
+    let user    = { name = "Eve", role = "guest" }
+    let card    = user_card_partial(user)
+    let wrapped = Html.tag("article", [("class", "profile")], card)
+    let s       = IOList.to_string(wrapped)
+    assert (string_contains(s, "<article class=\"profile\">"))
+    assert (string_contains(s, "Eve"))
+    assert (string_contains(s, "</article>"))
+  end
+end
+
+describe "partials: Bastion.Cache.fragment" do
+  test "fragment runs generator on cache miss" do
+    let result = Bastion.Cache.fragment("test_bf_frag_miss_1", 0, fn () -> IOList.from_string("<p>Hello</p>"))
+    assert (IOList.to_string(result) == "<p>Hello</p>")
+  end
+
+  test "fragment returns cached result on hit" do
+    -- Seed the cache
+    Bastion.Cache.fragment("test_bf_frag_hit_1", 0, fn () -> IOList.from_string("first"))
+    -- Second call must return cached value, not call generator again
+    let result = Bastion.Cache.fragment("test_bf_frag_hit_1", 0, fn () -> IOList.from_string("second"))
+    assert (IOList.to_string(result) == "first")
+  end
+
+  test "different keys cache independently" do
+    Bastion.Cache.fragment("test_bf_frag_keys_a", 0, fn () -> IOList.from_string("A"))
+    Bastion.Cache.fragment("test_bf_frag_keys_b", 0, fn () -> IOList.from_string("B"))
+    let ra = Bastion.Cache.fragment("test_bf_frag_keys_a", 0, fn () -> IOList.from_string("X"))
+    let rb = Bastion.Cache.fragment("test_bf_frag_keys_b", 0, fn () -> IOList.from_string("X"))
+    assert (IOList.to_string(ra) == "A")
+    assert (IOList.to_string(rb) == "B")
+  end
+
+  test "fragment result is safe to embed in ~H without double-escaping" do
+    Bastion.Cache.fragment("test_bf_frag_safe_1", 0, fn () -> ~H"<em>cached item</em>")
+    let frag = Bastion.Cache.fragment("test_bf_frag_safe_1", 0, fn () -> IOList.empty())
+    let page = ~H"<div>${frag}</div>"
+    assert (IOList.to_string(page) == "<div><em>cached item</em></div>")
+  end
+
+  test "cache invalidate clears fragment so next call regenerates" do
+    Bastion.Cache.fragment("test_bf_frag_inv_1", 0, fn () -> IOList.from_string("old"))
+    Bastion.Cache.invalidate("fragment_cache", "test_bf_frag_inv_1")
+    let result = Bastion.Cache.fragment("test_bf_frag_inv_1", 0, fn () -> IOList.from_string("new"))
+    assert (IOList.to_string(result) == "new")
+  end
+end
+
+-- ── Fallback controller ────────────────────────────────────────────────────
+
+describe "fallback controller: known routes" do
+  test "GET / returns 200" do
+    let c2 = router(make_get("/"))
+    assert (HttpServer.status(c2) == 200)
+  end
+
+  test "GET / returns Home in body" do
+    let c2 = router(make_get("/"))
+    assert (string_contains(HttpServer.resp_body(c2), "Home"))
+  end
+
+  test "GET /about returns 200" do
+    let c2 = router(make_get("/about"))
+    assert (HttpServer.status(c2) == 200)
+  end
+
+  test "GET /about returns About in body" do
+    let c2 = router(make_get("/about"))
+    assert (string_contains(HttpServer.resp_body(c2), "About"))
+  end
+
+  test "known routes are halted after response" do
+    let c2 = router(make_get("/"))
+    assert (HttpServer.halted(c2))
+  end
+end
+
+describe "fallback controller: 404 for unknown routes" do
+  test "GET /missing returns 404" do
+    let c2 = router(make_get("/missing"))
+    assert (HttpServer.status(c2) == 404)
+  end
+
+  test "GET /a/b/c returns 404" do
+    let c2 = router(make_get("/a/b/c"))
+    assert (HttpServer.status(c2) == 404)
+  end
+
+  test "GET /about/sub returns 404 (only exact /about is registered)" do
+    let c2 = router(make_get("/about/sub"))
+    assert (HttpServer.status(c2) == 404)
+  end
+
+  test "fallback body is Not Found" do
+    let c2 = router(make_get("/no-such-page"))
+    assert (HttpServer.resp_body(c2) == "Not Found")
+  end
+
+  test "fallback conn is halted" do
+    let c2 = router(make_get("/nope"))
+    assert (HttpServer.halted(c2))
+  end
+
+  test "root-level unknown segment returns 404" do
+    let c2 = router(make_get("/users"))
+    assert (HttpServer.status(c2) == 404)
+  end
+end
+
+describe "fallback controller: wrong HTTP method falls through" do
+  test "POST / falls through to 404 (only GET / is registered)" do
+    let conn = make_conn(Post, "/", "", Cons(Header("host", "localhost"), Nil), "")
+    let c2   = router(conn)
+    assert (HttpServer.status(c2) == 404)
+  end
+
+  test "Put /about falls through to 404" do
+    let conn = make_conn(Put, "/about", "", Cons(Header("host", "localhost"), Nil), "")
+    let c2   = router(conn)
+    assert (HttpServer.status(c2) == 404)
+  end
+
+  test "Delete /about falls through to 404" do
+    let conn = make_conn(Delete, "/about", "", Cons(Header("host", "localhost"), Nil), "")
+    let c2   = router(conn)
+    assert (HttpServer.status(c2) == 404)
+  end
+end
+
+describe "fallback controller: pipeline halting" do
+  test "halted conn skips subsequent plugs in run_pipeline" do
+    let halted_conn = not_found(make_get("/gone"))
+    -- Even if we add a page_index plug, it should be skipped
+    let plugs = Cons(fn c -> page_index(c), Nil)
+    let final = HttpServer.run_pipeline(halted_conn, plugs)
+    -- Status must remain 404, not be overwritten by page_index
+    assert (HttpServer.status(final) == 404)
+  end
+
+  test "non-halted conn runs plugs in pipeline" do
+    let conn  = make_get("/")
+    let plugs = Cons(fn c -> page_index(c), Nil)
+    let final = HttpServer.run_pipeline(conn, plugs)
+    assert (HttpServer.status(final) == 200)
+  end
+
+  test "fallback after etag gives 304 when matching ETag" do
+    let body    = "<h1>Home</h1>"
+    let tag     = compute_etag_for(body)
+    let conn    = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+    -- Route through router, then apply etag
+    let routed  = router(conn)
+    let final   = Bastion.Cache.etag(routed)
+    assert (HttpServer.status(final) == 304)
+  end
+end
+
+end
