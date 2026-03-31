@@ -1,65 +1,221 @@
 -- IslandView — template helpers for embedding islands in server-rendered HTML.
 --
--- Use these functions in your controller templates to render island placeholders
--- and include the client runtime scripts.
+-- Use these functions in controller templates to render island wrappers and
+-- include the client runtime scripts.
+--
+-- Dataflow modes:
+--   island_server/2  — Server-mode island (read-only, no event listeners)
+--   island/2         — Client-mode island (owns its state, handles events)
+--   island_ssr/3     — Client-mode with server-rendered inner HTML
+--
+-- Channel sync (Client mode only):
+--   island_with_channel/3   — wire up a channel topic; state syncs after each update
+--
+-- Parent-child binding:
+--   island_child/4      — child island slotted inside a parent
+--   island_child_ssr/5  — child island with server-rendered initial HTML
+--
+-- Hydration strategy variants:
+--   island_with_strategy/3   — specify eager/lazy/on-visible/on-idle
+--   island_ssr_with_strategy/4
 --
 -- Example (in a controller template):
 --
---   let counter_html = IslandView.island("Counter", "{\"count\":0}")
+--   let counter_html = IslandView.island_ssr("Counter", "{\"count\":0}", Counter.render("{\"count\":0}"))
 --   let scripts      = IslandView.scripts()
 --   "<html><body>" ++ counter_html ++ scripts ++ "</body></html>"
 --
--- For server-side rendered islands with initial HTML:
---
---   let inner = Counter.render("{\"count\":0}")
---   let html  = IslandView.island_ssr("Counter", "{\"count\":0}", inner)
---
--- See also: island_socket.march, island_assets.march, stdlib/islands.march.
+-- See also: island_socket.march, island_assets.march, islands.march.
 
 mod IslandView do
 
-  -- ── Island placeholders ─────────────────────────────────────────────────
+  -- ── Server-mode islands ──────────────────────────────────────────────────
+  --
+  -- Server-mode islands are read-only projections. The JS runtime does NOT
+  -- attach event listeners. State arrives only via the wired channel.
 
   doc """
-  Render an island placeholder div with initial state.
+  Render a Server-mode island placeholder.
 
-  The client JS runtime discovers elements with data-march-island and hydrates
-  them.  State is embedded in a single-quoted data-march-state attribute.
+  The JS runtime will not attach any event listeners to this island.
+  Use Server mode for display-only islands like live feeds, scoreboards, etc.
+  """
+  fn island_server(name : String, state_json : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"server\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ "></div>"
+  end
 
-  Example:
-    IslandView.island("Counter", "{\"count\":0}")
+  doc """
+  Render a Server-mode island with server-rendered inner HTML.
+
+  The inner_html is shown immediately; the JS runtime takes over on hydration
+  and patches the DOM as the server pushes new state.
+  """
+  fn island_server_ssr(name : String, state_json : String, inner_html : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"server\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ ">"
+    ++ inner_html
+    ++ "</div>"
+  end
+
+  -- ── Client-mode islands ──────────────────────────────────────────────────
+  --
+  -- Client-mode islands own their state. Events are handled locally.
+  -- Optional: wire up a channel topic to sync state after each update.
+
+  doc """
+  Render a Client-mode island placeholder with initial state.
+
+  The JS runtime attaches event listeners and routes data-on-* events
+  to the island's local update function.
   """
   fn island(name : String, state_json : String) : String do
-    "<div data-march-island=\"" ++ name ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'></div>"
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ "></div>"
   end
 
   doc """
-  Render an island placeholder with server-side rendered initial HTML inside.
+  Render a Client-mode island with server-rendered initial HTML.
 
-  The inner_html is displayed immediately while the client runtime loads. On
-  hydration the runtime takes over and patches the DOM as needed.
-
-  Example:
-    IslandView.island_ssr("Counter", "{\"count\":0}", Counter.render("{\"count\":0}"))
+  The inner_html is displayed immediately while the WASM module loads.
+  On hydration the runtime takes over and patches the DOM as state changes.
   """
   fn island_ssr(name : String, state_json : String, inner_html : String) : String do
-    "<div data-march-island=\"" ++ name ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'>" ++ inner_html ++ "</div>"
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ ">"
+    ++ inner_html
+    ++ "</div>"
   end
 
   doc """
-  Render an island placeholder with a hydration strategy.
+  Render a Client-mode island wired to a channel for state sync.
 
-  strategy is one of: "eager", "lazy", "idle", "interaction".
+  After each local update, the JS runtime pushes the new state JSON to the
+  channel topic. The channel can push state down at any time (last-write-wins).
+
+  Without a channel, use island/2 for purely local state.
+
+  Example:
+    IslandView.island_with_channel("Counter", state_json, "counter:#{user_id}")
+  """
+  fn island_with_channel(name : String, state_json : String, channel_topic : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ " data-march-channel=\"" ++ escape_attr(channel_topic) ++ "\""
+    ++ "></div>"
+  end
+
+  doc """
+  Render a Client-mode island with SSR content wired to a channel.
+  """
+  fn island_ssr_with_channel(name : String, state_json : String, channel_topic : String, inner_html : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ " data-march-channel=\"" ++ escape_attr(channel_topic) ++ "\""
+    ++ ">"
+    ++ inner_html
+    ++ "</div>"
+  end
+
+  -- ── Child islands ────────────────────────────────────────────────────────
+  --
+  -- Child islands are slotted inside a parent island. The parent is the source
+  -- of truth for the child's props. Children dispatch events upward via the
+  -- runtime's internal tree-walk (not the old global send bus).
+  --
+  -- The parent must implement handle_child_event to receive dispatched events.
+  -- The on_event name here must match the name the parent registered.
+
+  doc """
+  Render a child island placeholder slotted inside a parent.
+
+  The JS runtime uses data-march-parent to walk up the tree when the child
+  dispatches an event. The parent's handle_child_event is called with the
+  event name and payload JSON.
+
+  Parameters:
+    name      — child island module name
+    parent_id — parent's data-march-instance-id value
+    on_event  — event handler name registered on the parent (via on_event= in template)
+    state_json — initial state JSON (derived from parent state, pushed by parent)
+  """
+  fn island_child(name : String, parent_id : String, on_event : String, state_json : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ " data-march-parent=\"" ++ escape_attr(parent_id) ++ "\""
+    ++ " data-march-on-event=\"" ++ escape_attr(on_event) ++ "\""
+    ++ "></div>"
+  end
+
+  doc """
+  Render a child island with server-rendered initial HTML.
+  """
+  fn island_child_ssr(name : String, parent_id : String, on_event : String, state_json : String, inner_html : String) : String do
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"eager\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ " data-march-parent=\"" ++ escape_attr(parent_id) ++ "\""
+    ++ " data-march-on-event=\"" ++ escape_attr(on_event) ++ "\""
+    ++ ">"
+    ++ inner_html
+    ++ "</div>"
+  end
+
+  -- ── Hydration strategy variants ──────────────────────────────────────────
+
+  doc """
+  Render a Client-mode island placeholder with a hydration strategy.
+
+  strategy is one of: "eager", "lazy", "on-visible", "on-idle".
   """
   fn island_with_strategy(name : String, state_json : String, strat : String) : String do
-    "<div data-march-island=\"" ++ name ++ "\" data-march-hydrate=\"" ++ strat ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'></div>"
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"" ++ strat ++ "\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ "></div>"
   end
 
   doc """
-  Render an island placeholder with SSR content and a hydration strategy.
+  Render a Client-mode island with SSR content and a hydration strategy.
   """
   fn island_ssr_with_strategy(name : String, state_json : String, strat : String, inner_html : String) : String do
-    "<div data-march-island=\"" ++ name ++ "\" data-march-hydrate=\"" ++ strat ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'>" ++ inner_html ++ "</div>"
+    "<div"
+    ++ " data-march-island=\"" ++ name ++ "\""
+    ++ " data-march-dataflow=\"client\""
+    ++ " data-march-hydrate=\"" ++ strat ++ "\""
+    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
+    ++ ">"
+    ++ inner_html
+    ++ "</div>"
   end
 
   -- ── Script tags ─────────────────────────────────────────────────────────
@@ -89,7 +245,7 @@ mod IslandView do
   Generate the WebSocket connection script tag.
 
   This script connects to the island WebSocket endpoint and wires up
-  the bidirectional message loop.  Include after scripts().
+  the bidirectional message loop. Include after scripts().
   """
   fn ws_scripts() : String do
     "<script src=\"/_bastion/islands-ws.js\"></script>"
@@ -104,8 +260,7 @@ mod IslandView do
 
   -- ── Internal helpers ────────────────────────────────────────────────────
 
-  -- Escape single-quote characters so JSON can be safely embedded in a
-  -- single-quoted HTML attribute (data-march-state='...').
+  -- Escape characters that would break a single-quoted HTML attribute.
   pfn escape_attr(s : String) : String do
     let s1 = String.replace_all(s, "&", "&amp;")
     let s2 = String.replace_all(s1, "'", "&#39;")

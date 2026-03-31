@@ -11,7 +11,7 @@ mod TestBastionFeatures do
 
 ptype Upgrade = NoUpgrade | WebSocketUpgrade(a)
 ptype Conn = Conn(
-  Int, Method, String, List(String), String,
+  Int, Atom, String, List(String), String,
   List(Header), String, Int, List(Header), String,
   Bool, List((String, String)), Upgrade
 )
@@ -22,7 +22,7 @@ pfn make_conn(meth, path_, qs, req_hdrs, req_body) do
 end
 
 pfn make_get(path_) do
-  make_conn(Get, path_, "", Cons(Header("host", "localhost"), Nil), "")
+  make_conn(:get, path_, "", Cons(Header("host", "localhost"), Nil), "")
 end
 
 -- ETag helper: compute the ETag header value for a given body string.
@@ -68,9 +68,9 @@ pfn router(conn) do
   let m = HttpServer.method(conn)
   let p = HttpServer.path_info(conn)
   match (m, p) do
-  (Get, []) ->
+  (:get, Nil) ->
     page_index(conn)
-  (Get, ["about"]) ->
+  (:get, Cons("about", Nil)) ->
     page_about(conn)
   _ ->
     not_found(conn)
@@ -390,7 +390,7 @@ describe "Bastion.Cache.etag: 304 short-circuit" do
   test "returns 304 when If-None-Match matches ETag" do
     let body = "the page body"
     let tag  = compute_etag_for(body)
-    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+    let conn = make_conn(:get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
                |> HttpServer.send_resp(200, body)
     let c2   = Bastion.Cache.etag(conn)
     assert (HttpServer.status(c2) == 304)
@@ -399,7 +399,7 @@ describe "Bastion.Cache.etag: 304 short-circuit" do
   test "304 response body is empty" do
     let body = "page content"
     let tag  = compute_etag_for(body)
-    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+    let conn = make_conn(:get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
                |> HttpServer.send_resp(200, body)
     let c2   = Bastion.Cache.etag(conn)
     assert (HttpServer.resp_body(c2) == "")
@@ -408,7 +408,7 @@ describe "Bastion.Cache.etag: 304 short-circuit" do
   test "304 conn is halted" do
     let body = "data"
     let tag  = compute_etag_for(body)
-    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+    let conn = make_conn(:get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
                |> HttpServer.send_resp(200, body)
     let c2   = Bastion.Cache.etag(conn)
     assert (HttpServer.halted(c2))
@@ -417,14 +417,14 @@ describe "Bastion.Cache.etag: 304 short-circuit" do
   test "ETag header is still set on 304 response" do
     let body = "data"
     let tag  = compute_etag_for(body)
-    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+    let conn = make_conn(:get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
                |> HttpServer.send_resp(200, body)
     let c2   = Bastion.Cache.etag(conn)
     assert (HttpServer.get_resp_header(c2, "etag") != None)
   end
 
   test "no 304 when If-None-Match does not match" do
-    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", "\"stale-etag\""), Nil), "")
+    let conn = make_conn(:get, "/", "", Cons(Header("if-none-match", "\"stale-etag\""), Nil), "")
                |> HttpServer.send_resp(200, "fresh body")
     let c2   = Bastion.Cache.etag(conn)
     assert (HttpServer.status(c2) == 200)
@@ -439,7 +439,7 @@ describe "Bastion.Cache.etag: 304 short-circuit" do
   test "304 with empty body still produces matching ETag" do
     let body = ""
     let tag  = compute_etag_for(body)
-    let conn = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+    let conn = make_conn(:get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
                |> HttpServer.send_resp(200, body)
     let c2   = Bastion.Cache.etag(conn)
     assert (HttpServer.status(c2) == 304)
@@ -815,19 +815,19 @@ end
 
 describe "fallback controller: wrong HTTP method falls through" do
   test "POST / falls through to 404 (only GET / is registered)" do
-    let conn = make_conn(Post, "/", "", Cons(Header("host", "localhost"), Nil), "")
+    let conn = make_conn(:post, "/", "", Cons(Header("host", "localhost"), Nil), "")
     let c2   = router(conn)
     assert (HttpServer.status(c2) == 404)
   end
 
   test "Put /about falls through to 404" do
-    let conn = make_conn(Put, "/about", "", Cons(Header("host", "localhost"), Nil), "")
+    let conn = make_conn(:put, "/about", "", Cons(Header("host", "localhost"), Nil), "")
     let c2   = router(conn)
     assert (HttpServer.status(c2) == 404)
   end
 
   test "Delete /about falls through to 404" do
-    let conn = make_conn(Delete, "/about", "", Cons(Header("host", "localhost"), Nil), "")
+    let conn = make_conn(:delete, "/about", "", Cons(Header("host", "localhost"), Nil), "")
     let c2   = router(conn)
     assert (HttpServer.status(c2) == 404)
   end
@@ -853,7 +853,7 @@ describe "fallback controller: pipeline halting" do
   test "fallback after etag gives 304 when matching ETag" do
     let body    = "<h1>Home</h1>"
     let tag     = compute_etag_for(body)
-    let conn    = make_conn(Get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
+    let conn    = make_conn(:get, "/", "", Cons(Header("if-none-match", tag), Nil), "")
     -- Route through router, then apply etag
     let routed  = router(conn)
     let final   = Bastion.Cache.etag(routed)

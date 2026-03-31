@@ -4,6 +4,32 @@
  * Discovers <div data-march-island="ModuleName"> elements in the DOM,
  * opens a single multiplexed WebSocket to the server, and manages
  * island lifecycle (state sync, event dispatch, DOM morphing).
+ *
+ * Dataflow modes (data-march-dataflow attribute):
+ *   "server" — server owns state, no event listeners attached.
+ *              State arrives via WebSocket only.
+ *   "client" — island owns state, handles events locally.
+ *              Optional: wire up data-march-channel for last-write-wins sync.
+ *
+ * Parent-child binding (data-march-parent / data-march-on-event):
+ *   Children dispatch events upward via dispatchToParent().
+ *   The runtime walks the data-march-parent chain to find the handler.
+ *   There is no global island-to-island message bus.
+ *
+ * Event attributes (new style, preferred):
+ *   data-on-click="MsgName"        → dispatches {tag:"MsgName"} on click
+ *   data-on-change="MsgName"       → dispatches {tag:"MsgName",value:...} on change
+ *   data-on-input="MsgName"        → dispatches {tag:"MsgName",value:...} on input
+ *   data-on-submit="MsgName"       → dispatches {tag:"MsgName",data:{...}} on form submit
+ *   data-on-keydown="MsgName"      → dispatches {tag:"MsgName",key:...,value:...} on keydown
+ *   data-on-keydown-key="Enter"    → optional key filter for data-on-keydown
+ *
+ * Legacy event attributes (still supported for backward compatibility):
+ *   data-msg="MsgName"
+ *   data-msg-input="MsgName"
+ *   data-msg-change="MsgName"
+ *   data-msg-submit="MsgName"
+ *   data-msg-keydown="MsgName"
  */
 
 (() => {
@@ -14,7 +40,7 @@
   const WS_PATH = '/_bastion/ws';
   const RECONNECT_BASE_MS = 500;
   const RECONNECT_MAX_MS = 30000;
-  const RECONNECT_JITTER = 0.3;  // +/- 30% jitter
+  const RECONNECT_JITTER = 0.3;
 
   // ── Island Instance ─────────────────────────────────────────────
 
@@ -30,6 +56,16 @@
       this.instanceId = `${this.moduleName}-${manager.nextId()}`;
       this.state = this._parseInitialState(el);
       this.wasmModule = null;
+
+      // "server" | "client" — default to "client" for backward compat
+      this.dataflow = (el.dataset.marchDataflow || 'client').toLowerCase();
+
+      // Optional channel topic for Client-mode sync (last-write-wins)
+      this.channelTopic = el.dataset.marchChannel || null;
+
+      // Parent-child relationship
+      this.parentId = el.dataset.marchParent || null;
+      this.onEvent  = el.dataset.marchOnEvent || null;
 
       el.dataset.marchInstanceId = this.instanceId;
     }
@@ -49,63 +85,89 @@
       }
     }
 
+    /** True if this is a Server-mode island (read-only, no event listeners). */
+    isServer() {
+      return this.dataflow === 'server';
+    }
+
     /**
-     * Called when server sends a full state replacement.
-     * In Phase 2 (server-rendering), we store the state but do NOT
-     * trigger a local rerender -- the server will send a separate
-     * 'render' message with the HTML.
+     * Called when the server pushes a full state replacement.
+     * Server-mode: always apply. Client-mode: apply and re-render.
      * @param {Object} newState
      */
     onStateUpdate(newState) {
       this.state = newState;
-      // Phase 4: if WASM is loaded, render client-side without waiting for
-      // a separate 'render' message from the server.
       if (this.wasmModule) {
         this.rerender();
       }
     }
 
     /**
-     * Called when server sends a merge (CRDT reconciliation).
-     * Phase 2: server state always wins (no client-side WASM merge).
-     * Phase 4: will use WASM merge function if available.
+     * Called when the server sends a "props" update (parent pushed new props).
+     * Equivalent to a state update from the parent's perspective.
+     * @param {Object} newProps
+     */
+    onPropsUpdate(newProps) {
+      this.state = newProps;
+      if (this.wasmModule) {
+        this.rerender();
+      }
+    }
+
+    /**
+     * Called when server sends a merge response (CRDT reconciliation).
      * @param {Object} remoteState
      */
     onMerge(remoteState) {
       this.state = remoteState;
-      // Phase 5: pass to WASM merge function (currently server-wins).
       if (this.wasmModule) {
-        this.wasmModule.merge(remoteState);
+        this.wasmModule.merge && this.wasmModule.merge(remoteState);
         this.rerender();
       }
     }
 
     /**
-     * Dispatch a user-initiated message.
+     * Dispatch a user-initiated message from a DOM event.
      *
-     * Phase 2 (server-rendering): No optimistic local update. The message
-     * is sent to the server which runs update() + render() and sends back
-     * rendered HTML.  The client morphs the DOM when the 'render' response
-     * arrives.
+     * For Client-mode islands:
+     *   1. If WASM is loaded, apply update optimistically and re-render.
+     *   2. Check if update returned a dispatch tuple {state, dispatch}.
+     *      If so, walk up the parent chain and call handle_child_event.
+     *   3. If a channel is wired, push state to the channel topic.
+     *   4. Also send to the WebSocket server for persistence.
      *
-     * Phase 4 (client WASM): Will restore optimistic local updates when
-     * WASM modules are available on the client.
+     * For Server-mode islands: this should never be called (no event listeners).
      *
      * @param {string|Object} msgPayload
      */
     dispatch(msgPayload) {
-      // Phase 4: if WASM is loaded, apply update optimistically and
-      // re-render locally without waiting for a server round-trip.
-      // We also send to the server for persistence and reconciliation.
+      if (this.isServer()) return;  // defensive: Server islands have no events
+
       if (this.wasmModule) {
-        const updated = this.wasmModule.update(msgPayload);
-        if (updated) {
+        const result = this.wasmModule.update(msgPayload);
+
+        if (result) {
+          // Handle {state, dispatch} tuple from update (parent-child dispatch)
+          const newState = result.state !== undefined ? result.state : result;
+          const upstreamDispatch = result.dispatch || null;
+
+          this.state = newState;
           const html = this.wasmModule.render();
           if (html !== null) this.morph(html);
+
+          // Channel sync (last-write-wins, no CRDT)
+          if (this.channelTopic) {
+            this.manager.channelPush(this.channelTopic, newState);
+          }
+
+          // Child-to-parent dispatch: walk up the tree
+          if (upstreamDispatch && this.parentId && this.onEvent) {
+            this.manager.dispatchToParent(this.parentId, this.onEvent, upstreamDispatch);
+          }
         }
       }
 
-      // Always send to server (for persistence, auth, side-effects).
+      // Send to server (persistence, auth, side-effects)
       this.manager.send({
         island: this.instanceId,
         type: 'msg',
@@ -114,9 +176,7 @@
     }
 
     /**
-     * Re-render the island. If a client-side WASM render function
-     * exists, use it to produce HTML and morph the DOM. Otherwise
-     * the server will send rendered HTML via a 'render' message.
+     * Re-render using the WASM module if available.
      */
     rerender() {
       if (this.wasmModule && typeof this.wasmModule.render === 'function') {
@@ -189,6 +249,10 @@
 
     /**
      * Scan the DOM for uninitialized island elements and register them.
+     *
+     * Hydration order: parents before children. DOM order naturally guarantees
+     * this for nested islands — querySelectorAll returns nodes in document order,
+     * so a parent <div> always appears before its nested children.
      */
     discoverIslands() {
       const elements = document.querySelectorAll('[data-march-island]');
@@ -197,10 +261,10 @@
         const instance = new IslandInstance(el, this);
         this.instances.set(instance.instanceId, instance);
 
-        // Inject scoped CSS if the island has styles embedded in its element.
+        // Inject scoped CSS on first hydration
         this._injectScopedCss(instance);
 
-        // Attempt to load WASM module (Phase 2)
+        // Load WASM module synchronously from registry if already available
         if (window.__bastionWasm) {
           const mod = window.__bastionWasm.getModule(instance.moduleName);
           if (mod) {
@@ -208,7 +272,7 @@
           }
         }
 
-        // Tell server about this island
+        // Tell server about this island (Server mode and Client-with-channel)
         this.send({
           island: instance.instanceId,
           type: 'init',
@@ -216,14 +280,13 @@
           payload: instance.state
         });
 
-        // Start loading WASM module asynchronously (Phase 4)
+        // Async WASM loading (Phase 4)
         if (window.__bastionWasm) {
           window.__bastionWasm.loadModule(instance.moduleName).then(wasmMod => {
             if (wasmMod) {
               instance.wasmModule = wasmMod;
-              // Re-render using WASM if we already have server state
-              if (instance.statePtr || wasmMod.statePtr) {
-                const html = wasmMod.render();
+              if (instance.state && Object.keys(instance.state).length > 0) {
+                const html = wasmMod.render(instance.state);
                 if (html !== null) instance.morph(html);
               }
             }
@@ -234,12 +297,7 @@
 
     /**
      * Inject an island's scoped CSS into the document <head> on first hydration.
-     *
-     * Reads the data-march-island-css attribute set by Islands.wrap_with_css on
-     * the server.  Creates a single <style> tag per island module (keyed by
-     * id="bastion-css-{moduleName}"), so multiple instances of the same island
-     * on one page only inject once.
-     *
+     * Creates a single <style> tag per island module (deduped by id).
      * @param {IslandInstance} instance
      */
     _injectScopedCss(instance) {
@@ -247,7 +305,7 @@
       if (!css) return;
 
       const styleId = `bastion-css-${instance.moduleName}`;
-      if (document.getElementById(styleId)) return;  // already injected
+      if (document.getElementById(styleId)) return;
 
       const style = document.createElement('style');
       style.id = styleId;
@@ -321,7 +379,6 @@
           console.warn('[bastion] Failed to parse WebSocket message:', e);
           return;
         }
-
         this._handleMessage(msg);
       };
 
@@ -333,7 +390,7 @@
       };
 
       this.ws.onerror = () => {
-        // onclose will fire after this, triggering reconnection
+        // onclose fires after this, triggering reconnection
       };
     }
 
@@ -342,7 +399,6 @@
      * @param {Object} msg
      */
     _handleMessage(msg) {
-      // Handle broadcast/system messages
       if (msg.type === 'ping') {
         this.send({ type: 'pong' });
         return;
@@ -355,11 +411,15 @@
         case 'state':
           instance.onStateUpdate(msg.payload);
           break;
+        case 'props':
+          // Parent pushed updated props to this child island
+          instance.onPropsUpdate(msg.payload);
+          break;
         case 'merge':
           instance.onMerge(msg.payload);
           break;
         case 'render':
-          // Server-rendered HTML (for islands without client WASM)
+          // Server-rendered HTML (SSR islands or Server-mode)
           instance.morph(msg.payload);
           break;
         default:
@@ -368,7 +428,7 @@
     }
 
     /**
-     * Schedule a reconnection with exponential backoff and jitter.
+     * Schedule reconnection with exponential backoff and jitter.
      */
     _scheduleReconnect() {
       if (this._reconnectTimer) return;
@@ -403,107 +463,202 @@
       }
     }
 
+    /**
+     * Push state to a channel topic for last-write-wins sync.
+     * Called after a Client-mode island updates its local state.
+     * @param {string} topic
+     * @param {Object} state
+     */
+    channelPush(topic, state) {
+      this.send({
+        type: 'channel_push',
+        topic: topic,
+        payload: state
+      });
+    }
+
+    // ── Parent-child dispatch ───────────────────────────────────
+
+    /**
+     * Walk the data-march-parent chain from the given parent ID upward
+     * and call handle_child_event on the first ancestor that matches.
+     *
+     * If the parent's WASM module has handle_child_event, call it locally
+     * and re-render the parent. Also send a child_event message to the server
+     * so the server-side state stays in sync.
+     *
+     * If no ancestor handles the event, the event is dropped (no silent
+     * propagation to the server, per spec).
+     *
+     * @param {string} parentId   - Instance ID of the immediate parent
+     * @param {string} onEvent    - Event handler name registered on the parent
+     * @param {Object} dispatchObj - {event: string, payload: Object}
+     */
+    dispatchToParent(parentId, onEvent, dispatchObj) {
+      const parentInstance = this.instances.get(parentId);
+      if (!parentInstance) return;
+
+      // Local WASM handle_child_event (Phase 4+)
+      if (parentInstance.wasmModule && typeof parentInstance.wasmModule.handle_child_event === 'function') {
+        const eventName = typeof dispatchObj === 'object' ? dispatchObj.event : dispatchObj;
+        const payload = typeof dispatchObj === 'object' ? (dispatchObj.payload || {}) : {};
+        const newState = parentInstance.wasmModule.handle_child_event(eventName, payload);
+        if (newState !== undefined) {
+          parentInstance.state = newState;
+          parentInstance.rerender();
+        }
+      }
+
+      // Send to server so server-side parent state stays in sync
+      const eventName = typeof dispatchObj === 'object' ? dispatchObj.event : String(dispatchObj);
+      const payload   = typeof dispatchObj === 'object' ? (dispatchObj.payload || {}) : {};
+      this.send({
+        island: parentId,
+        type: 'child_event',
+        event: eventName,
+        payload: payload
+      });
+    }
+
     // ── Event Delegation ────────────────────────────────────────
 
+    /**
+     * Bind global event listeners that route DOM events to island dispatches.
+     *
+     * Supports both new data-on-* attributes and legacy data-msg* attributes.
+     * Server-mode islands are skipped — they have no event handlers.
+     */
     bindGlobalEvents() {
-      // Click events: data-msg attribute
+      // ── Click ─────────────────────────────────────────────────
       document.addEventListener('click', (e) => {
-        const target = e.target.closest('[data-msg]');
-        if (!target) return;
-
-        e.preventDefault();
-
-        let msg = target.dataset.msg;
-        // Attempt to parse as JSON for structured messages
-        try {
-          msg = JSON.parse(msg);
-        } catch (_) {
-          // Simple string like "Increment" → wrap as derive Json variant
-          // format: {"tag":"Increment"} so the server's from_json can dispatch.
-          msg = { tag: msg };
+        // New style: data-on-click
+        const onClickEl = e.target.closest('[data-on-click]');
+        if (onClickEl) {
+          e.preventDefault();
+          const instance = this._findIslandForElement(onClickEl);
+          if (instance && !instance.isServer()) {
+            instance.dispatch({ tag: onClickEl.dataset.onClick });
+          }
+          return;
         }
 
-        const instance = this._findIslandForElement(target);
-        if (instance) {
-          instance.dispatch(msg);
+        // Legacy: data-msg
+        const msgEl = e.target.closest('[data-msg]');
+        if (msgEl) {
+          e.preventDefault();
+          const instance = this._findIslandForElement(msgEl);
+          if (instance && !instance.isServer()) {
+            let msg = msgEl.dataset.msg;
+            try { msg = JSON.parse(msg); } catch (_) { msg = { tag: msg }; }
+            instance.dispatch(msg);
+          }
         }
       });
 
-      // Input events: data-msg-input attribute
+      // ── Input ──────────────────────────────────────────────────
       document.addEventListener('input', (e) => {
         const target = e.target;
-        if (!target.dataset.msgInput) return;
 
-        const msg = {
-          type: target.dataset.msgInput,
-          value: target.value
-        };
+        // New style: data-on-input
+        if (target.dataset.onInput) {
+          const instance = this._findIslandForElement(target);
+          if (instance && !instance.isServer()) {
+            instance.dispatch({ tag: target.dataset.onInput, value: target.value });
+          }
+          return;
+        }
 
-        const instance = this._findIslandForElement(target);
-        if (instance) {
-          instance.dispatch(msg);
+        // Legacy: data-msg-input
+        if (target.dataset.msgInput) {
+          const instance = this._findIslandForElement(target);
+          if (instance && !instance.isServer()) {
+            instance.dispatch({ type: target.dataset.msgInput, value: target.value });
+          }
         }
       });
 
-      // Change events: data-msg-change attribute (for selects, checkboxes)
+      // ── Change ─────────────────────────────────────────────────
       document.addEventListener('change', (e) => {
         const target = e.target;
-        if (!target.dataset.msgChange) return;
 
-        const value = target.type === 'checkbox' ? target.checked : target.value;
-        const msg = {
-          type: target.dataset.msgChange,
-          value: value
-        };
+        // New style: data-on-change
+        if (target.dataset.onChange) {
+          const instance = this._findIslandForElement(target);
+          if (instance && !instance.isServer()) {
+            const value = target.type === 'checkbox' ? target.checked : target.value;
+            instance.dispatch({ tag: target.dataset.onChange, value: value });
+          }
+          return;
+        }
 
-        const instance = this._findIslandForElement(target);
-        if (instance) {
-          instance.dispatch(msg);
+        // Legacy: data-msg-change
+        if (target.dataset.msgChange) {
+          const instance = this._findIslandForElement(target);
+          if (instance && !instance.isServer()) {
+            const value = target.type === 'checkbox' ? target.checked : target.value;
+            instance.dispatch({ type: target.dataset.msgChange, value: value });
+          }
         }
       });
 
-      // Form submit events: data-msg-submit attribute
+      // ── Submit ─────────────────────────────────────────────────
       document.addEventListener('submit', (e) => {
-        const form = e.target.closest('[data-msg-submit]');
-        if (!form) return;
+        // New style: data-on-submit (on the <form> element)
+        const onSubmitForm = e.target.closest('[data-on-submit]');
+        if (onSubmitForm) {
+          e.preventDefault();
+          const formData = new FormData(onSubmitForm);
+          const data = Object.fromEntries(formData.entries());
+          const instance = this._findIslandForElement(onSubmitForm);
+          if (instance && !instance.isServer()) {
+            instance.dispatch({ tag: onSubmitForm.dataset.onSubmit, data: data });
+          }
+          return;
+        }
 
-        e.preventDefault();
-        const formData = new FormData(form);
-        const data = Object.fromEntries(formData.entries());
-        const msg = {
-          type: form.dataset.msgSubmit,
-          data: data
-        };
-
-        const instance = this._findIslandForElement(form);
-        if (instance) {
-          instance.dispatch(msg);
+        // Legacy: data-msg-submit
+        const msgForm = e.target.closest('[data-msg-submit]');
+        if (msgForm) {
+          e.preventDefault();
+          const formData = new FormData(msgForm);
+          const data = Object.fromEntries(formData.entries());
+          const instance = this._findIslandForElement(msgForm);
+          if (instance && !instance.isServer()) {
+            instance.dispatch({ type: msgForm.dataset.msgSubmit, data: data });
+          }
         }
       });
 
-      // Keyboard events: data-msg-keydown attribute
+      // ── Keydown ────────────────────────────────────────────────
       document.addEventListener('keydown', (e) => {
         const target = e.target;
-        if (!target.dataset.msgKeydown) return;
 
-        const keyFilter = target.dataset.msgKeydownKey;
-        if (keyFilter && e.key !== keyFilter) return;
+        // New style: data-on-keydown
+        if (target.dataset.onKeydown) {
+          const keyFilter = target.dataset.onKeydownKey;
+          if (keyFilter && e.key !== keyFilter) return;
+          const instance = this._findIslandForElement(target);
+          if (instance && !instance.isServer()) {
+            instance.dispatch({ tag: target.dataset.onKeydown, key: e.key, value: target.value || '' });
+          }
+          return;
+        }
 
-        const msg = {
-          type: target.dataset.msgKeydown,
-          key: e.key,
-          value: target.value || ''
-        };
-
-        const instance = this._findIslandForElement(target);
-        if (instance) {
-          instance.dispatch(msg);
+        // Legacy: data-msg-keydown
+        if (target.dataset.msgKeydown) {
+          const keyFilter = target.dataset.msgKeydownKey;
+          if (keyFilter && e.key !== keyFilter) return;
+          const instance = this._findIslandForElement(target);
+          if (instance && !instance.isServer()) {
+            instance.dispatch({ type: target.dataset.msgKeydown, key: e.key, value: target.value || '' });
+          }
         }
       });
     }
 
     /**
      * Find the IslandInstance that owns a given DOM element.
+     * Walks up the DOM to find the nearest enclosing island wrapper.
      * @param {HTMLElement} el
      * @returns {IslandInstance|null}
      */
@@ -518,7 +673,6 @@
     _startObserver() {
       if (this._observer) return;
 
-      // Debounce mutation handling to batch rapid DOM changes
       let pending = false;
       this._observer = new MutationObserver(() => {
         if (pending) return;
@@ -547,7 +701,7 @@
     manager.init();
   }
 
-  // Expose for debugging and programmatic access
+  // Expose for debugging only. No global send API — use channels or parent-child dispatch.
   window.__bastionIslands = manager;
 
 })();
