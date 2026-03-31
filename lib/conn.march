@@ -15,7 +15,7 @@ mod Conn do
   -- ── Request accessors ──────────────────────────────────────────────
 
   doc "Returns the HTTP method of the request (Get, Post, Put, …)."
-  fn method(conn : Conn) : Method do
+  fn method(conn : Conn) : Atom do
     HttpServer.method(conn)
   end
 
