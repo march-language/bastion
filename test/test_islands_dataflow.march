@@ -1,0 +1,412 @@
+-- test/test_islands_dataflow.march
+-- TDD tests for the Islands Data Flow spec (specs/islands-data-flow.md).
+--
+-- Tests cover:
+--   1. DataFlow type (Server / Client)
+--   2. Wrapping with dataflow mode
+--   3. Parent-child island binding
+--   4. Event dispatch helpers
+--   5. Server-mode validation (reject data-on-* in Server islands)
+--   6. Channel sync wrapping
+--   7. Form helpers
+--   8. IslandSocket dataflow-aware registry
+
+mod TestIslandsDataflow do
+
+import Islands
+import IslandView
+import IslandSocket
+import Test
+
+-- ── Helpers ───────────────────────────────────────────────────────────────
+
+pfn string_contains(haystack : String, needle : String) : Bool do
+  String.contains(haystack, needle)
+end
+
+pfn assert_contains(haystack : String, needle : String, msg : String) : Unit do
+  if not(string_contains(haystack, needle)) do
+    Test.fail(msg ++ " — expected to contain: \"" ++ needle ++ "\" in: \"" ++ haystack ++ "\"")
+  else
+    ()
+  end
+end
+
+pfn assert_not_contains(haystack : String, needle : String, msg : String) : Unit do
+  if string_contains(haystack, needle) do
+    Test.fail(msg ++ " — expected NOT to contain: \"" ++ needle ++ "\" in: \"" ++ haystack ++ "\"")
+  else
+    ()
+  end
+end
+
+-- Test helpers for IslandSocket: update_fn and render_fn stubs
+pfn noop_update(pair : (String, String)) : String do
+  match pair do
+    (s, _m) -> s
+  end
+end
+
+pfn noop_render(s : String) : String do s end
+pfn span_render(s : String) : String do "<span>" ++ s ++ "</span>" end
+
+pfn noop_event_handler(triple : (String, String, String)) : String do
+  match triple do
+    (s, _e, _p) -> s
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 1. DataFlow Type
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Islands.DataFlow type" do
+  test "Server variant exists and converts to string" do
+    let df = Islands.Server
+    assert (Islands.dataflow_str(df) == "server")
+  end
+
+  test "Client variant exists and converts to string" do
+    let df = Islands.Client
+    assert (Islands.dataflow_str(df) == "client")
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 2. Wrapping with DataFlow Mode
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Islands.wrap_with_dataflow" do
+  test "includes data-march-dataflow attribute" do
+    let html = Islands.wrap_with_dataflow(
+      "ScoreBoard", Islands.Eager, Islands.Server,
+      "{\"scores\":[]}", "", "<div>scores</div>")
+    assert_contains(html, "data-march-dataflow=\"server\"", "dataflow attr")
+  end
+
+  test "Client dataflow sets client attribute" do
+    let html = Islands.wrap_with_dataflow(
+      "Counter", Islands.Eager, Islands.Client,
+      "{\"count\":0}", "", "<span>0</span>")
+    assert_contains(html, "data-march-dataflow=\"client\"", "client dataflow attr")
+  end
+
+  test "still includes island name and hydrate strategy" do
+    let html = Islands.wrap_with_dataflow(
+      "Counter", Islands.Lazy, Islands.Client,
+      "{}", "", "<span>0</span>")
+    assert_contains(html, "data-march-island=\"Counter\"", "island name")
+    assert_contains(html, "data-march-hydrate=\"lazy\"", "hydrate strategy")
+  end
+
+  test "escapes state JSON in attribute" do
+    let html = Islands.wrap_with_dataflow(
+      "X", Islands.Eager, Islands.Client,
+      "{\"key\":\"val&ue\"}", "", "")
+    assert_contains(html, "&amp;", "escaped ampersand in state")
+  end
+
+  test "includes CSS when provided" do
+    let html = Islands.wrap_with_dataflow(
+      "Card", Islands.Eager, Islands.Client,
+      "{}", ".card { color: red; }", "<div>card</div>")
+    assert_contains(html, "data-march-island-css=", "css attr present")
+  end
+
+  test "SSR content is inside the div" do
+    let html = Islands.wrap_with_dataflow(
+      "X", Islands.Eager, Islands.Client, "{}", "", "<p>hello</p>")
+    assert_contains(html, "<p>hello</p></div>", "ssr content inside div")
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 3. Parent-Child Island Binding
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Islands.wrap_child" do
+  test "includes data-march-parent attribute" do
+    let html = Islands.wrap_child(
+      "ItemRow", "item-list-1", Islands.Eager,
+      "{\"id\":\"1\",\"label\":\"Apple\"}", "", "<div>Apple</div>")
+    assert_contains(html, "data-march-parent=\"item-list-1\"", "parent attr")
+  end
+
+  test "includes island name and state" do
+    let html = Islands.wrap_child(
+      "ItemRow", "parent-1", Islands.Eager,
+      "{\"id\":\"1\"}", "", "<span>1</span>")
+    assert_contains(html, "data-march-island=\"ItemRow\"", "island name")
+    assert_contains(html, "data-march-state=", "state present")
+  end
+
+  test "children always have server dataflow relative to parent" do
+    let html = Islands.wrap_child(
+      "ItemRow", "parent-1", Islands.Eager,
+      "{}", "", "<span>row</span>")
+    -- Children are always Server-dataflow relative to their parent
+    assert_contains(html, "data-march-dataflow=\"server\"", "child is server dataflow")
+  end
+
+  test "includes on_event handler name when provided" do
+    let html = Islands.wrap_child_with_event(
+      "ItemRow", "parent-1", Islands.Eager,
+      "{}", "", "<span>row</span>",
+      "item_event")
+    assert_contains(html, "data-march-on-event=\"item_event\"", "event handler name")
+  end
+
+  test "child ID can be set for unique identification" do
+    let html = Islands.wrap_child_with_id(
+      "ItemRow", "parent-1", "item-row-42", Islands.Eager,
+      "{}", "", "<span>row</span>")
+    assert_contains(html, "data-march-id=\"item-row-42\"", "child island id")
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 4. Event Dispatch Helpers
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Islands.Event" do
+  test "event can be created with name and payload" do
+    let evt = Islands.Event("item_toggled", "{\"id\":\"42\"}")
+    assert (Islands.event_name(evt) == "item_toggled")
+    assert (Islands.event_payload(evt) == "{\"id\":\"42\"}")
+  end
+
+  test "event JSON encoding" do
+    let evt = Islands.Event("clicked", "{\"x\":10}")
+    let json = Islands.event_to_json(evt)
+    assert_contains(json, "\"event\":\"clicked\"", "event name in json")
+    assert_contains(json, "\"payload\":{\"x\":10}", "payload in json")
+  end
+
+  test "dispatch wraps event with source island info" do
+    let dispatch_json = Islands.dispatch_json("item-row-42", "item_toggled", "{\"id\":\"42\"}")
+    assert_contains(dispatch_json, "\"source\":\"item-row-42\"", "source island id")
+    assert_contains(dispatch_json, "\"event\":\"item_toggled\"", "event name")
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 5. Server-Mode Validation
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Islands.validate_server_html" do
+  test "clean HTML passes validation" do
+    let result = Islands.validate_server_html("<div><span>Score: 42</span></div>")
+    match result do
+    Ok(_) -> ()
+    Err(msg) -> Test.fail("Expected Ok but got Err: " ++ msg)
+    end
+  end
+
+  test "data-on-click is rejected in Server mode" do
+    let result = Islands.validate_server_html("<button data-on-click=\"Inc\">+</button>")
+    match result do
+    Ok(_) -> Test.fail("Expected Err for data-on-click in Server mode")
+    Err(_) -> ()
+    end
+  end
+
+  test "data-on-input is rejected in Server mode" do
+    let result = Islands.validate_server_html("<input data-on-input=\"Search\" />")
+    match result do
+    Ok(_) -> Test.fail("Expected Err for data-on-input in Server mode")
+    Err(_) -> ()
+    end
+  end
+
+  test "data-on-change is rejected in Server mode" do
+    let result = Islands.validate_server_html("<select data-on-change=\"Filter\"></select>")
+    match result do
+    Ok(_) -> Test.fail("Expected Err for data-on-change in Server mode")
+    Err(_) -> ()
+    end
+  end
+
+  test "data-on-submit is rejected in Server mode" do
+    let result = Islands.validate_server_html("<form data-on-submit=\"Save\"></form>")
+    match result do
+    Ok(_) -> Test.fail("Expected Err for data-on-submit in Server mode")
+    Err(_) -> ()
+    end
+  end
+
+  test "data-msg attribute is also rejected (legacy)" do
+    let result = Islands.validate_server_html("<button data-msg=\"Click\">go</button>")
+    match result do
+    Ok(_) -> Test.fail("Expected Err for data-msg in Server mode")
+    Err(_) -> ()
+    end
+  end
+
+  test "error message names the offending attribute" do
+    let result = Islands.validate_server_html("<button data-on-click=\"Inc\">+</button>")
+    match result do
+    Ok(_) -> Test.fail("Expected Err")
+    Err(msg) -> assert_contains(msg, "data-on-click", "error mentions attribute")
+    end
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 6. Channel Sync Wrapping
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Islands.wrap_with_channel" do
+  test "includes data-march-channel attribute" do
+    let html = Islands.wrap_with_channel(
+      "Counter", Islands.Eager, Islands.Client,
+      "{\"count\":0}", "", "<span>0</span>",
+      "counter:user-123")
+    assert_contains(html, "data-march-channel=\"counter:user-123\"", "channel topic")
+  end
+
+  test "still includes dataflow attribute" do
+    let html = Islands.wrap_with_channel(
+      "Counter", Islands.Eager, Islands.Client,
+      "{}", "", "",
+      "counter:1")
+    assert_contains(html, "data-march-dataflow=\"client\"", "dataflow present with channel")
+  end
+
+  test "Server islands can also have channels (for receiving pushes)" do
+    let html = Islands.wrap_with_channel(
+      "ScoreBoard", Islands.Eager, Islands.Server,
+      "{}", "", "<div>scores</div>",
+      "scores:live")
+    assert_contains(html, "data-march-channel=\"scores:live\"", "server channel")
+    assert_contains(html, "data-march-dataflow=\"server\"", "server dataflow")
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 7. Form Helpers
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Islands.form_config" do
+  test "creates form config with channel topic" do
+    let cfg = Islands.FormConfig("contact:submit", "/thank-you")
+    assert (Islands.form_channel(cfg) == "contact:submit")
+  end
+
+  test "form config includes redirect path" do
+    let cfg = Islands.FormConfig("contact:submit", "/thank-you")
+    assert (Islands.form_redirect(cfg) == "/thank-you")
+  end
+
+  test "wrap_form includes data-march-form attribute" do
+    let html = Islands.wrap_form(
+      "ContactForm", Islands.Eager,
+      "{\"name\":\"\",\"email\":\"\"}",
+      "<form><input name=\"name\"/></form>",
+      "contact:submit", "/thank-you")
+    assert_contains(html, "data-march-form=\"true\"", "form marker")
+    assert_contains(html, "data-march-channel=\"contact:submit\"", "form channel")
+  end
+
+  test "wrap_form includes redirect path" do
+    let html = Islands.wrap_form(
+      "ContactForm", Islands.Eager,
+      "{}", "<form></form>",
+      "contact:submit", "/thank-you")
+    assert_contains(html, "data-march-redirect=\"/thank-you\"", "redirect path")
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 8. IslandSocket DataFlow-Aware Registry
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "IslandSocket dataflow-aware registration" do
+  test "register_with_dataflow stores the dataflow mode" do
+    let reg = IslandSocket.new_registry()
+              |> IslandSocket.register_with_dataflow("ScoreBoard", noop_update, span_render, Islands.Server)
+    match IslandSocket.find_handler(reg, "ScoreBoard") do
+    Some(h) -> do
+      let df = IslandSocket.handler_dataflow(h)
+      assert (Islands.dataflow_str(df) == "server")
+    end
+    None -> Test.fail("Handler not found after register_with_dataflow")
+    end
+  end
+
+  test "default register uses Client dataflow" do
+    let reg = IslandSocket.new_registry()
+              |> IslandSocket.register("Counter", noop_update, noop_render)
+    match IslandSocket.find_handler(reg, "Counter") do
+    Some(h) -> do
+      let df = IslandSocket.handler_dataflow(h)
+      assert (Islands.dataflow_str(df) == "client")
+    end
+    None -> Test.fail("Handler not found")
+    end
+  end
+
+  test "register_with_event_handler stores child event handler" do
+    let reg = IslandSocket.new_registry()
+              |> IslandSocket.register_with_event_handler("ItemList", noop_update, noop_render, noop_event_handler)
+    assert (IslandSocket.has_event_handler(reg, "ItemList"))
+  end
+
+  test "islands without event handler return false for has_event_handler" do
+    let reg = IslandSocket.new_registry()
+              |> IslandSocket.register("Counter", noop_update, noop_render)
+    assert (not(IslandSocket.has_event_handler(reg, "Counter")))
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 9. Integration: Server island rejects events at registration time
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Server island HTML validation integration" do
+  test "validate_server_island checks render output" do
+    let render_fn = fn s -> "<div data-on-click=\"Bad\">" ++ s ++ "</div>"
+    let result = Islands.validate_server_island(render_fn, "{\"x\":1}")
+    match result do
+    Ok(_) -> Test.fail("Expected validation to reject data-on-click in Server island render")
+    Err(msg) -> assert_contains(msg, "data-on-click", "error names attribute")
+    end
+  end
+
+  test "clean server render passes validation" do
+    let render_fn = fn s -> "<div class=\"score\">" ++ s ++ "</div>"
+    let result = Islands.validate_server_island(render_fn, "{\"x\":1}")
+    match result do
+    Ok(_) -> ()
+    Err(msg) -> Test.fail("Expected Ok but got: " ++ msg)
+    end
+  end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 10. IslandView helpers for dataflow
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "IslandView dataflow helpers" do
+  test "island_with_dataflow renders placeholder with dataflow attribute" do
+    let html = IslandView.island_with_dataflow("Counter", "{}", "client")
+    assert_contains(html, "data-march-island=\"Counter\"", "island name")
+    assert_contains(html, "data-march-dataflow=\"client\"", "dataflow attr")
+  end
+
+  test "island_ssr_with_dataflow renders with SSR content and dataflow" do
+    let html = IslandView.island_ssr_with_dataflow(
+      "ScoreBoard", "{\"scores\":[]}", "server", "<div>scores</div>")
+    assert_contains(html, "data-march-dataflow=\"server\"", "dataflow attr")
+    assert_contains(html, "<div>scores</div>", "ssr content")
+  end
+
+  test "child_island renders with parent reference" do
+    let html = IslandView.child_island(
+      "ItemRow", "parent-1", "{\"label\":\"Apple\"}", "<span>Apple</span>")
+    assert_contains(html, "data-march-parent=\"parent-1\"", "parent ref")
+    assert_contains(html, "data-march-island=\"ItemRow\"", "island name")
+    assert_contains(html, "<span>Apple</span>", "ssr content")
+  end
+end
+
+end
