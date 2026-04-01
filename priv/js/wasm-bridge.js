@@ -116,7 +116,7 @@
     /**
      * Apply a message to the state.
      * msgPayload is a string (variant name like "Increment") or a JSON object.
-     * Returns true if the state was updated.
+     * Returns true if the state was updated, false if the server should handle it.
      * @param {string|Object} msgPayload
      * @returns {boolean}
      */
@@ -124,32 +124,27 @@
       if (!this.statePtr) return false;
       if (typeof this.exports.march_island_update !== 'function') return false;
 
+      // Normalise to a JSON string — islands use fn update(state_json, msg_json)
+      // so the msg is always passed as a March String on the WASM side.
       let msgStr;
       if (typeof msgPayload === 'string') {
+        // Already a string: pass as-is (e.g. a variant name like "Increment"
+        // or a JSON value like "{\"tag\":\"SetValue\",\"value\":3}").
         msgStr = msgPayload;
       } else {
-        // For structured payloads use the "tag" field if present, else JSON
-        msgStr = (msgPayload && msgPayload.type) ? msgPayload.type : JSON.stringify(msgPayload);
+        msgStr = JSON.stringify(msgPayload);
       }
 
+      // Write the message string into WASM linear memory as a March String.
       let msgPtr = 0;
-      // Try march_island_msg_from_name for enum-style messages
-      if (typeof this.exports.march_island_msg_from_name === 'function') {
-        try {
-          const encoded = new TextEncoder().encode(msgStr);
-          const rawPtr = this.exports.march_alloc_export(BigInt(encoded.length + 1));
-          if (rawPtr) {
-            const heap = new Uint8Array(this.memory.buffer);
-            heap.set(encoded, rawPtr);
-            heap[rawPtr + encoded.length] = 0;
-            msgPtr = this.exports.march_island_msg_from_name(rawPtr, encoded.length);
-          }
-        } catch (e) {
-          console.warn(`[bastion/wasm] msg_from_name failed for "${msgStr}":`, e);
-        }
+      try {
+        msgPtr = this._writeString(msgStr);
+      } catch (e) {
+        console.warn(`[bastion/wasm] failed to write msg string for "${msgStr}":`, e);
+        return false;
       }
 
-      if (!msgPtr) return false;  // unknown message — server handles it
+      if (!msgPtr) return false;
 
       try {
         const newStatePtr = this.exports.march_island_update(this.statePtr, msgPtr);
