@@ -38,25 +38,140 @@ pfn forge_toml(name) do
 end
 
 pfn main_source(pascal) do
-  "mod " ++ pascal ++ " do\n\nfn router(conn, stats) do\n  " ++ pascal ++ ".Router.dispatch(conn, stats)\nend\n\nfn main() do\n  let stats = BastionDev.new_stats()\n  HttpServer.new(4000)\n  |> HttpServer.plug(fn conn -> router(conn, stats))\n  |> HttpServer.listen()\nend\n\nend\n"
-end
-
-pfn router_source(pascal) do
-  "mod " ++ pascal ++ ".Router do\n\nalias HttpServer as H\n\nfn dispatch(conn, stats) do\n  let m = H.method(conn)\n  let p = H.path_info(conn)\n  match (m, p) do\n  -- ROUTE: GET /\n  (:get, Nil) ->\n    " ++ pascal ++ ".Controllers.PageController.index(conn)\n\n  -- ROUTE: GET /_bastion\n  (:get, Cons(\"_bastion\", Nil)) ->\n    BastionDev.dashboard_handler(conn, stats)\n\n  _ ->\n    H.send_resp(conn, 404, \"Not Found\")\n  end\nend\n\nend\n"
+  "mod " ++ pascal ++ " do\n\n" ++
+  "  import HttpServer\n" ++
+  "  import Router\n" ++
+  "  import Middleware\n" ++
+  "  import Controller\n" ++
+  "  import IslandSocket\n" ++
+  "  import IslandAssets\n" ++
+  "  import Static\n" ++
+  "  import PageController\n" ++
+  "  import Counter\n\n" ++
+  "  pfn build_router() : Router do\n" ++
+  "    Router.new()\n" ++
+  "    |> Router.action(Get, \"/\",      fn conn -> PageController.home(conn))\n" ++
+  "    |> Router.action(Get, \"/about\", fn conn -> PageController.about(conn))\n" ++
+  "    |> Router.get(\"/health\", fn conn -> health(conn))\n" ++
+  "  end\n\n" ++
+  "  pfn health(conn : Conn) : Conn do\n" ++
+  "    Controller.json(conn, 200, \"{\\\"status\\\":\\\"ok\\\"}\")\n" ++
+  "  end\n\n" ++
+  "  pfn build_island_registry() : IslandSocket.Registry do\n" ++
+  "    IslandSocket.new_registry()\n" ++
+  "    |> IslandSocket.register(\"Counter\",\n" ++
+  "         fn (state, msg) -> Counter.update_json(state, msg),\n" ++
+  "         fn state -> Counter.render_json(state))\n" ++
+  "  end\n\n" ++
+  "  fn main() : Unit do\n" ++
+  "    let router   = build_router()\n" ++
+  "    let plug     = Router.to_plug(router)\n" ++
+  "    let registry = build_island_registry()\n\n" ++
+  "    let island_ws     = IslandSocket.plug(IslandSocket.default_config(), registry)\n" ++
+  "    let island_assets = IslandAssets.plug(IslandAssets.default_config())\n" ++
+  "    let static_files  = Static.serve(\"public\")\n\n" ++
+  "    let app = fn conn -> do\n" ++
+  "      let c = island_ws(conn)\n" ++
+  "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
+  "      let c = island_assets(c)\n" ++
+  "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
+  "      let c = static_files(c)\n" ++
+  "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
+  "      let c = Middleware.logger(c)\n" ++
+  "      let c = Middleware.request_id(c)\n" ++
+  "      let c = Middleware.cors(c)\n" ++
+  "      match HttpServer.halted(c) do\n" ++
+  "      true  -> c\n" ++
+  "      false -> plug(c)\n" ++
+  "      end\n" ++
+  "      end end end\n" ++
+  "    end\n\n" ++
+  "    println(\"" ++ pascal ++ " listening on http://localhost:4000\")\n" ++
+  "    HttpServer.new(4000)\n" ++
+  "    |> HttpServer.plug(app)\n" ++
+  "    |> HttpServer.listen()\n" ++
+  "  end\n\n" ++
+  "end\n"
 end
 
 pfn page_controller_source(pascal) do
-  "mod " ++ pascal ++ ".Controllers.PageController do\n\nalias HttpServer as H\nalias " ++ pascal ++ ".Templates.Layout as Layout\nalias " ++ pascal ++ ".Templates.Page.Index as IndexView\n\nfn index(conn) do\n  let content = IndexView.render()\n  let html    = Layout.wrap(content)\n  H.html(conn, 200, IOList.to_string(html))\nend\n\nend\n"
+  let q = "\"\"\""
+  "mod PageController do\n\n" ++
+  "  import HttpServer\n" ++
+  "  import Controller\n" ++
+  "  import Response\n\n" ++
+  "  fn home(conn : Conn) : Controller.ActionResult do\n" ++
+  "    let html = layout(\"Home\", ~H" ++ q ++ "\n" ++
+  "      <h1>Welcome to " ++ pascal ++ "!</h1>\n" ++
+  "      <p>Edit <code>lib/page_controller.march</code> to get started.</p>\n" ++
+  "      <p><a href=\"/about\">About</a></p>\n" ++
+  "      <h2>Interactive Counter (Island)</h2>\n" ++
+  "      <div data-march-island=\"Counter\" data-march-state='{\"count\":0}'></div>\n" ++
+  "    " ++ q ++ ")\n" ++
+  "    Controller.ActionOk(Response.html(conn, 200, html))\n" ++
+  "  end\n\n" ++
+  "  fn about(conn : Conn) : Controller.ActionResult do\n" ++
+  "    let html = layout(\"About\", ~H" ++ q ++ "\n" ++
+  "      <h1>About</h1>\n" ++
+  "      <p>Built with <a href=\"https://github.com/march-lang/bastion\">Bastion</a>.</p>\n" ++
+  "    " ++ q ++ ")\n" ++
+  "    Controller.ActionOk(Response.html(conn, 200, html))\n" ++
+  "  end\n\n" ++
+  "  pfn layout(title : String, body : String) : String do\n" ++
+  "    ~H" ++ q ++ "\n" ++
+  "    <!DOCTYPE html>\n" ++
+  "    <html lang=\"en\">\n" ++
+  "    <head>\n" ++
+  "      <meta charset=\"utf-8\">\n" ++
+  "      <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" ++
+  "      <title>" ++ iv("title") ++ " · " ++ pascal ++ "</title>\n" ++
+  "      <link rel=\"stylesheet\" href=\"/css/app.css\">\n" ++
+  "    </head>\n" ++
+  "    <body>\n" ++
+  "      <nav><a href=\"/\">Home</a> <a href=\"/about\">About</a></nav>\n" ++
+  "      <main>" ++ iv("body") ++ "</main>\n" ++
+  "      <script src=\"/_bastion/islands.js\"></script>\n" ++
+  "    </body>\n" ++
+  "    </html>\n" ++
+  "    " ++ q ++ "\n" ++
+  "  end\n\n" ++
+  "end\n"
 end
 
-pfn layout_source(name, pascal) do
+pfn counter_island_source() do
   let q = "\"\"\""
-  "mod " ++ pascal ++ ".Templates.Layout do\n\nfn wrap(inner_html) do\n  let css_path = Bastion.Assets.static_path(\"app.css\")\n  let js_path  = Bastion.Assets.static_path(\"app.js\")\n  ~H" ++ q ++ "<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>" ++ name ++ "</title>\n    <link rel=\"stylesheet\" href=\"" ++ iv("css_path") ++ "\">\n  </head>\n  <body>\n    " ++ iv("inner_html") ++ "\n    <script src=\"" ++ iv("js_path") ++ "\"></script>\n  </body>\n</html>" ++ q ++ "\nend\n\nend\n"
-end
-
-pfn page_index_source(name, pascal) do
-  let q = "\"\"\""
-  "mod " ++ pascal ++ ".Templates.Page.Index do\n\nfn render() do\n  ~H" ++ q ++ "<div class=\"container\">\n  <h1>Welcome to " ++ name ++ "!</h1>\n  <p>Edit <code>lib/" ++ name ++ "/templates/page/index.march</code> to get started.</p>\n</div>" ++ q ++ "\nend\n\nend\n"
+  "-- Counter — example island component.\n" ++
+  "--\n" ++
+  "-- Islands follow the create/update/render protocol.\n" ++
+  "-- Derive Json on State and Msg to get automatic update_json/render_json\n" ++
+  "-- bridge functions generated by the compiler.\n\n" ++
+  "mod Counter do\n\n" ++
+  "  type Props = { initial : Int }\n" ++
+  "  type State = { count : Int }\n" ++
+  "  type Msg = Increment | Decrement | Reset\n\n" ++
+  "  derive Json for State\n" ++
+  "  derive Json for Msg\n\n" ++
+  "  fn create(props : Props) : State do\n" ++
+  "    { count = props.initial }\n" ++
+  "  end\n\n" ++
+  "  fn update(st : State, msg : Msg) : State do\n" ++
+  "    match msg do\n" ++
+  "    Increment -> { count = st.count + 1 }\n" ++
+  "    Decrement -> { count = st.count - 1 }\n" ++
+  "    Reset     -> { count = 0 }\n" ++
+  "    end\n" ++
+  "  end\n\n" ++
+  "  fn render(st : State) : IOList do\n" ++
+  "    ~H" ++ q ++ "\n" ++
+  "    <div id=\"counter\" class=\"counter\">\n" ++
+  "      <button data-msg=\"Decrement\">-</button>\n" ++
+  "      <span class=\"count\">" ++ iv("int_to_string(st.count)") ++ "</span>\n" ++
+  "      <button data-msg=\"Increment\">+</button>\n" ++
+  "    </div>\n" ++
+  "    " ++ q ++ "\n" ++
+  "  end\n\n" ++
+  "  -- update_json and render_json are auto-generated because State and Msg derive Json.\n\n" ++
+  "end\n"
 end
 
 pfn config_main() do
@@ -75,20 +190,66 @@ pfn config_prod() do
   "mod Config.Prod do\n  -- Set the PORT environment variable to configure the HTTP port.\n  let port = match Process.env(\"PORT\") do\n    Some(p) -> string_to_int(p)\n    None    -> 4000\n  end\nend\n"
 end
 
-pfn app_css(name) do
-  "/* app.css — " ++ name ++ " styles */\n\n*, *::before, *::after {\n  box-sizing: border-box;\n}\n\nbody {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n  line-height: 1.5;\n}\n\n.container {\n  max-width: 960px;\n  margin: 0 auto;\n  padding: 2rem;\n}\n"
+pfn app_css() do
+  "*, *::before, *::after { box-sizing: border-box; }\n\n" ++
+  "body {\n" ++
+  "  font-family: system-ui, sans-serif;\n" ++
+  "  max-width: 800px;\n" ++
+  "  margin: 0 auto;\n" ++
+  "  padding: 1rem;\n" ++
+  "  color: #1a1a1a;\n" ++
+  "}\n\n" ++
+  "nav { margin-bottom: 2rem; }\n" ++
+  "nav a { margin-right: 1rem; color: #0070f3; text-decoration: none; }\n" ++
+  "nav a:hover { text-decoration: underline; }\n\n" ++
+  ".counter {\n" ++
+  "  display: inline-flex;\n" ++
+  "  align-items: center;\n" ++
+  "  gap: 0.75rem;\n" ++
+  "  font-size: 1.5rem;\n" ++
+  "}\n\n" ++
+  ".counter button {\n" ++
+  "  font-size: 1.5rem;\n" ++
+  "  width: 2.5rem;\n" ++
+  "  height: 2.5rem;\n" ++
+  "  border: 1px solid #ccc;\n" ++
+  "  border-radius: 6px;\n" ++
+  "  cursor: pointer;\n" ++
+  "  background: white;\n" ++
+  "}\n\n" ++
+  ".counter button:hover { background: #f0f0f0; }\n"
 end
 
-pfn app_js() do
-  "// app.js — application JavaScript\n"
-end
-
-pfn test_helper_source(pascal) do
-  "mod " ++ pascal ++ ".TestHelper do\n\nfn start() do\n  :ok\nend\n\nend\n"
-end
-
-pfn test_page_controller_source(pascal) do
-  "mod " ++ pascal ++ ".Controllers.TestPageController do\n\ndescribe \"PageController.index\" do\n  test \"placeholder\" do\n    assert true\n  end\nend\n\nend\n"
+pfn test_source(name, pascal) do
+  "mod " ++ pascal ++ "Test do\n\n" ++
+  "  import Counter\n\n" ++
+  "  describe \"Counter island\" do\n\n" ++
+  "    test \"render_json shows initial count\" do\n" ++
+  "      let html = Counter.render_json(\"{\\\"count\\\":0}\")\n" ++
+  "      assert (String.contains(html, \"0\"))\n" ++
+  "    end\n\n" ++
+  "    test \"update_json increment increases count\" do\n" ++
+  "      let next = Counter.update_json(\"{\\\"count\\\":5}\", \"{\\\"tag\\\":\\\"Increment\\\"}\")\n" ++
+  "      assert (String.contains(next, \"6\"))\n" ++
+  "    end\n\n" ++
+  "    test \"update_json decrement decreases count\" do\n" ++
+  "      let next = Counter.update_json(\"{\\\"count\\\":5}\", \"{\\\"tag\\\":\\\"Decrement\\\"}\")\n" ++
+  "      assert (String.contains(next, \"4\"))\n" ++
+  "    end\n\n" ++
+  "    test \"render_json produces correct HTML\" do\n" ++
+  "      let html = Counter.render_json(\"{\\\"count\\\":42}\")\n" ++
+  "      assert (String.contains(html, \"42\"))\n" ++
+  "      assert (String.contains(html, \"data-msg\"))\n" ++
+  "      assert (String.contains(html, \"Increment\"))\n" ++
+  "      assert (String.contains(html, \"Decrement\"))\n" ++
+  "    end\n\n" ++
+  "    test \"update_json then render_json round-trip\" do\n" ++
+  "      let next = Counter.update_json(\"{\\\"count\\\":0}\", \"{\\\"tag\\\":\\\"Increment\\\"}\")\n" ++
+  "      let html = Counter.render_json(next)\n" ++
+  "      assert (String.contains(html, \"1\"))\n" ++
+  "    end\n\n" ++
+  "  end\n\n" ++
+  "end\n"
 end
 
 pfn editorconfig() do
@@ -96,11 +257,33 @@ pfn editorconfig() do
 end
 
 pfn gitignore() do
-  "/.march/\n"
+  "/.march/\n/islands/*.wasm\n/islands/*.glue.js\n"
 end
 
-pfn readme(name) do
-  "# " ++ capitalize(name) ++ "\n"
+pfn readme(name, pascal) do
+  "# " ++ pascal ++ "\n\n" ++
+  "A [Bastion](https://github.com/march-lang/bastion) web application.\n\n" ++
+  "## Getting started\n\n" ++
+  "```bash\n" ++
+  "forge deps\n" ++
+  "forge run\n" ++
+  "```\n\n" ++
+  "Visit http://localhost:4000\n\n" ++
+  "## Structure\n\n" ++
+  "```\n" ++
+  "lib/\n" ++
+  "  " ++ name ++ ".march          # Router and server entry point\n" ++
+  "  page_controller.march  # Page handlers\n" ++
+  "  counter.march          # Example island component\n" ++
+  "public/                  # Static assets (CSS, JS, images)\n" ++
+  "islands/                 # Compiled .wasm island modules\n" ++
+  "test/                    # Tests\n" ++
+  "```\n\n" ++
+  "## Islands\n\n" ++
+  "Compile an island to WASM:\n\n" ++
+  "```bash\n" ++
+  "march --compile --target wasm32-unknown-unknown lib/counter.march -o islands/Counter.wasm\n" ++
+  "```\n"
 end
 
 -- ── Scaffold ─────────────────────────────────────────────────────────────────
@@ -114,12 +297,12 @@ fn scaffold(name) do
     Err("directory '" ++ name ++ "' already exists")
   else
     let pascal = snake_to_pascal(name)
-    let _ = Dir.mkdir_p(name ++ "/lib/" ++ name ++ "/controllers")
-    let _ = Dir.mkdir_p(name ++ "/lib/" ++ name ++ "/templates/page")
+    let _ = Dir.mkdir_p(name ++ "/lib")
     let _ = Dir.mkdir_p(name ++ "/config")
-    let _ = Dir.mkdir_p(name ++ "/assets/css")
-    let _ = Dir.mkdir_p(name ++ "/assets/js")
-    let _ = Dir.mkdir_p(name ++ "/test/controllers")
+    let _ = Dir.mkdir_p(name ++ "/public/css")
+    let _ = Dir.mkdir_p(name ++ "/public/js")
+    let _ = Dir.mkdir_p(name ++ "/islands")
+    let _ = Dir.mkdir_p(name ++ "/test")
     let write = fn path -> fn content -> do
       let _ = File.write(name ++ "/" ++ path, content)
       println("* creating " ++ name ++ "/" ++ path)
@@ -127,20 +310,18 @@ fn scaffold(name) do
     write("forge.toml")(forge_toml(name))
     write(".editorconfig")(editorconfig())
     write(".gitignore")(gitignore())
-    write("README.md")(readme(name))
+    write("README.md")(readme(name, pascal))
     write("lib/" ++ name ++ ".march")(main_source(pascal))
-    write("lib/" ++ name ++ "/router.march")(router_source(pascal))
-    write("lib/" ++ name ++ "/controllers/page_controller.march")(page_controller_source(pascal))
-    write("lib/" ++ name ++ "/templates/layout.march")(layout_source(name, pascal))
-    write("lib/" ++ name ++ "/templates/page/index.march")(page_index_source(name, pascal))
+    write("lib/page_controller.march")(page_controller_source(pascal))
+    write("lib/counter.march")(counter_island_source())
     write("config/config.march")(config_main())
     write("config/dev.march")(config_dev())
     write("config/test.march")(config_test())
     write("config/prod.march")(config_prod())
-    write("assets/css/app.css")(app_css(name))
-    write("assets/js/app.js")(app_js())
-    write("test/test_helper.march")(test_helper_source(pascal))
-    write("test/controllers/test_page_controller.march")(test_page_controller_source(pascal))
+    write("public/css/app.css")(app_css())
+    write("public/js/.gitkeep")("")
+    write("islands/.gitkeep")("")
+    write("test/" ++ name ++ "_test.march")(test_source(name, pascal))
     let _ = Process.run("sh", ["-c", "git init " ++ name ++ " > /dev/null 2>&1"])
     Ok(())
   end
