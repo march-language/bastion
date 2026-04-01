@@ -1,0 +1,266 @@
+-- Forge.Server — forge bastion server
+--
+-- Starts the Bastion dev server with file-watching and auto-restart.
+--
+-- Behaviour:
+-- - Spawns a child process running `march <entry>` with MARCH_ENV=dev.
+-- - Watches lib/ and config/ for .march file mtime changes (1s poll).
+-- - On any change: prints the changed filename, kills the child, spawns
+--   a new one. BastionDev's SSE live-reload endpoint reconnects and
+--   triggers a browser reload automatically.
+-- - Optionally spawns esbuild --watch for the assets pipeline.
+-- - On SIGINT/SIGTERM: kills child and esbuild, exits cleanly.
+--
+-- Ported from cmd_bastion_server.ml.
+
+mod Forge.Server do
+
+needs IO.File, IO.FS, IO.Process, IO.Signal
+
+-- ── Mtime snapshot ───────────────────────────────────────────────────────────
+
+-- Recursively collect .march file mtimes under dir.
+-- Returns a list of (path, mtime) pairs.
+pfn collect_mtimes(dir) do
+  if !FS.exists(dir) || !FS.is_dir(dir) do
+    []
+  else
+    let entries = FS.list_dir(dir)
+    List.concat_map(entries, fn name ->
+      let path = dir ++ "/" ++ name
+      if FS.is_dir(path) do
+        collect_mtimes(path)
+      else if String.ends_with(name, ".march") do
+        match FS.stat(path) do
+        Ok(st)  -> [(path, st.mtime)]
+        Err(_)  -> []
+        end
+      else
+        []
+      end
+    )
+  end
+end
+
+pfn snapshot(lib_dir, config_dir) do
+  List.append(collect_mtimes(lib_dir), collect_mtimes(config_dir))
+end
+
+-- Return Some(path) for the first changed or new file, None if nothing changed.
+pfn first_change(prev, curr) do
+  List.find_value(curr, fn (path, mtime) ->
+    match List.assoc(prev, path) do
+    None           -> Some(path)   -- new file
+    Some(old_mtime) ->
+      if mtime != old_mtime do Some(path) else None end
+    end
+  )
+end
+
+-- ── Environment helpers ───────────────────────────────────────────────────────
+
+-- Merge a list of (key, value) overrides into the current process environment.
+pfn build_env(overrides) do
+  let base = Process.env()
+  -- for each override, replace or add
+  List.foldl(overrides, base, fn (k, v), env ->
+    let without = List.filter(env, fn (ek, _) -> ek != k)
+    List.append(without, [(k, v)])
+  )
+end
+
+-- Locate the `march` binary in PATH.
+pfn find_march_exe() do
+  let path_dirs = match Env.get("PATH") do
+    None    -> ["/usr/local/bin", "/usr/bin", "/bin"]
+    Some(p) -> String.split(p, ":")
+  end
+  match List.find_value(path_dirs, fn d ->
+    let candidate = d ++ "/march"
+    if FS.exists(candidate) do Some(candidate) else None end
+  ) do
+  Some(exe) -> exe
+  None      -> "march"   -- will fail at execve, but let the OS report it
+  end
+end
+
+-- ── esbuild watcher ──────────────────────────────────────────────────────────
+
+pfn find_esbuild() do
+  let path_dirs = match Env.get("PATH") do
+    None    -> ["/usr/local/bin", "/usr/bin", "/bin"]
+    Some(p) -> String.split(p, ":")
+  end
+  List.find_value(path_dirs, fn d ->
+    let candidate = d ++ "/esbuild"
+    if FS.exists(candidate) do Some(candidate) else None end
+  )
+end
+
+-- Spawn esbuild --watch if assets/ exists and esbuild is installed.
+-- Returns the child PID or -1 if not started.
+pfn maybe_start_esbuild(root) do
+  let js_entry  = root ++ "/assets/js/app.js"
+  let css_entry = root ++ "/assets/css/app.css"
+  let out_dir   = root ++ "/priv/static/assets"
+  let has_assets = FS.exists(js_entry) || FS.exists(css_entry)
+  if !has_assets do -1
+  else
+    match find_esbuild() do
+    None ->
+      IO.println("    Assets:    esbuild not found — run `forge assets build` manually")
+      -1
+    Some(esbuild) ->
+      Dir.make_all(out_dir)
+      let entries = List.filter_map([js_entry, css_entry], fn p ->
+        if FS.exists(p) do Some(p) else None end
+      )
+      let args = List.append(
+        entries,
+        ["--bundle", "--outdir=" ++ out_dir, "--sourcemap", "--watch"]
+      )
+      let pid = Process.spawn(esbuild, args, Process.env())
+      IO.println("    Assets:    esbuild --watch (pid " ++ Int.to_string(pid) ++ ")")
+      pid
+    end
+  end
+end
+
+-- ── Banner ───────────────────────────────────────────────────────────────────
+
+pfn print_banner(app_name, port, has_assets) do
+  IO.println("")
+  IO.println("==> Bastion dev server starting")
+  IO.println("    App:       " ++ app_name)
+  IO.println("    URL:       http://localhost:" ++ Int.to_string(port))
+  IO.println("    Dashboard: http://localhost:" ++ Int.to_string(port) ++ "/_bastion")
+  IO.println("    Env:       dev")
+  IO.println("    Watching:  lib/  config/")
+  if has_assets do
+    IO.println("    Assets:    assets/ -> priv/static/assets/ (esbuild)")
+  end
+  IO.println("    Press Ctrl+C to stop.")
+  IO.println("")
+end
+
+-- ── Watch loop ───────────────────────────────────────────────────────────────
+-- Recursive implementation — replaces the OCaml while true loop.
+
+pfn watch_loop(march_exe, entry, env, child_pid, esbuild_pid, lib_dir, config_dir, prev) do
+  Time.sleep_ms(1000)
+
+  -- Re-spawn server if it exited unexpectedly
+  let new_child = match Process.wait_nohang(child_pid) do
+    Some(_) ->
+      IO.println("--> Server exited unexpectedly. Restarting in 1s...")
+      Time.sleep_ms(1000)
+      Process.spawn(march_exe, [entry], env)
+    None -> child_pid
+  end
+
+  -- Re-spawn esbuild if it exited unexpectedly
+  let new_esbuild = if esbuild_pid > 0 do
+    match Process.wait_nohang(esbuild_pid) do
+    Some(_) ->
+      IO.println("--> esbuild exited unexpectedly. Restarting...")
+      let root = Path.dirname(Path.dirname(lib_dir))
+      maybe_start_esbuild(root)
+    None -> esbuild_pid
+    end
+  else
+    esbuild_pid
+  end
+
+  -- Detect file changes
+  let curr = snapshot(lib_dir, config_dir)
+  let new_child2 = match first_change(prev, curr) do
+    None -> new_child
+    Some(changed) ->
+      IO.println("--> change detected in " ++ Path.basename(changed) ++ ", restarting...")
+      Process.kill(new_child, Sigterm)
+      Process.wait(new_child)
+      let restarted = Process.spawn(march_exe, [entry], env)
+      -- brief pause so the new server can bind the port before next check
+      Time.sleep_ms(100)
+      restarted
+  end
+
+  watch_loop(march_exe, entry, env, new_child2, new_esbuild, lib_dir, config_dir, curr)
+end
+
+-- ── Run ──────────────────────────────────────────────────────────────────────
+
+doc """
+Start the Bastion dev server.
+
+`port_override` is Some(port) to use a specific port, or None for the default (4000).
+"""
+fn run(port_override) do
+  match Forge.Project.load() do
+  Err(msg) -> Err(msg)
+  Ok(proj) ->
+    let root       = proj.root
+    let lib_dir    = root ++ "/lib"
+    let config_dir = root ++ "/config"
+    let entry      = lib_dir ++ "/" ++ proj.name ++ ".march"
+    if !FS.exists(entry) do
+      Err("entry point not found: " ++ entry)
+    else
+      -- Build MARCH_LIB_PATH from path deps + lib/ + config/
+      let dep_lib_paths = List.filter_map(proj.deps, fn (_, dep) ->
+        match dep with
+        | Forge.Project.PathDep(rel) ->
+          let abs = if Path.is_relative(rel) do root ++ "/" ++ rel else rel end
+          let d = abs ++ "/lib"
+          if FS.exists(d) do Some(d) else None end
+        | _ -> None
+        end
+      )
+      let all_lib_paths = List.concat([
+        dep_lib_paths,
+        [lib_dir],
+        if FS.exists(config_dir) do [config_dir] else [] end
+      ])
+      let lib_path_str = String.join(all_lib_paths, ":")
+      let port = match port_override do
+        Some(p) -> p
+        None    -> 4000
+      end
+      let env = build_env([
+        ("MARCH_ENV",      "dev"),
+        ("MARCH_LIB_PATH", lib_path_str),
+        ("BASTION_PORT",   Int.to_string(port))
+      ])
+      let march_exe  = find_march_exe()
+      let has_assets = FS.exists(root ++ "/assets")
+      print_banner(proj.name, port, has_assets)
+
+      -- Spawn esbuild --watch for assets
+      let esbuild_pid = maybe_start_esbuild(root)
+
+      -- Spawn initial server child
+      let child_pid = Process.spawn(march_exe, [entry], env)
+
+      -- Clean shutdown on Ctrl-C
+      Signal.trap(Sigint, fn _ ->
+        if child_pid > 0 do
+          Process.kill(child_pid, Sigterm)
+          Process.wait(child_pid)
+        end
+        if esbuild_pid > 0 do
+          Process.kill(esbuild_pid, Sigterm)
+          Process.wait(esbuild_pid)
+        end
+        IO.println("\n--> Stopped.")
+        Process.exit(0)
+      )
+
+      let prev = snapshot(lib_dir, config_dir)
+      watch_loop(march_exe, entry, env, child_pid, esbuild_pid, lib_dir, config_dir, prev)
+
+      Ok(())   -- unreachable — loop exits via SIGINT
+    end
+  end
+end
+
+end

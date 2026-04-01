@@ -1,0 +1,26 @@
+-- Forge.New — forge bastion new <name>
+--
+-- Scaffolds a new Bastion web application.
+-- Thin wrapper around Forge.Scaffold.scaffold/1.
+-- Ported from cmd_bastion_new.ml.
+
+mod Forge.New do
+
+needs IO.File, IO.FS, IO.Process
+
+import Forge.Scaffold
+
+doc "Run `forge bastion new <name>` — scaffold a new Bastion app."
+fn run(name) do
+  match Forge.Scaffold.scaffold(name) do
+  Ok(()) ->
+    IO.println("created Bastion app '" ++ name ++ "'")
+    IO.println("  next steps:")
+    IO.println("    cd " ++ name)
+    IO.println("    forge bastion server")
+    Ok(())
+  Err(msg) -> Err(msg)
+  end
+end
+
+end

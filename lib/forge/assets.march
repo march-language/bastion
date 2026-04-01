@@ -1,0 +1,188 @@
+-- Forge.Assets — forge assets build / deploy / watch
+--
+-- Shells out to esbuild to bundle the assets in assets/ into
+-- priv/static/assets/.
+--
+--   build   — dev bundle: sourcemaps, no minification
+--   deploy  — prod bundle: minified + content-hash fingerprinting, writes manifest
+--   watch   — runs esbuild in --watch mode (for use alongside forge bastion server)
+--
+-- Directory conventions (relative to project root):
+--   assets/js/app.js              JS entry point (may import CSS)
+--   assets/css/app.css            CSS entry point
+--   priv/static/assets/           output directory (gitignored)
+--   priv/static/assets/manifest.json  digest manifest (deploy only)
+--
+-- esbuild must be on PATH.  Install with:
+--   npm install -g esbuild    OR    brew install esbuild
+--
+-- Ported from cmd_assets.ml.
+
+mod Forge.Assets do
+
+needs IO.File, IO.FS, IO.Process
+
+-- ── Helpers ──────────────────────────────────────────────────────────────────
+
+-- List all regular files immediately inside dir (non-recursive).
+pfn readdir_files(dir) do
+  match FS.list_dir(dir) do
+  Ok(entries) ->
+    List.filter(entries, fn name ->
+      let p = dir ++ "/" ++ name
+      FS.exists(p) && !FS.is_dir(p)
+    )
+  Err(_) -> []
+  end
+end
+
+-- Locate esbuild in PATH.
+pfn find_esbuild() do
+  let path_dirs = match Env.get("PATH") do
+    None    -> ["/usr/local/bin", "/usr/bin", "/bin"]
+    Some(p) -> String.split(p, ":")
+  end
+  match List.find_value(path_dirs, fn d ->
+    let candidate = d ++ "/esbuild"
+    if FS.exists(candidate) do Some(candidate) else None end
+  ) do
+  Some(exe) -> Ok(exe)
+  None ->
+    Err("esbuild not found in PATH.\nInstall it with one of:\n  npm install -g esbuild\n  brew install esbuild")
+  end
+end
+
+-- 8-hex-char MD5 digest of file content — good enough for cache-busting.
+pfn fingerprint(content) do
+  let hex = Digest.md5_hex(content)
+  String.slice(hex, 0, 8)
+end
+
+-- Ensure priv/static/assets/ exists.
+pfn ensure_output_dir(root) do
+  Dir.make_all(root ++ "/priv/static/assets")
+end
+
+-- Build the esbuild command from entry points, flags, and output directory.
+pfn esbuild_cmd(esbuild_exe, root, extra_flags) do
+  let js_entry  = root ++ "/assets/js/app.js"
+  let css_entry = root ++ "/assets/css/app.css"
+  let out_dir   = root ++ "/priv/static/assets"
+  let entries = List.filter_map([js_entry, css_entry], fn p ->
+    if FS.exists(p) do Some(p) else None end
+  )
+  if List.is_empty(entries) do
+    Err("No entry points found. Expected assets/js/app.js or assets/css/app.css")
+  else
+    let entry_str = String.join(entries, " ")
+    let cmd = esbuild_exe ++ " " ++ entry_str
+             ++ " --bundle --outdir=" ++ out_dir
+             ++ " " ++ extra_flags
+    Ok(cmd)
+  end
+end
+
+-- ── Digest (deploy only) ──────────────────────────────────────────────────────
+
+-- Fingerprint all output files, rename them with a hash suffix, and write
+-- priv/static/assets/manifest.json.
+-- The manifest maps logical names (e.g. "app.js") to digested names
+-- (e.g. "app-a1b2c3d4.js").
+pfn digest_assets(root) do
+  let assets_dir = root ++ "/priv/static/assets"
+  let files = readdir_files(assets_dir)
+    |> List.filter(fn f -> f != "manifest.json")
+  let manifest_entries = List.filter_map(files, fn filename ->
+    let filepath = assets_dir ++ "/" ++ filename
+    let content  = File.read(filepath)
+    let hash     = fingerprint(content)
+    let ext      = Path.extension(filename)
+    let stem     = Path.remove_extension(filename)
+    let hashed   = stem ++ "-" ++ hash ++ ext
+    let hashed_p = assets_dir ++ "/" ++ hashed
+    match FS.rename(filepath, hashed_p) do
+    Ok(())  -> Some((filename, hashed))
+    Err(e)  ->
+      IO.eprintln("warning: could not rename " ++ filename ++ ": " ++ e)
+      Some((filename, hashed))
+    end
+  )
+  -- Write manifest.json
+  let manifest_path = assets_dir ++ "/manifest.json"
+  let pairs = List.map(manifest_entries, fn (k, v) ->
+    "  " ++ "\"" ++ k ++ "\": \"" ++ v ++ "\""
+  )
+  let content = "{\n" ++ String.join(pairs, ",\n") ++ "\n}\n"
+  File.write(manifest_path, content)
+  let count = List.length(manifest_entries)
+  let entry_word = if count == 1 do "entry" else "entries" end
+  IO.println("wrote " ++ manifest_path ++ " (" ++ Int.to_string(count) ++ " " ++ entry_word ++ ")")
+  List.each(manifest_entries, fn (k, v) ->
+    IO.println("  " ++ k ++ " -> " ++ v)
+  )
+end
+
+-- ── Public commands ───────────────────────────────────────────────────────────
+
+doc "forge assets build — dev bundle with sourcemaps, no minification."
+fn build() do
+  match Forge.Project.load() do
+  Err(msg) -> Err(msg)
+  Ok(proj) ->
+    let root = proj.root
+    ensure_output_dir(root)
+    with Ok(esbuild) <- find_esbuild(),
+         Ok(cmd)     <- esbuild_cmd(esbuild, root, "--sourcemap") do
+      IO.println("--> forge assets build\n    " ++ cmd)
+      let exit_code = Process.exec_shell(cmd)
+      if exit_code == 0 do
+        IO.println("--> assets built successfully.")
+        Ok(())
+      else
+        Err("esbuild exited with code " ++ Int.to_string(exit_code))
+      end
+    end
+  end
+end
+
+doc "forge assets deploy — prod bundle: minified + digest fingerprinting."
+fn deploy() do
+  match Forge.Project.load() do
+  Err(msg) -> Err(msg)
+  Ok(proj) ->
+    let root = proj.root
+    ensure_output_dir(root)
+    with Ok(esbuild) <- find_esbuild(),
+         Ok(cmd)     <- esbuild_cmd(esbuild, root, "--minify --sourcemap=external") do
+      IO.println("--> forge assets deploy\n    " ++ cmd)
+      let exit_code = Process.exec_shell(cmd)
+      if exit_code == 0 do
+        IO.println("--> bundling complete, fingerprinting...")
+        digest_assets(root)
+        IO.println("--> assets deployed successfully.")
+        Ok(())
+      else
+        Err("esbuild exited with code " ++ Int.to_string(exit_code))
+      end
+    end
+  end
+end
+
+doc "forge assets watch — rebuild on file changes (dev mode)."
+fn watch() do
+  match Forge.Project.load() do
+  Err(msg) -> Err(msg)
+  Ok(proj) ->
+    let root = proj.root
+    ensure_output_dir(root)
+    with Ok(esbuild) <- find_esbuild(),
+         Ok(cmd)     <- esbuild_cmd(esbuild, root, "--sourcemap --watch") do
+      IO.println("--> forge assets watch (press Ctrl+C to stop)\n    " ++ cmd)
+      let exit_code = Process.exec_shell(cmd)
+      if exit_code == 0 do Ok(())
+      else Err("esbuild exited with code " ++ Int.to_string(exit_code)) end
+    end
+  end
+end
+
+end

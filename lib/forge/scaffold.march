@@ -1,0 +1,140 @@
+-- Forge.Scaffold — forge bastion new <name>
+--
+-- Scaffolds a new Bastion web application skeleton.
+-- Ported from scaffold_bastion.ml.
+
+mod Forge.Scaffold do
+
+needs IO.File, IO.FS, IO.Process
+
+-- ── Helpers ──────────────────────────────────────────────────────────────────
+
+-- Convert snake_case to PascalCase: "my_app" -> "MyApp"
+pfn snake_to_pascal(s) do
+  let parts = String.split(s, "_")
+  let non_empty = List.filter(parts, fn p -> !String.is_empty(p))
+  List.map(non_empty, fn p -> String.capitalize(p))
+    |> String.join("")
+end
+
+-- Produce a literal ${name} placeholder for use inside generated source files.
+-- Needed because March triple-quoted strings evaluate ${...} at compile time.
+pfn iv(name) do
+  "${" ++ name ++ "}"
+end
+
+-- ── Templates ────────────────────────────────────────────────────────────────
+
+pfn forge_toml(name) do
+  "[package]\nname = \"" ++ name ++ "\"\nversion = \"0.1.0\"\ntype = \"app\"\ndescription = \"\"\nauthor = \"\"\n\n[deps]\nbastion = \"*\"\n"
+end
+
+pfn main_source(pascal) do
+  "mod " ++ pascal ++ " do\n\nfn router(conn, stats) do\n  " ++ pascal ++ ".Router.dispatch(conn, stats)\nend\n\nfn main() do\n  let stats = BastionDev.new_stats()\n  HttpServer.new(4000)\n  |> HttpServer.plug(fn conn -> router(conn, stats))\n  |> HttpServer.listen()\nend\n\nend\n"
+end
+
+pfn router_source(pascal) do
+  "mod " ++ pascal ++ ".Router do\n\nalias HttpServer as H\n\nfn dispatch(conn, stats) do\n  let m = H.method(conn)\n  let p = H.path_info(conn)\n  match (m, p) do\n  -- ROUTE: GET /\n  (:get, Nil) ->\n    " ++ pascal ++ ".Controllers.PageController.index(conn)\n\n  -- ROUTE: GET /_bastion\n  (:get, Cons(\"_bastion\", Nil)) ->\n    BastionDev.dashboard_handler(conn, stats)\n\n  _ ->\n    H.send_resp(conn, 404, \"Not Found\")\n  end\nend\n\nend\n"
+end
+
+pfn page_controller_source(pascal) do
+  "mod " ++ pascal ++ ".Controllers.PageController do\n\nalias HttpServer as H\nalias " ++ pascal ++ ".Templates.Layout as Layout\nalias " ++ pascal ++ ".Templates.Page.Index as IndexView\n\nfn index(conn) do\n  let content = IndexView.render()\n  let html    = Layout.wrap(content)\n  H.html(conn, 200, IOList.to_string(html))\nend\n\nend\n"
+end
+
+pfn layout_source(name, pascal) do
+  let q = "\"\"\""
+  "mod " ++ pascal ++ ".Templates.Layout do\n\nfn wrap(inner_html) do\n  let css_path = Bastion.Assets.static_path(\"app.css\")\n  let js_path  = Bastion.Assets.static_path(\"app.js\")\n  ~H" ++ q ++ "<!DOCTYPE html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>" ++ name ++ "</title>\n    <link rel=\"stylesheet\" href=\"" ++ iv("css_path") ++ "\">\n  </head>\n  <body>\n    " ++ iv("inner_html") ++ "\n    <script src=\"" ++ iv("js_path") ++ "\"></script>\n  </body>\n</html>" ++ q ++ "\nend\n\nend\n"
+end
+
+pfn page_index_source(name, pascal) do
+  let q = "\"\"\""
+  "mod " ++ pascal ++ ".Templates.Page.Index do\n\nfn render() do\n  ~H" ++ q ++ "<div class=\"container\">\n  <h1>Welcome to " ++ name ++ "!</h1>\n  <p>Edit <code>lib/" ++ name ++ "/templates/page/index.march</code> to get started.</p>\n</div>" ++ q ++ "\nend\n\nend\n"
+end
+
+pfn config_main() do
+  "mod Config do\n-- Application configuration.\n-- Environment-specific settings live in config/dev.march,\n-- config/test.march, and config/prod.march.\nend\n"
+end
+
+pfn config_dev() do
+  "mod Config.Dev do\n  let port = 4000\n  let debug = true\nend\n"
+end
+
+pfn config_test() do
+  "mod Config.Test do\n  let port = 4001\n  let debug = false\nend\n"
+end
+
+pfn config_prod() do
+  "mod Config.Prod do\n  -- Set the PORT environment variable to configure the HTTP port.\n  let port = match Env.get(\"PORT\") do\n    Some(p) -> string_to_int(p)\n    None    -> 4000\n  end\nend\n"
+end
+
+pfn app_css(name) do
+  "/* app.css — " ++ name ++ " styles */\n\n*, *::before, *::after {\n  box-sizing: border-box;\n}\n\nbody {\n  margin: 0;\n  font-family: system-ui, -apple-system, sans-serif;\n  line-height: 1.5;\n}\n\n.container {\n  max-width: 960px;\n  margin: 0 auto;\n  padding: 2rem;\n}\n"
+end
+
+pfn app_js() do
+  "// app.js — application JavaScript\n"
+end
+
+pfn test_helper_source(pascal) do
+  "mod " ++ pascal ++ ".TestHelper do\n\nfn start() do\n  :ok\nend\n\nend\n"
+end
+
+pfn test_page_controller_source(pascal) do
+  "mod " ++ pascal ++ ".Controllers.TestPageController do\n\ndescribe \"PageController.index\" do\n  test \"placeholder\" do\n    assert true\n  end\nend\n\nend\n"
+end
+
+pfn editorconfig() do
+  "root = true\n\n[*]\nindent_style = space\nindent_size = 2\ncharset = utf-8\nend_of_line = lf\ntrim_trailing_whitespace = true\ninsert_final_newline = true\n\n[*.march]\nindent_style = space\nindent_size = 2\n"
+end
+
+pfn gitignore() do
+  "/.march/\n"
+end
+
+pfn readme(name) do
+  "# " ++ String.capitalize(name) ++ "\n"
+end
+
+-- ── Scaffold ─────────────────────────────────────────────────────────────────
+
+doc """
+Scaffold a new Bastion application named `name` in a new directory.
+Returns Ok(()) on success or Err(msg) on failure.
+"""
+fn scaffold(name) do
+  if FS.exists(name) do
+    Err("directory '" ++ name ++ "' already exists")
+  else
+    let pascal = snake_to_pascal(name)
+    Dir.make_all(name ++ "/lib/" ++ name ++ "/controllers")
+    Dir.make_all(name ++ "/lib/" ++ name ++ "/templates/page")
+    Dir.make_all(name ++ "/config")
+    Dir.make_all(name ++ "/assets/css")
+    Dir.make_all(name ++ "/assets/js")
+    Dir.make_all(name ++ "/test/controllers")
+    let f = fn rel -> fn content ->
+      File.write(name ++ "/" ++ rel, content)
+    in
+    f("forge.toml")(forge_toml(name))
+    f(".editorconfig")(editorconfig())
+    f(".gitignore")(gitignore())
+    f("README.md")(readme(name))
+    f("lib/" ++ name ++ ".march")(main_source(pascal))
+    f("lib/" ++ name ++ "/router.march")(router_source(pascal))
+    f("lib/" ++ name ++ "/controllers/page_controller.march")(page_controller_source(pascal))
+    f("lib/" ++ name ++ "/templates/layout.march")(layout_source(name, pascal))
+    f("lib/" ++ name ++ "/templates/page/index.march")(page_index_source(name, pascal))
+    f("config/config.march")(config_main())
+    f("config/dev.march")(config_dev())
+    f("config/test.march")(config_test())
+    f("config/prod.march")(config_prod())
+    f("assets/css/app.css")(app_css(name))
+    f("assets/js/app.js")(app_js())
+    f("test/test_helper.march")(test_helper_source(pascal))
+    f("test/controllers/test_page_controller.march")(test_page_controller_source(pascal))
+    Process.exec_shell("git init " ++ name ++ " > /dev/null 2>&1")
+    Ok(())
+  end
+end
+
+end

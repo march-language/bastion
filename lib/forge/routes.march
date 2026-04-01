@@ -1,0 +1,392 @@
+-- Forge.Routes — forge bastion routes
+--
+-- Reads the project's router.march file(s) and prints all registered routes
+-- in a formatted table.
+--
+-- Route detection: scans for the comment convention:
+--   -- ROUTE: GET /path
+-- and also for bare match-arm patterns of the form:
+--   (:get,  [...])  ->
+--   (:post, [...])  ->
+-- The two strategies are combined and de-duplicated.
+--
+-- Ported from cmd_bastion_routes.ml.
+
+mod Forge.Routes do
+
+needs IO.File, IO.FS
+
+-- A single recognised route.
+type Route = Route({
+  method_str : String,
+  path       : String,
+  handler    : String
+})
+
+-- ── String helpers ───────────────────────────────────────────────────────────
+
+pfn trim_left(s) do
+  let chars = String.to_chars(s)
+  let dropped = List.drop_while(chars, fn c -> c == ' ' || c == '\t')
+  String.from_chars(dropped)
+end
+
+pfn starts_with(s, prefix) do
+  String.starts_with(s, prefix)
+end
+
+-- ── Comment-style route parser ───────────────────────────────────────────────
+-- Parses "-- ROUTE: GET /path" comments followed by a handler expression.
+
+pfn extract_handler_from_line(line) do
+  -- handler is the text before "(" or "->"
+  let trimmed = trim_left(line)
+  if String.is_empty(trimmed) || starts_with(trimmed, "--") do
+    None
+  else
+    let h = match String.index_of(trimmed, "(") do
+      Some(k) -> String.slice(trimmed, 0, k) |> String.trim()
+      None    ->
+        match String.index_of(trimmed, "->") do
+        Some(k) when k > 0 -> String.slice(trimmed, 0, k) |> String.trim()
+        _                  -> String.trim(trimmed)
+        end
+    end
+    if String.is_empty(h) do None else Some(h) end
+  end
+end
+
+pfn find_handler(lines, from_idx) do
+  let n = List.length(lines)
+  find_handler_loop(lines, from_idx, n)
+end
+
+pfn find_handler_loop(lines, idx, n) do
+  if idx >= n do ""
+  else
+    let line = trim_left(List.get(lines, idx))
+    if String.is_empty(line) || starts_with(line, "--") do
+      find_handler_loop(lines, idx + 1, n)
+    else
+      match extract_handler_from_line(line) do
+      Some(h) -> h
+      None    -> find_handler_loop(lines, idx + 1, n)
+      end
+    end
+  end
+end
+
+pfn parse_comment_routes(lines) do
+  let indexed = List.zip(List.range(0, List.length(lines)), lines)
+  List.filter_map(indexed, fn (i, line) ->
+    let trimmed = trim_left(line)
+    if starts_with(trimmed, "-- ROUTE: ") do
+      let rest = String.slice(trimmed, 10, String.length(trimmed))
+      match String.split_first(rest, " ") do
+      Some((meth, path)) ->
+        let handler = find_handler(lines, i + 1)
+        Some(Route({
+          method_str = String.upcase(meth),
+          path       = path,
+          handler    = handler
+        }))
+      None -> None
+      end
+    else
+      None
+    end
+  )
+end
+
+-- ── Arm-style route parser ───────────────────────────────────────────────────
+-- Recognises match arms like (:get, Cons("a", Nil)) ->
+
+pfn method_of_token(s) do
+  match String.downcase(String.trim(s)) do
+  ":get"    -> Some("GET")
+  "get"     -> Some("GET")
+  ":post"   -> Some("POST")
+  "post"    -> Some("POST")
+  ":put"    -> Some("PUT")
+  "put"     -> Some("PUT")
+  ":patch"  -> Some("PATCH")
+  "patch"   -> Some("PATCH")
+  ":delete" -> Some("DELETE")
+  "delete"  -> Some("DELETE")
+  ":head"   -> Some("HEAD")
+  "head"    -> Some("HEAD")
+  _         -> None
+  end
+end
+
+pfn segment_of_token(p) do
+  let p2 = String.trim(p)
+  let len = String.length(p2)
+  if len >= 2 && String.starts_with(p2, "\"") && String.ends_with(p2, "\"") do
+    String.slice(p2, 1, len - 1)
+  else
+    ":" ++ p2
+  end
+end
+
+-- Parse a Cons-chain string like Cons("a", Cons("b", Nil)) into segments.
+pfn segments_of_cons(s) do
+  let s2 = String.trim(s)
+  if s2 == "Nil" || String.is_empty(s2) do
+    []
+  else if starts_with(s2, "Cons(") do
+    let inner = String.slice(s2, 5, String.length(s2))
+    match find_balanced_comma(inner, 0, 0) do
+    None -> []
+    Some(comma_idx) ->
+      let head = String.trim(String.slice(inner, 0, comma_idx))
+      let tail_raw = String.trim(String.slice(inner, comma_idx + 1, String.length(inner)))
+      -- strip trailing ")" from tail
+      let tail = if String.ends_with(tail_raw, ")") do
+        String.slice(tail_raw, 0, String.length(tail_raw) - 1)
+      else
+        tail_raw
+      end
+      Cons(segment_of_token(head), segments_of_cons(tail))
+    end
+  else
+    []
+  end
+end
+
+-- Find the index of the first comma at depth 0 in string s starting from pos.
+pfn find_balanced_comma(s, pos, depth) do
+  let n = String.length(s)
+  if pos >= n do None
+  else
+    let c = String.char_at(s, pos)
+    match c do
+    '(' -> find_balanced_comma(s, pos + 1, depth + 1)
+    '[' -> find_balanced_comma(s, pos + 1, depth + 1)
+    ')' -> find_balanced_comma(s, pos + 1, depth - 1)
+    ']' -> find_balanced_comma(s, pos + 1, depth - 1)
+    ',' when depth == 0 -> Some(pos)
+    _   -> find_balanced_comma(s, pos + 1, depth)
+    end
+  end
+end
+
+pfn path_of_list_literal(s) do
+  let s2 = String.trim(s)
+  if s2 == "Nil" do
+    "/"
+  else if starts_with(s2, "Cons(") do
+    "/" ++ String.join(segments_of_cons(s2), "/")
+  else
+    -- bracket form [...]
+    let inner = if String.length(s2) >= 2
+                   && String.starts_with(s2, "[")
+                   && String.ends_with(s2, "]") do
+      String.trim(String.slice(s2, 1, String.length(s2) - 1))
+    else
+      s2
+    end
+    if String.is_empty(inner) do "/"
+    else
+      let parts = String.split(inner, ",")
+      let segs = List.map(parts, fn p ->
+        let p2 = String.trim(p)
+        if String.length(p2) >= 2
+           && String.starts_with(p2, "\"")
+           && String.ends_with(p2, "\"") do
+          String.slice(p2, 1, String.length(p2) - 1)
+        else
+          ":" ++ p2
+        end
+      )
+      "/" ++ String.join(segs, "/")
+    end
+  end
+end
+
+pfn is_arm_line(line) do
+  let trimmed = trim_left(line)
+  starts_with(trimmed, "(:") ||
+  (String.length(trimmed) > 1
+   && String.starts_with(trimmed, "(")
+   && (
+     starts_with(String.slice(trimmed, 1, String.length(trimmed)), "Get,")  ||
+     starts_with(String.slice(trimmed, 1, String.length(trimmed)), "Post,") ||
+     starts_with(String.slice(trimmed, 1, String.length(trimmed)), "Put,")  ||
+     starts_with(String.slice(trimmed, 1, String.length(trimmed)), "Patch,") ||
+     starts_with(String.slice(trimmed, 1, String.length(trimmed)), "Delete,") ||
+     starts_with(String.slice(trimmed, 1, String.length(trimmed)), "Head,")
+   ))
+end
+
+pfn parse_arm_line(line, lines, line_idx) do
+  let trimmed = trim_left(line)
+  -- extract up to "->"
+  let s = match String.index_of(trimmed, "->") do
+    Some(k) when k > 0 -> String.trim(String.slice(trimmed, 0, k - 1))
+    _                  -> trimmed
+  end
+  -- parse (:method, path_list)
+  match String.index_of(s, ",") do
+  None -> None
+  Some(comma) ->
+    let atom_part = String.trim(String.slice(s, 1, comma - 1))
+    let rest_raw  = String.trim(String.slice(s, comma + 1, String.length(s)))
+    -- strip trailing ")"
+    let rest = if String.ends_with(rest_raw, ")") do
+      String.slice(rest_raw, 0, String.length(rest_raw) - 1)
+    else
+      rest_raw
+    end
+    match method_of_token(atom_part) do
+    None -> None
+    Some(meth) ->
+      let path = path_of_list_literal(rest)
+      -- skip internal bastion routes
+      if starts_with(path, "/_bastion") do
+        None
+      else
+        -- handler: look for text after "->" on same line, else next non-blank line
+        let handler = match String.index_of(line, "->") do
+          Some(k) ->
+            let after = String.trim(String.slice(line, k + 2, String.length(line)))
+            match String.index_of(after, "(") do
+            Some(p) -> String.trim(String.slice(after, 0, p))
+            None    -> String.trim(after)
+            end
+          None -> find_handler(lines, line_idx + 1)
+        end
+        Some(Route({ method_str = meth, path = path, handler = handler }))
+      end
+    end
+  end
+end
+
+pfn parse_arm_routes(lines) do
+  let indexed = List.zip(List.range(0, List.length(lines)), lines)
+  List.filter_map(indexed, fn (i, line) ->
+    if is_arm_line(line) do
+      parse_arm_line(line, lines, i)
+    else
+      None
+    end
+  )
+end
+
+-- ── De-duplication ───────────────────────────────────────────────────────────
+
+pfn route_key(r) do
+  match r do
+  Route(r) -> r.method_str ++ " " ++ r.path
+  end
+end
+
+pfn dedup(routes) do
+  dedup_loop(routes, [])
+end
+
+pfn dedup_loop(routes, seen) do
+  match routes do
+  Nil -> []
+  Cons(r, rest) ->
+    let k = route_key(r)
+    if List.contains(seen, k) do
+      dedup_loop(rest, seen)
+    else
+      Cons(r, dedup_loop(rest, Cons(k, seen)))
+    end
+  end
+end
+
+-- ── Printer ──────────────────────────────────────────────────────────────────
+
+pfn pad(s, n) do
+  let len = String.length(s)
+  if len >= n do s
+  else s ++ String.repeat(" ", n - len) end
+end
+
+pfn print_routes(routes) do
+  if List.is_empty(routes) do
+    IO.println("No routes found.")
+  else
+    let col1 = List.foldl(routes, 6, fn r, acc ->
+      match r do
+      Route(r) -> max(acc, String.length(r.method_str))
+      end
+    )
+    let col2 = List.foldl(routes, 4, fn r, acc ->
+      match r do
+      Route(r) -> max(acc, String.length(r.path))
+      end
+    )
+    let sep_len = col1 + col2 + String.length("  CONTROLLER") + 6
+    let sep = String.repeat("-", sep_len)
+    IO.println(pad("METHOD", col1) ++ "  " ++ pad("PATH", col2) ++ "  CONTROLLER")
+    IO.println(sep)
+    List.each(routes, fn r ->
+      match r do
+      Route(r) ->
+        IO.println(pad(r.method_str, col1) ++ "  " ++ pad(r.path, col2) ++ "  " ++ r.handler)
+      end
+    )
+  end
+end
+
+-- ── Router file discovery ────────────────────────────────────────────────────
+
+pfn find_router_files(proj) do
+  let root    = proj.root
+  let lib_dir = root ++ "/lib"
+  let primary = lib_dir ++ "/" ++ proj.name ++ "/router.march"
+  if FS.exists(primary) do
+    [primary]
+  else
+    let sub = lib_dir ++ "/" ++ proj.name
+    if FS.exists(sub) && FS.is_dir(sub) do
+      let entries = FS.list_dir(sub)
+      List.filter_map(entries, fn name ->
+        if String.ends_with(name, "router.march")
+           || (String.starts_with(name, "router") && String.ends_with(name, ".march")) do
+          Some(sub ++ "/" ++ name)
+        else
+          None
+        end
+      )
+    else
+      []
+    end
+  end
+end
+
+-- ── Run ──────────────────────────────────────────────────────────────────────
+
+doc "List all routes in the current Bastion project."
+fn run() do
+  match Forge.Project.load() do
+  Err(msg) -> Err(msg)
+  Ok(proj) ->
+    let files = find_router_files(proj)
+    if List.is_empty(files) do
+      IO.println("No router file found (expected lib/" ++ proj.name ++ "/router.march).")
+      Ok(())
+    else
+      let all_routes = List.concat_map(files, fn path ->
+        let src   = File.read(path)
+        let lines = String.split(src, "\n")
+        let comment_routes = parse_comment_routes(lines)
+        let arm_routes     = parse_arm_routes(lines)
+        -- comment routes take priority; arm routes fill in any extras
+        let known = List.map(comment_routes, fn r -> route_key(r))
+        let extra = List.filter(arm_routes, fn r ->
+          !List.contains(known, route_key(r))
+        )
+        List.append(comment_routes, extra)
+      )
+      print_routes(dedup(all_routes))
+      Ok(())
+    end
+  end
+end
+
+end
