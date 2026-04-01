@@ -8,16 +8,14 @@ mod Forge.New do
 
 needs IO.File, IO.FS, IO.Process
 
-import Forge.Scaffold
-
 doc "Run `forge bastion new <name>` — scaffold a new Bastion app."
 fn run(name) do
   match Forge.Scaffold.scaffold(name) do
-  Ok(()) ->
-    IO.println("created Bastion app '" ++ name ++ "'")
-    IO.println("  next steps:")
-    IO.println("    cd " ++ name)
-    IO.println("    forge bastion server")
+  Ok(_) ->
+    println("created Bastion app '" ++ name ++ "'")
+    println("  next steps:")
+    println("    cd " ++ name)
+    println("    forge bastion server")
     Ok(())
   Err(msg) -> Err(msg)
   end
