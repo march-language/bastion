@@ -41,12 +41,7 @@ mod IslandView do
   Use Server mode for display-only islands like live feeds, scoreboards, etc.
   """
   fn island_server(name : String, state_json : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"server\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ "></div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="server" data-march-hydrate="eager" data-march-state='#{escape_attr(state_json)}'></div>"""
   end
 
   doc """
@@ -56,14 +51,7 @@ mod IslandView do
   and patches the DOM as the server pushes new state.
   """
   fn island_server_ssr(name : String, state_json : String, inner_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"server\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ ">"
-    ++ inner_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="server" data-march-hydrate="eager" data-march-state='#{escape_attr(state_json)}'>#{inner_html}</div>"""
   end
 
   -- ── Client-mode islands ──────────────────────────────────────────────────
@@ -78,12 +66,7 @@ mod IslandView do
   to the island's local update function.
   """
   fn island(name : String, state_json : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ "></div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_attr(state_json)}'></div>"""
   end
 
   doc """
@@ -93,14 +76,7 @@ mod IslandView do
   On hydration the runtime takes over and patches the DOM as state changes.
   """
   fn island_ssr(name : String, state_json : String, inner_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ ">"
-    ++ inner_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_attr(state_json)}'>#{inner_html}</div>"""
   end
 
   doc """
@@ -115,28 +91,14 @@ mod IslandView do
     IslandView.island_with_channel("Counter", state_json, "counter:#{user_id}")
   """
   fn island_with_channel(name : String, state_json : String, channel_topic : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ " data-march-channel=\"" ++ escape_attr(channel_topic) ++ "\""
-    ++ "></div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_attr(state_json)}' data-march-channel="#{escape_attr(channel_topic)}"></div>"""
   end
 
   doc """
   Render a Client-mode island with SSR content wired to a channel.
   """
   fn island_ssr_with_channel(name : String, state_json : String, channel_topic : String, inner_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ " data-march-channel=\"" ++ escape_attr(channel_topic) ++ "\""
-    ++ ">"
-    ++ inner_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_attr(state_json)}' data-march-channel="#{escape_attr(channel_topic)}">#{inner_html}</div>"""
   end
 
   -- ── Child islands ────────────────────────────────────────────────────────
@@ -162,30 +124,14 @@ mod IslandView do
     state_json — initial state JSON (derived from parent state, pushed by parent)
   """
   fn island_child(name : String, parent_id : String, on_event : String, state_json : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ " data-march-parent=\"" ++ escape_attr(parent_id) ++ "\""
-    ++ " data-march-on-event=\"" ++ escape_attr(on_event) ++ "\""
-    ++ "></div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_attr(state_json)}' data-march-parent="#{escape_attr(parent_id)}" data-march-on-event="#{escape_attr(on_event)}"></div>"""
   end
 
   doc """
   Render a child island with server-rendered initial HTML.
   """
   fn island_child_ssr(name : String, parent_id : String, on_event : String, state_json : String, inner_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ " data-march-parent=\"" ++ escape_attr(parent_id) ++ "\""
-    ++ " data-march-on-event=\"" ++ escape_attr(on_event) ++ "\""
-    ++ ">"
-    ++ inner_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_attr(state_json)}' data-march-parent="#{escape_attr(parent_id)}" data-march-on-event="#{escape_attr(on_event)}">#{inner_html}</div>"""
   end
 
   -- ── Hydration strategy variants ──────────────────────────────────────────
@@ -196,26 +142,14 @@ mod IslandView do
   strategy is one of: "eager", "lazy", "on-visible", "on-idle".
   """
   fn island_with_strategy(name : String, state_json : String, strat : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"" ++ strat ++ "\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ "></div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{strat}" data-march-state='#{escape_attr(state_json)}'></div>"""
   end
 
   doc """
   Render a Client-mode island with SSR content and a hydration strategy.
   """
   fn island_ssr_with_strategy(name : String, state_json : String, strat : String, inner_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"" ++ strat ++ "\""
-    ++ " data-march-state='" ++ escape_attr(state_json) ++ "'"
-    ++ ">"
-    ++ inner_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{strat}" data-march-state='#{escape_attr(state_json)}'>#{inner_html}</div>"""
   end
 
   -- ── Script tags ─────────────────────────────────────────────────────────
@@ -227,7 +161,7 @@ mod IslandView do
   Uses the default Bastion assets path.
   """
   fn scripts() : String do
-    "<script src=\"/_bastion/islands.js\"></script>"
+    ~H"""<script src="/_bastion/islands.js"></script>"""
   end
 
   doc """
@@ -238,7 +172,7 @@ mod IslandView do
     -- produces: <script src="/assets/islands.js"></script>
   """
   fn scripts_with_base(base_url : String) : String do
-    "<script src=\"" ++ base_url ++ "/islands.js\"></script>"
+    ~H"""<script src="#{base_url}/islands.js"></script>"""
   end
 
   doc """
@@ -248,14 +182,14 @@ mod IslandView do
   the bidirectional message loop. Include after scripts().
   """
   fn ws_scripts() : String do
-    "<script src=\"/_bastion/islands-ws.js\"></script>"
+    ~H"""<script src="/_bastion/islands-ws.js"></script>"""
   end
 
   doc """
   Generate the WebSocket script tag with a custom base URL.
   """
   fn ws_scripts_with_base(base_url : String) : String do
-    "<script src=\"" ++ base_url ++ "/islands-ws.js\"></script>"
+    ~H"""<script src="#{base_url}/islands-ws.js"></script>"""
   end
 
   -- ── Internal helpers ────────────────────────────────────────────────────
