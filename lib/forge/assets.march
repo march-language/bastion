@@ -200,4 +200,26 @@ fn watch() do
   end
 end
 
+fn main() do
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  match args do
+  Nil -> do
+    println("Usage: forge bastion.assets <command>")
+    println("  build   — dev bundle (sourcemaps, no minification)")
+    println("  deploy  — prod bundle (minified + content-hash manifest)")
+    println("  watch   — rebuild on file changes")
+  end
+  Cons(cmd, _) ->
+    let _ = if cmd == "build" do build()
+            else if cmd == "deploy" do deploy()
+            else if cmd == "watch" do watch()
+            else do
+              println("Unknown assets command: " ++ cmd)
+              Err("unknown command: " ++ cmd)
+            end end end end
+    ()
+  end
+end
+
 end

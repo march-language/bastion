@@ -389,4 +389,9 @@ fn run() do
   end
 end
 
+fn main() do
+  let _ = run()
+  ()
+end
+
 end

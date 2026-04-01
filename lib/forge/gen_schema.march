@@ -464,4 +464,47 @@ fn run_context(context_name, module_name) do
   Ok(())
 end
 
+fn main() do
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  match args do
+  Nil -> do
+    println("Usage: forge bastion.gen.schema <subcommand> ...")
+    println("  schema <Module> <table> [field:type ...]  — schema + migration")
+    println("  json   <Context> <Module> [field:type ...] — full JSON API scaffold")
+    println("  context <Context> <Module>                — context module only")
+  end
+  Cons(sub, rest) ->
+    let _ = if sub == "schema" do
+      match rest do
+      Cons(mod_, Cons(tbl, fields)) -> run_schema(mod_, tbl, fields)
+      _ -> do
+        println("Usage: forge bastion.gen.schema schema <Module> <table> [field:type ...]")
+        Err("missing args")
+      end
+      end
+    else if sub == "json" do
+      match rest do
+      Cons(ctx, Cons(mod_, fields)) -> run_json(ctx, mod_, fields)
+      _ -> do
+        println("Usage: forge bastion.gen.schema json <Context> <Module> [field:type ...]")
+        Err("missing args")
+      end
+      end
+    else if sub == "context" do
+      match rest do
+      Cons(ctx, Cons(mod_, _)) -> run_context(ctx, mod_)
+      _ -> do
+        println("Usage: forge bastion.gen.schema context <Context> <Module>")
+        Err("missing args")
+      end
+      end
+    else do
+      println("Unknown subcommand: " ++ sub)
+      Err("unknown subcommand: " ++ sub)
+    end end end end
+    ()
+  end
+end
+
 end

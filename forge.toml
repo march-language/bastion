@@ -5,6 +5,30 @@ type = "lib"
 description = ""
 author = ""
 
+[archive.task.bastion.new]
+command = "bastion.new"
+module  = "lib/forge/new.march"
+
+[archive.task.bastion.server]
+command = "bastion.server"
+module  = "lib/forge/server.march"
+
+[archive.task.bastion.routes]
+command = "bastion.routes"
+module  = "lib/forge/routes.march"
+
+[archive.task.bastion.assets]
+command = "bastion.assets"
+module  = "lib/forge/assets.march"
+
+[archive.task.bastion.gen.auth]
+command = "bastion.gen.auth"
+module  = "lib/forge/gen_auth.march"
+
+[archive.task.bastion.gen.schema]
+command = "bastion.gen.schema"
+module  = "lib/forge/gen_schema.march"
+
 [archive.task.bastion.gen.island]
 command = "bastion.gen.island"
 module  = "lib/forge/gen_island.march"

@@ -893,4 +893,9 @@ fn run() do
   Ok(())
 end
 
+fn main() do
+  let _ = run()
+  ()
+end
+
 end

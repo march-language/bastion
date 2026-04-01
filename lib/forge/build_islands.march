@@ -47,20 +47,27 @@ pfn pascal_to_snake_loop(chars, acc, first) do
 end
 
 -- ── @island scanner ───────────────────────────────────────────────────────────
+--
+-- Discovery uses `grep -rl` to find .march files containing "@island".
+-- This delegates encoding, binary-file handling, and recursion to the system's
+-- grep, which is more robust than a hand-rolled dir walker.
+--
+-- Module name extraction still reads the file: grep finds the file, then we
+-- scan for the `mod Name do` line that follows the @island annotation.
 
--- Recursively collect all .march files under a directory.
-pfn collect_march_files(dir) do
-  match Dir.list_full(dir) do
-  Ok(entries) ->
-    List.flat_map(entries, fn path -> do
-      if String.ends_with(path, ".march") do
-        [path]
-      else if Dir.exists(path) do
-        collect_march_files(path)
-      else
-        Nil
-      end end
-    end)
+-- Use grep to find all .march files under the given directories that contain
+-- the @island annotation.  Returns a list of file paths.
+pfn grep_island_files(dirs) do
+  let dir_args = String.join(dirs, " ")
+  let cmd = "grep -rl '@island' " ++ dir_args ++ " --include='*.march' 2>/dev/null"
+  match Process.run("sh", ["-c", cmd]) do
+  Ok(result) ->
+    let out = String.trim(Process.stdout(result))
+    if String.is_empty(out) do Nil
+    else
+      let paths = String.split(out, "\n")
+      List.filter(paths, fn p -> !String.is_empty(p))
+    end
   Err(_) -> Nil
   end
 end
@@ -71,11 +78,9 @@ fn extract_mod_name(line) do
   let trimmed = String.trim(line)
   if String.starts_with(trimmed, "mod ") do
     let rest = String.slice_bytes(trimmed, 4, String.byte_size(trimmed) - 4)
-    -- take everything up to the first space or "do"
     match String.index_of(rest, " ") do
     Some(k) -> Some(String.slice_bytes(rest, 0, k))
     None    ->
-      -- "mod Foo" with no trailing space — use the whole rest
       if String.is_empty(rest) do None else Some(String.trim(rest)) end
     end
   else
@@ -83,8 +88,7 @@ fn extract_mod_name(line) do
   end
 end
 
--- Scan a single .march file for @island annotations.
--- Returns a list of (module_name, source_path) pairs.
+-- Scan a single file for (module_name, source_path) pairs — one per @island.
 pfn scan_file(path) do
   match File.read_lines(path) do
   Ok(lines) -> scan_lines(lines, path, false, Nil)
@@ -111,12 +115,12 @@ pfn scan_lines(lines, path, next_is_island, acc) do
   end
 end
 
--- Scan lib/ (and islands/) for all @island modules.
+-- Discover all @island modules under lib/ and islands/.
+-- Delegates file discovery to grep, then extracts module names by reading each file.
 pfn discover_islands() do
-  let lib_files    = collect_march_files("lib")
-  let island_files = collect_march_files("islands")
-  let all = List.append(lib_files, island_files)
-  List.flat_map(all, fn path -> scan_file(path))
+  let search_dirs = List.filter(["lib", "islands"], fn d -> Dir.exists(d))
+  let files = grep_island_files(search_dirs)
+  List.flat_map(files, fn path -> scan_file(path))
 end
 
 -- ── WASM compilation ─────────────────────────────────────────────────────────

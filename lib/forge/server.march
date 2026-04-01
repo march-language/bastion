@@ -197,4 +197,19 @@ fn run(port_override) do
   end
 end
 
+fn main() do
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  let port_override = match args do
+    Cons(p, _) ->
+      match string_to_int(p) do
+      Some(n) -> Some(n)
+      None    -> None
+      end
+    Nil -> None
+    end
+  let _ = run(port_override)
+  ()
+end
+
 end

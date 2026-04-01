@@ -21,4 +21,14 @@ fn run(name) do
   end
 end
 
+fn main() do
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  match args do
+  Nil          -> println("Usage: forge bastion.new <name>")
+  Cons(n, _)   -> let _ = run(n)
+                  ()
+  end
+end
+
 end
