@@ -244,4 +244,14 @@ fn run(args : List(String)) do
   end
 end
 
+-- ── Entrypoint ───────────────────────────────────────────────────────────────
+-- Called by `forge bastion.gen.island <Name> [--server] [--compile]`.
+-- Reads newline-separated args from FORGE_TASK_ARGS environment variable.
+
+fn main() do
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  run(args)
+end
+
 end
