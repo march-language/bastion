@@ -41,10 +41,42 @@ mod Islands do
   -- Dataflow mode — describes who owns the island's state.
   type DataflowMode = Server | Client
 
+  -- Event — a named event with a JSON payload, dispatched from a child island upward.
+  type Event = Event(String, String)
+  -- Event(event_name, payload_json)
+
+  -- FormConfig — channel and redirect configuration for form islands.
+  type FormConfig = FormConfig(String, String)
+  -- FormConfig(channel_topic, redirect_path)
+
+  -- ── Constructor accessor functions ──────────────────────────────────────
+  -- Use these instead of direct constructor access from outside this module,
+  -- because direct constructor access (e.g. Islands.Eager) does not carry the
+  -- fully qualified type across module boundaries in March.
+
+  doc "Return the Eager hydration strategy."
+  fn eager()          do Eager end
+  doc "Return the Lazy hydration strategy."
+  fn lazy_hydrate()   do Lazy end
+  doc "Return the OnIdle hydration strategy."
+  fn on_idle()        do OnIdle end
+  doc "Return the OnInteraction hydration strategy."
+  fn on_interaction() do OnInteraction end
+  doc "Return the OnVisible hydration strategy."
+  fn on_visible()     do OnVisible end
+  doc "Return the Client dataflow mode."
+  fn client_mode()    do Client end
+  doc "Return the Server dataflow mode."
+  fn server_mode()    do Server end
+  doc "Construct an Event value."
+  fn new_event(name : String, payload : String) do Event(name, payload) end
+  doc "Construct a FormConfig value."
+  fn new_form_config(channel : String, redirect : String) do FormConfig(channel, redirect) end
+
   -- ── Hydration strategy helpers ──────────────────────────────────────────
 
   doc "Convert a HydrateOn strategy to the data-march-hydrate attribute string."
-  fn hydrate_attr(strat : HydrateOn) : String do
+  fn hydrate_attr(strat) : String do
     match strat do
     Eager         -> "eager"
     Lazy          -> "lazy"
@@ -54,14 +86,22 @@ mod Islands do
     end
   end
 
+  doc "Convert a DataflowMode to the data-march-dataflow attribute string."
+  fn dataflow_str(mode) : String do
+    match mode do
+    Server -> "server"
+    Client -> "client"
+    end
+  end
+
   -- ── Core wrap helpers ───────────────────────────────────────────────────
   --
   -- The primary `wrap` function is the 4-arg form that takes only a strategy.
   -- It defaults to Client dataflow mode (the common case).
   --
-  -- Use wrap_with_dataflow/5 to specify an explicit DataflowMode.
-  -- Use wrap_with_channel/5 for Client islands with channel sync.
-  -- Use wrap_child/5 for islands nested inside a parent island.
+  -- Use wrap_with_dataflow/6 to specify an explicit DataflowMode and optional CSS.
+  -- Use wrap_with_channel/7 for Client islands with channel sync.
+  -- Use wrap_child/6 for islands nested inside a parent island.
 
   doc """
   Wrap server-rendered HTML with island metadata for client hydration.
@@ -74,8 +114,8 @@ mod Islands do
     state_json — initial state as JSON string
     ssr_html   — server-rendered inner HTML (shown before WASM loads)
   """
-  fn wrap(name : String, strat : HydrateOn, state_json : String, ssr_html : String) : String do
-    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}'>#{ssr_html}</div>"""
+  fn wrap(name : String, strat, state_json : String, ssr_html : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"client\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "'>" ++ ssr_html ++ "</div>"
   end
 
   doc "Convenience: Client-mode eager wrap."
@@ -84,13 +124,20 @@ mod Islands do
   end
 
   doc """
-  Wrap with an explicit DataflowMode.
+  Wrap with an explicit DataflowMode and optional scoped CSS.
 
-  Use this when you need Server mode (read-only projection).
-  For Client mode, prefer wrap/4.
+  Parameters:
+    name       — island module name
+    strat      — hydration strategy
+    mode       — Client or Server dataflow mode
+    state_json — initial state as JSON string
+    css        — scoped CSS string (empty string = omit the attribute)
+    ssr_html   — server-rendered inner HTML
   """
-  fn wrap_with_dataflow(name : String, mode : DataflowMode, strat : HydrateOn, state_json : String, ssr_html : String) : String do
-    ~H"""<div data-march-island="#{name}" data-march-dataflow="#{dataflow_str(mode)}" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}'>#{ssr_html}</div>"""
+  fn wrap_with_dataflow(name : String, strat, mode, state_json : String, css : String, ssr_html : String) : String do
+    let base = "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"" ++ dataflow_str(mode) ++ "\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "'"
+    let with_css = if css == "" do base else base ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\"" end
+    with_css ++ ">" ++ ssr_html ++ "</div>"
   end
 
   doc """
@@ -99,8 +146,8 @@ mod Islands do
   The island div is present in the DOM for hydration, but the visible content
   is entirely produced by the client-side WASM render function.
   """
-  fn client_only(name : String, strat : HydrateOn, state_json : String) : String do
-    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}'></div>"""
+  fn client_only(name : String, strat, state_json : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"client\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "'></div>"
   end
 
   -- ── CSS helpers ─────────────────────────────────────────────────────────
@@ -121,8 +168,8 @@ mod Islands do
     css        — scoped CSS (will be escaped for use in HTML attribute)
     ssr_html   — server-rendered inner HTML
   """
-  fn wrap_with_css(name : String, strat : HydrateOn, state_json : String, css : String, ssr_html : String) : String do
-    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}' data-march-island-css="#{escape_dq(css)}">#{ssr_html}</div>"""
+  fn wrap_with_css(name : String, strat, state_json : String, css : String, ssr_html : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"client\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "' data-march-island-css=\"" ++ escape_dq(css) ++ "\">" ++ ssr_html ++ "</div>"
   end
 
   doc "Convenience: Client-mode eager wrap with scoped CSS."
@@ -133,23 +180,25 @@ mod Islands do
   -- ── Channel sync ─────────────────────────────────────────────────────────
 
   doc """
-  Wrap a Client-mode island with a channel topic for state sync.
+  Wrap an island with a channel topic for state sync and an explicit dataflow mode.
 
   When a channel is wired, the JS runtime pushes new state to the channel
-  topic after each local update (last-write-wins). The channel can also push
-  state down at any time (e.g. another browser session updated state).
-
-  Use wrap/4 for purely local state with no server sync.
+  topic after each local update (last-write-wins) for Client islands.
+  Server islands use the channel to receive server-pushed state.
 
   Parameters:
     name          — island module name
     strat         — hydration strategy
+    mode          — Client or Server dataflow mode
     state_json    — initial state as JSON string
-    channel_topic — topic string (e.g. "counter:#{user_id}")
+    css           — scoped CSS (empty string = omit)
     ssr_html      — server-rendered inner HTML
+    channel_topic — topic string (e.g. "counter:#{user_id}")
   """
-  fn wrap_with_channel(name : String, strat : HydrateOn, state_json : String, channel_topic : String, ssr_html : String) : String do
-    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}' data-march-channel="#{escape_dq(channel_topic)}">#{ssr_html}</div>"""
+  fn wrap_with_channel(name : String, strat, mode, state_json : String, css : String, ssr_html : String, channel_topic : String) : String do
+    let base = "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"" ++ dataflow_str(mode) ++ "\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "' data-march-channel=\"" ++ escape_dq(channel_topic) ++ "\""
+    let with_css = if css == "" do base else base ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\"" end
+    with_css ++ ">" ++ ssr_html ++ "</div>"
   end
 
   -- ── Parent-child binding ──────────────────────────────────────────────────
@@ -157,29 +206,186 @@ mod Islands do
   doc """
   Wrap a child island slotted inside a parent island.
 
-  Children receive their initial state (props) from the parent and dispatch
-  events upward via the JS runtime's tree-walk. The parent must implement
+  Children always have Server dataflow relative to their parent — they receive
+  props from the parent and dispatch events upward. The parent must implement
   handle_child_event to receive those events.
 
   Parameters:
     name       — child island module name
-    parent_id  — parent island's data-march-instance-id value
-    on_event   — event handler name the parent registered (via on_event= in template)
+    parent_id  — parent island's instance ID
+    strat      — hydration strategy
     state_json — initial state JSON (derived from parent state)
+    css        — scoped CSS (empty string = omit)
     ssr_html   — server-rendered inner HTML
   """
-  fn wrap_child(name : String, parent_id : String, on_event : String, state_json : String, ssr_html : String) : String do
-    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_sq(state_json)}' data-march-parent="#{escape_dq(parent_id)}" data-march-on-event="#{escape_dq(on_event)}">#{ssr_html}</div>"""
+  fn wrap_child(name : String, parent_id : String, strat, state_json : String, css : String, ssr_html : String) : String do
+    let base = "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"server\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "' data-march-parent=\"" ++ escape_dq(parent_id) ++ "\""
+    let with_css = if css == "" do base else base ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\"" end
+    with_css ++ ">" ++ ssr_html ++ "</div>"
   end
 
-  doc "Wrap a child island with scoped CSS."
-  fn wrap_child_with_css(name : String, parent_id : String, on_event : String, state_json : String, css : String, ssr_html : String) : String do
-    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_sq(state_json)}' data-march-parent="#{escape_dq(parent_id)}" data-march-on-event="#{escape_dq(on_event)}" data-march-island-css="#{escape_dq(css)}">#{ssr_html}</div>"""
+  doc """
+  Wrap a child island with an explicit on_event handler name.
+
+  Use this when the parent registers a named event handler via on_event= in
+  its template. The on_event name must match what the parent's handle_child_event
+  is registered under.
+
+  Parameters:
+    name      — child island module name
+    parent_id — parent island's instance ID
+    strat     — hydration strategy
+    state_json — initial state JSON
+    css       — scoped CSS (empty string = omit)
+    ssr_html  — server-rendered inner HTML
+    on_event  — event handler name registered on the parent
+  """
+  fn wrap_child_with_event(name : String, parent_id : String, strat, state_json : String, css : String, ssr_html : String, on_event : String) : String do
+    let base = "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"server\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "' data-march-parent=\"" ++ escape_dq(parent_id) ++ "\" data-march-on-event=\"" ++ escape_dq(on_event) ++ "\""
+    let with_css = if css == "" do base else base ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\"" end
+    with_css ++ ">" ++ ssr_html ++ "</div>"
+  end
+
+  doc """
+  Wrap a child island with an explicit instance ID for unique identification.
+
+  Parameters:
+    name      — child island module name
+    parent_id — parent island's instance ID
+    child_id  — explicit instance ID for this child island
+    strat     — hydration strategy
+    state_json — initial state JSON
+    css       — scoped CSS (empty string = omit)
+    ssr_html  — server-rendered inner HTML
+  """
+  fn wrap_child_with_id(name : String, parent_id : String, child_id : String, strat, state_json : String, css : String, ssr_html : String) : String do
+    let base = "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"server\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "' data-march-parent=\"" ++ escape_dq(parent_id) ++ "\" data-march-id=\"" ++ escape_dq(child_id) ++ "\""
+    let with_css = if css == "" do base else base ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\"" end
+    with_css ++ ">" ++ ssr_html ++ "</div>"
   end
 
   doc "Convenience: Server-mode eager wrap (display-only island, no event listeners)."
   fn wrap_server(name : String, state_json : String, ssr_html : String) : String do
-    wrap_with_dataflow(name, Server, Eager, state_json, ssr_html)
+    wrap_with_dataflow(name, Eager, Server, state_json, "", ssr_html)
+  end
+
+  -- ── Form islands ─────────────────────────────────────────────────────────
+
+  doc """
+  Wrap a form island with channel and redirect configuration.
+
+  Form islands have a built-in submit lifecycle:
+    1. User fills fields → UpdateField msgs update local state.
+    2. User submits → validate runs client-side.
+    3. If valid → push to channel topic.
+    4. Server responds → drive state to Success or show validation errors.
+
+  Parameters:
+    name          — island module name
+    strat         — hydration strategy
+    state_json    — initial state as JSON string
+    form_html     — server-rendered form HTML
+    channel_topic — channel topic for form submission (e.g. "contact:submit")
+    redirect      — path to redirect to on success (e.g. "/thank-you")
+  """
+  fn wrap_form(name : String, strat, state_json : String, form_html : String, channel_topic : String, redirect : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"client\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "' data-march-form=\"true\" data-march-channel=\"" ++ escape_dq(channel_topic) ++ "\" data-march-redirect=\"" ++ escape_dq(redirect) ++ "\">" ++ form_html ++ "</div>"
+  end
+
+  doc "Return the channel topic from a FormConfig."
+  fn form_channel(cfg) : String do
+    match cfg do
+    FormConfig(channel, _) -> channel
+    end
+  end
+
+  doc "Return the redirect path from a FormConfig."
+  fn form_redirect(cfg) : String do
+    match cfg do
+    FormConfig(_, redirect) -> redirect
+    end
+  end
+
+  -- ── Event helpers ─────────────────────────────────────────────────────────
+
+  doc "Return the event name from an Event."
+  fn event_name(evt) : String do
+    match evt do
+    Event(name, _) -> name
+    end
+  end
+
+  doc "Return the payload JSON from an Event."
+  fn event_payload(evt) : String do
+    match evt do
+    Event(_, payload) -> payload
+    end
+  end
+
+  doc "Encode an Event as a JSON object string."
+  fn event_to_json(evt) : String do
+    match evt do
+    Event(name, payload) ->
+      "{\"event\":\"" ++ escape_dq(name) ++ "\",\"payload\":" ++ payload ++ "}"
+    end
+  end
+
+  doc """
+  Build a dispatch JSON object for an upward child-to-parent event.
+
+  Parameters:
+    source  — source child island instance ID
+    event   — event name
+    payload — payload JSON string
+  """
+  fn dispatch_json(source : String, event : String, payload : String) : String do
+    "{\"source\":\"" ++ escape_dq(source) ++ "\",\"event\":\"" ++ escape_dq(event) ++ "\",\"payload\":" ++ payload ++ "}"
+  end
+
+  -- ── Server-mode validation ────────────────────────────────────────────────
+
+  doc """
+  Validate that server-rendered HTML does not contain client event attributes.
+
+  Server islands are read-only projections. The compiler enforces this at
+  compile time, but this function provides a runtime check for tests and
+  dynamic render functions.
+
+  Returns Ok(html) if the HTML is clean, Err(message) if a forbidden attribute
+  is found. Forbidden attributes: data-on-click, data-on-input, data-on-change,
+  data-on-submit, data-msg.
+  """
+  fn validate_server_html(html : String) : Result(String, String) do
+    let forbidden = ["data-on-click", "data-on-input", "data-on-change", "data-on-submit", "data-msg"]
+    find_forbidden_attr(html, forbidden)
+  end
+
+  doc """
+  Validate that a render function's output for a given state does not contain
+  client event attributes.
+
+  Calls render_fn(state_json) and runs validate_server_html on the result.
+  Returns Ok(html) or Err(message).
+  """
+  fn validate_server_island(render_fn : String -> String, state_json : String) : Result(String, String) do
+    let html = render_fn(state_json)
+    validate_server_html(html)
+  end
+
+  pfn find_forbidden_attr(html : String, attrs : List(String)) : Result(String, String) do
+    match attrs do
+    Nil -> Ok(html)
+    Cons(attr, rest) ->
+      let found = match String.index_of(html, attr) do
+        Some(_) -> true
+        None    -> false
+        end
+      if found do
+        Err("Server island render output contains forbidden attribute: " ++ attr)
+      else
+        find_forbidden_attr(html, rest)
+      end
+    end
   end
 
   -- ── Bootstrap & preload ─────────────────────────────────────────────────
@@ -194,7 +400,7 @@ mod Islands do
     base_url — URL prefix where island JS assets are served (e.g. "/_march/islands")
   """
   fn bootstrap_script(base_url : String) : String do
-    ~H"""<script type="module" src="#{base_url}/march-islands.js"></script>"""
+    "<script type=\"module\" src=\"" ++ base_url ++ "/march-islands.js\"></script>"
   end
 
   doc """
@@ -208,7 +414,7 @@ mod Islands do
     module_name — island module name (e.g. "Counter")
   """
   fn preload_hint(base_url : String, module_name : String) : String do
-    ~H"""<link rel="modulepreload" href="#{base_url}/#{module_name}.wasm">"""
+    "<link rel=\"modulepreload\" href=\"" ++ base_url ++ "/" ++ module_name ++ ".wasm\">"
   end
 
   -- ── Island Registry ──────────────────────────────────────────────────────
@@ -314,13 +520,6 @@ mod Islands do
   end
 
   -- ── Private helpers ─────────────────────────────────────────────────────
-
-  pfn dataflow_str(mode : DataflowMode) : String do
-    match mode do
-    Server -> "server"
-    Client -> "client"
-    end
-  end
 
   -- escape_sq: for single-quoted HTML attributes (used for state JSON).
   -- Only escapes & and ' since double quotes are safe inside single-quote delimiters.

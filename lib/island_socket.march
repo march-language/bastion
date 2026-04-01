@@ -52,6 +52,7 @@ mod IslandSocket do
   import HttpServer
   import WebSocket
   import Json
+  import Islands
 
   -- ── Configuration ──────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ mod IslandSocket do
   --
   -- The registry maps module names to handler functions:
   --
+  --   dataflow      : Islands.DataflowMode (Client | Server)
   --   update_fn     : (state_json, msg_json) -> state_json
   --   render_fn     : state_json -> html_string
   --   merge_fn_opt  : Option((local_json, remote_json) -> state_json)
@@ -90,10 +92,11 @@ mod IslandSocket do
   -- parent state JSON.
 
   type IslandHandler = IslandHandler(
-    String,                                  -- module name
-    (String, String) -> String,              -- update_fn(state, msg) -> state
-    String -> String,                        -- render_fn(state) -> html
-    Option((String, String) -> String),      -- merge_fn_opt
+    String,                                    -- module name
+    String,                                    -- dataflow mode string ("client" | "server")
+    (String, String) -> String,                -- update_fn(state, msg) -> state
+    String -> String,                          -- render_fn(state) -> html
+    Option((String, String) -> String),        -- merge_fn_opt
     Option((String, String, String) -> String) -- child_fn_opt(state, event, payload) -> state
   )
 
@@ -107,6 +110,8 @@ mod IslandSocket do
   doc """
   Register an island module with its update and render functions.
 
+  Defaults to Client dataflow mode.
+
   update_fn takes (state_json, msg_json) and returns new state_json.
   render_fn takes state_json and returns an HTML string.
 
@@ -116,7 +121,20 @@ mod IslandSocket do
   fn register(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String) : Registry do
     match reg do
     Registry(handlers) ->
-      Registry(Cons(IslandHandler(name, update_fn, render_fn, None, None), handlers))
+      Registry(Cons(IslandHandler(name, "client", update_fn, render_fn, None, None), handlers))
+    end
+  end
+
+  doc """
+  Register an island module with an explicit DataflowMode.
+
+  Use Islands.Server for display-only islands that receive state exclusively
+  via the channel. Use "client" (the default) for interactive islands.
+  """
+  fn register_with_dataflow(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, mode) : Registry do
+    match reg do
+    Registry(handlers) ->
+      Registry(Cons(IslandHandler(name, mode, update_fn, render_fn, None, None), handlers))
     end
   end
 
@@ -128,7 +146,7 @@ mod IslandSocket do
   fn register_with_merge(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, merge_fn : (String, String) -> String) : Registry do
     match reg do
     Registry(handlers) ->
-      Registry(Cons(IslandHandler(name, update_fn, render_fn, Some(merge_fn), None), handlers))
+      Registry(Cons(IslandHandler(name, "client", update_fn, render_fn, Some(merge_fn), None), handlers))
     end
   end
 
@@ -138,23 +156,24 @@ mod IslandSocket do
   child_fn receives (state_json, event_name, payload_json) and returns the new
   parent state_json. This is called when a child island dispatches an event
   upward via the runtime's parent-child tree-walk.
-
-  Example:
-    IslandSocket.register_with_child_handler(
-      registry, "ItemList",
-      item_list_update, item_list_render,
-      fn (state, event, payload) ->
-        if event == "item_toggled" do
-          item_list_handle_item_toggled(state, payload)
-        else
-          state
-        end
-    )
   """
   fn register_with_child_handler(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, child_fn : (String, String, String) -> String) : Registry do
     match reg do
     Registry(handlers) ->
-      Registry(Cons(IslandHandler(name, update_fn, render_fn, None, Some(child_fn)), handlers))
+      Registry(Cons(IslandHandler(name, "client", update_fn, render_fn, None, Some(child_fn)), handlers))
+    end
+  end
+
+  doc """
+  Register an island module with a handle_child_event function (alias for register_with_child_handler).
+
+  Used when the parent island needs to receive events dispatched upward by
+  child islands. child_fn receives (state_json, event_name, payload_json).
+  """
+  fn register_with_event_handler(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, child_fn : (String, String, String) -> String) : Registry do
+    match reg do
+    Registry(handlers) ->
+      Registry(Cons(IslandHandler(name, "client", update_fn, render_fn, None, Some(child_fn)), handlers))
     end
   end
 
@@ -164,7 +183,7 @@ mod IslandSocket do
   fn register_full(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, merge_fn : (String, String) -> String, child_fn : (String, String, String) -> String) : Registry do
     match reg do
     Registry(handlers) ->
-      Registry(Cons(IslandHandler(name, update_fn, render_fn, Some(merge_fn), Some(child_fn)), handlers))
+      Registry(Cons(IslandHandler(name, "client", update_fn, render_fn, Some(merge_fn), Some(child_fn)), handlers))
     end
   end
 
@@ -175,12 +194,34 @@ mod IslandSocket do
     end
   end
 
+  doc "Return the DataflowMode from an island handler."
+  fn handler_dataflow(h : IslandHandler) do
+    match h do
+    IslandHandler(_, mode, _, _, _, _) -> mode
+    end
+  end
+
+  doc "Return true if the registry has a child event handler registered for the given island."
+  fn has_event_handler(reg : Registry, name : String) : Bool do
+    match find_handler(reg, name) do
+    Some(h) ->
+      match h do
+      IslandHandler(_, _, _, _, _, child_fn_opt) ->
+        match child_fn_opt do
+        Some(_) -> true
+        None    -> false
+        end
+      end
+    None -> false
+    end
+  end
+
   pfn find_in_list(handlers : List(IslandHandler), name : String) : Option(IslandHandler) do
     match handlers do
     Nil -> None
     Cons(h, rest) ->
       match h do
-      IslandHandler(n, _, _, _, _) ->
+      IslandHandler(n, _, _, _, _, _) ->
         if n == name do Some(h) else find_in_list(rest, name) end
       end
     end
@@ -199,6 +240,19 @@ mod IslandSocket do
 
   pfn empty_state() : IslandState do
     IslandState(Nil)
+  end
+
+  doc "Create an empty island state store. Used to initialise a fresh connection."
+  fn empty_store() : IslandState do
+    IslandState(Nil)
+  end
+
+  doc "Return true if the store has an island registered with the given instance ID."
+  fn has_island(store : IslandState, id : String) : Bool do
+    match get_island(store, id) do
+    Some(_) -> true
+    None    -> false
+    end
   end
 
   pfn put_island(store : IslandState, id : String, entry : IslandEntry) : IslandState do
@@ -250,14 +304,6 @@ mod IslandSocket do
   doc """
   Build a Conn -> Conn plug that upgrades matching requests to an island
   WebSocket with server-side rendering.
-
-  Usage:
-    let registry = IslandSocket.new_registry()
-                   |> IslandSocket.register("Counter", counter_update, counter_render)
-
-    HttpServer.new(4000)
-    |> HttpServer.plug(IslandSocket.plug(IslandSocket.default_config(), registry))
-    |> HttpServer.listen()
   """
   fn plug(cfg : Config, registry : Registry) : Conn -> Conn do
     let socket_path = config_path(cfg)
@@ -291,53 +337,64 @@ mod IslandSocket do
   -- ── Message dispatch ────────────────────────────────────────────────────
 
   pfn handle_text(ws_sock : WsSocket, text : String, store : IslandState, registry : Registry) : IslandState do
+    let (new_store, responses) = dispatch_text(text, store, registry)
+    send_all(ws_sock, responses)
+    new_store
+  end
+
+  pfn send_all(ws_sock : WsSocket, msgs : List(String)) : Unit do
+    match msgs do
+    Nil -> ()
+    Cons(m, rest) -> do
+      WebSocket.send_frame(ws_sock, TextFrame(m))
+      send_all(ws_sock, rest)
+    end
+    end
+  end
+
+  pfn dispatch_text(text : String, store : IslandState, registry : Registry) : (IslandState, List(String)) do
     match Json.parse(text) do
     Ok(msg) -> do
       let island_id = json_string_field(msg, "island")
       let msg_type  = json_string_field(msg, "type")
+      let payload   = extract_payload_raw(text)
       match msg_type do
-      "init"        -> handle_init(ws_sock, msg, island_id, store, registry)
-      "msg"         -> handle_msg(ws_sock, msg, island_id, store, registry)
-      "child_event" -> handle_child_event(ws_sock, msg, island_id, store, registry)
-      "optimistic"  -> handle_optimistic(ws_sock, msg, island_id, store, registry)
-      "destroy"     -> handle_destroy(island_id, store)
-      _             -> store
+      "init"        -> handle_init_pure(msg, payload, island_id, store, registry)
+      "msg"         -> handle_msg_pure(payload, island_id, store, registry)
+      "child_event" -> handle_child_event_pure(msg, payload, island_id, store, registry)
+      "optimistic"  -> handle_optimistic_pure(payload, island_id, store, registry)
+      "destroy"     -> (handle_destroy(island_id, store), [])
+      _             -> (store, [])
       end
     end
-    Err(_) -> store
+    Err(_) -> (store, [])
     end
   end
 
-  -- ── Init handler ────────────────────────────────────────────────────────
-  -- Store initial state, render the island, send back rendered HTML.
+  -- ── Pure message handlers ───────────────────────────────────────────────
+  --
+  -- These return (new_state, response_messages) without performing I/O.
+  -- Used both by the live WebSocket loop (via dispatch_text) and by
+  -- process_msg_for_test for deterministic testing.
 
-  pfn handle_init(ws_sock : WsSocket, msg : JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
+  pfn handle_init_pure(msg : JsonValue, payload : String, island_id : String, store : IslandState, registry : Registry) : (IslandState, List(String)) do
     let module_name = json_string_field(msg, "module")
-    let payload     = json_field_raw(msg, "payload")
     let entry = IslandEntry(module_name, payload)
     let new_store = put_island(store, island_id, entry)
     match find_handler(registry, module_name) do
     Some(handler) -> do
       match handler do
-      IslandHandler(_, _, render_fn, _, _) -> do
+      IslandHandler(_, _, _, render_fn, _, _) -> do
         let html = render_fn(payload)
-        send_render(ws_sock, island_id, html)
-        send_state(ws_sock, island_id, payload)
+        (new_store, [make_render_json(island_id, html), make_state_json(island_id, payload)])
       end
       end
     end
-    None -> do
-      send_state(ws_sock, island_id, payload)
+    None -> (new_store, [make_state_json(island_id, payload)])
     end
-    end
-    new_store
   end
 
-  -- ── Msg handler ─────────────────────────────────────────────────────────
-  -- Look up current state, run update, store new state, render, send HTML.
-
-  pfn handle_msg(ws_sock : WsSocket, msg : JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
-    let msg_payload = json_field_raw(msg, "payload")
+  pfn handle_msg_pure(msg_payload : String, island_id : String, store : IslandState, registry : Registry) : (IslandState, List(String)) do
     match get_island(store, island_id) do
     Some(entry) -> do
       match entry do
@@ -345,38 +402,25 @@ mod IslandSocket do
         match find_handler(registry, module_name) do
         Some(handler) -> do
           match handler do
-          IslandHandler(_, update_fn, render_fn, _, _) -> do
+          IslandHandler(_, _, update_fn, render_fn, _, _) -> do
             let new_state = update_fn((current_state, msg_payload))
             let new_store = put_island(store, island_id, IslandEntry(module_name, new_state))
             let html = render_fn(new_state)
-            send_render(ws_sock, island_id, html)
-            send_state(ws_sock, island_id, new_state)
-            new_store
+            (new_store, [make_render_json(island_id, html), make_state_json(island_id, new_state)])
           end
           end
         end
-        None -> do
-          send_state(ws_sock, island_id, msg_payload)
-          store
-        end
+        None -> (store, [make_state_json(island_id, msg_payload)])
         end
       end
       end
     end
-    None -> store
+    None -> (store, [])
     end
   end
 
-  -- ── Child event handler ──────────────────────────────────────────────────
-  --
-  -- A child island has dispatched an event upward. The "island" field in the
-  -- message is the PARENT island's instance ID. We route the event to the
-  -- parent's handle_child_event function, update the parent state, re-render
-  -- the parent, and send back the new parent HTML + updated child props.
-
-  pfn handle_child_event(ws_sock : WsSocket, msg : JsonValue, parent_id : String, store : IslandState, registry : Registry) : IslandState do
-    let event_name    = json_string_field(msg, "event")
-    let event_payload = json_field_raw(msg, "payload")
+  pfn handle_child_event_pure(msg : JsonValue, event_payload_ : String, parent_id : String, store : IslandState, registry : Registry) : (IslandState, List(String)) do
+    let event_name_ = json_string_field(msg, "event")
     match get_island(store, parent_id) do
     Some(entry) -> do
       match entry do
@@ -384,36 +428,27 @@ mod IslandSocket do
         match find_handler(registry, module_name) do
         Some(handler) -> do
           match handler do
-          IslandHandler(_, _, render_fn, _, child_fn_opt) -> do
-            -- Route to the parent's handle_child_event if registered
+          IslandHandler(_, _, _, render_fn, _, child_fn_opt) -> do
             let new_state = match child_fn_opt do
-              Some(child_fn) -> child_fn((current_state, event_name, event_payload))
+              Some(child_fn) -> child_fn((current_state, event_name_, event_payload_))
               None           -> current_state
               end
             let new_store = put_island(store, parent_id, IslandEntry(module_name, new_state))
-            -- Re-render the parent with updated state
             let html = render_fn(new_state)
-            send_render(ws_sock, parent_id, html)
-            send_state(ws_sock, parent_id, new_state)
-            new_store
+            (new_store, [make_render_json(parent_id, html), make_state_json(parent_id, new_state)])
           end
           end
         end
-        None -> store
+        None -> (store, [])
         end
       end
       end
     end
-    None -> store
+    None -> (store, [])
     end
   end
 
-  -- ── Optimistic state handler (CRDT reconciliation) ───────────────────────
-  -- Client sends its locally-computed optimistic state for reconciliation.
-  -- Server merges using the island's merge function (or server-wins by default).
-
-  pfn handle_optimistic(ws_sock : WsSocket, msg : JsonValue, island_id : String, store : IslandState, registry : Registry) : IslandState do
-    let client_state = json_field_raw(msg, "payload")
+  pfn handle_optimistic_pure(client_state : String, island_id : String, store : IslandState, registry : Registry) : (IslandState, List(String)) do
     match get_island(store, island_id) do
     Some(entry) -> do
       match entry do
@@ -421,56 +456,81 @@ mod IslandSocket do
         match find_handler(registry, module_name) do
         Some(handler) -> do
           match handler do
-          IslandHandler(_, _, render_fn, merge_opt, _) -> do
+          IslandHandler(_, _, _, render_fn, merge_opt, _) -> do
             let merged_state = match merge_opt do
               Some(merge_fn) -> merge_fn((client_state, server_state))
               None           -> server_state
               end
             let new_store = put_island(store, island_id, IslandEntry(module_name, merged_state))
             let html = render_fn(merged_state)
-            send_render(ws_sock, island_id, html)
-            send_merge(ws_sock, island_id, merged_state)
-            new_store
+            (new_store, [make_render_json(island_id, html), make_merge_json(island_id, merged_state)])
           end
           end
         end
-        None -> do
-          send_merge(ws_sock, island_id, client_state)
-          store
-        end
+        None -> (store, [make_merge_json(island_id, client_state)])
         end
       end
       end
     end
-    None -> store
+    None -> (store, [])
     end
   end
-
-  -- ── Destroy handler ────────────────────────────────────────────────────
 
   pfn handle_destroy(island_id : String, store : IslandState) : IslandState do
     remove_island(store, island_id)
   end
 
+  -- ── Test helper ─────────────────────────────────────────────────────────
+
+  doc """
+  Process a single JSON message against the given store and registry,
+  returning the new store and a list of JSON response strings.
+
+  This is the pure, side-effect-free equivalent of the live WebSocket loop.
+  Use it in tests to exercise the full bidirectional message protocol without
+  a live WebSocket connection.
+
+  Example:
+    let reg = IslandSocket.new_registry()
+              |> IslandSocket.register("Counter", counter_update, counter_render)
+    let store = IslandSocket.empty_store()
+    let init = "{\"island\":\"c-1\",\"type\":\"init\",\"module\":\"Counter\",\"payload\":{\"count\":0}}"
+    let (store2, responses) = IslandSocket.process_msg_for_test(init, store, reg)
+    -- responses contains render + state JSON strings
+  """
+  fn process_msg_for_test(text : String, store : IslandState, registry : Registry) : (IslandState, List(String)) do
+    dispatch_text(text, store, registry)
+  end
+
+  -- ── JSON response builders ───────────────────────────────────────────────
+
+  pfn make_render_json(island_id : String, html : String) : String do
+    "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"render\",\"payload\":\"" ++ json_escape(html) ++ "\"}"
+  end
+
+  pfn make_state_json(island_id : String, state_json : String) : String do
+    "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ state_json ++ "}"
+  end
+
+  pfn make_merge_json(island_id : String, state_json : String) : String do
+    "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"merge\",\"payload\":" ++ state_json ++ "}"
+  end
+
   -- ── Response helpers ──────────────────────────────────────────────────
 
   pfn send_render(ws_sock : WsSocket, island_id : String, html : String) : Unit do
-    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"render\",\"payload\":" ++ Json.to_string(Str(html)) ++ "}"
-    WebSocket.send_frame(ws_sock, TextFrame(response))
+    WebSocket.send_frame(ws_sock, TextFrame(make_render_json(island_id, html)))
   end
 
   pfn send_state(ws_sock : WsSocket, island_id : String, state_json : String) : Unit do
-    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"state\",\"payload\":" ++ state_json ++ "}"
-    WebSocket.send_frame(ws_sock, TextFrame(response))
+    WebSocket.send_frame(ws_sock, TextFrame(make_state_json(island_id, state_json)))
   end
 
   pfn send_merge(ws_sock : WsSocket, island_id : String, state_json : String) : Unit do
-    let response = "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"merge\",\"payload\":" ++ state_json ++ "}"
-    WebSocket.send_frame(ws_sock, TextFrame(response))
+    WebSocket.send_frame(ws_sock, TextFrame(make_merge_json(island_id, state_json)))
   end
 
   -- send_props pushes updated props from a parent to a specific child instance.
-  -- Used after handle_child_event causes the parent state to change.
   pfn send_props(ws_sock : WsSocket, child_id : String, props_json : String) : Unit do
     let response = "{\"island\":\"" ++ json_escape(child_id) ++ "\",\"type\":\"props\",\"payload\":" ++ props_json ++ "}"
     WebSocket.send_frame(ws_sock, TextFrame(response))
@@ -485,10 +545,17 @@ mod IslandSocket do
     end
   end
 
-  pfn json_field_raw(obj : JsonValue, key : String) : String do
-    match Json.get(obj, key) do
-    Some(v) -> Json.to_string(v)
-    None    -> "null"
+  -- Extract the raw JSON value for the "payload" field from the original
+  -- message string. The payload field is always last in the message, so we
+  -- read from after "payload": to the end, trimming the closing brace.
+  pfn extract_payload_raw(text : String) : String do
+    match String.index_of(text, "\"payload\":") do
+    Some(i) ->
+      let start = i + 10
+      let total = String.byte_size(text)
+      let len   = total - start - 1
+      String.slice_bytes(text, start, len)
+    None -> "null"
     end
   end
 

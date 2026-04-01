@@ -58,7 +58,7 @@ mod FallbackController do
     ActionOk(c) -> c
     ActionError(status, message) -> do
       let body = "{\"error\":{\"status\":" ++ int_to_string(status) ++
-                 ",\"message\":" ++ Json.to_string(Str(message)) ++ "}}"
+                 ",\"message\":\"" ++ String.replace_all(String.replace_all(message, "\\", "\\\\"), "\"", "\\\"") ++ "\"}}"
       Response.json(conn, status, body)
     end
     end

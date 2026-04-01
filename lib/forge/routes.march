@@ -16,8 +16,8 @@ mod Forge.Routes do
 
 needs IO.File, IO.FS
 
--- A single recognised route.
-type Route = { method_str: String, path: String, handler: String }
+-- A single recognised route (named ParsedRoute to avoid collision with Router.Route).
+type ParsedRoute = { method_str: String, path: String, handler: String }
 
 -- ── String helpers ───────────────────────────────────────────────────────────
 

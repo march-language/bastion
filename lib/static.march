@@ -270,7 +270,7 @@ mod Static do
     -- "<link rel=\"stylesheet\" href=\"/static/css/app-a1b2c3d4.css\" />"
   """
   fn css_tag(filename : String) : String do
-    ~H"""<link rel="stylesheet" href="#{path(filename)}" />"""
+    "<link rel=\"stylesheet\" href=\"" ++ path(filename) ++ "\" />"
   end
 
   doc """
@@ -282,7 +282,7 @@ mod Static do
     -- "<script src=\"/static/bastion.js\"></script>"
   """
   fn js_tag(filename : String) : String do
-    ~H"""<script src="#{path(filename)}"></script>"""
+    "<script src=\"" ++ path(filename) ++ "\"></script>"
   end
 
 end
