@@ -6,8 +6,6 @@
 
 mod Forge.New do
 
-needs IO.File, IO.FS, IO.Process
-
 doc "Run `forge bastion new <name>` — scaffold a new Bastion app."
 fn run(name) do
   match Forge.Scaffold.scaffold(name) do
