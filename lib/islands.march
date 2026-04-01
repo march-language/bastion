@@ -75,14 +75,7 @@ mod Islands do
     ssr_html   — server-rendered inner HTML (shown before WASM loads)
   """
   fn wrap(name : String, strat : HydrateOn, state_json : String, ssr_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
-    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
-    ++ ">"
-    ++ ssr_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}'>#{ssr_html}</div>"""
   end
 
   doc "Convenience: Client-mode eager wrap."
@@ -97,14 +90,7 @@ mod Islands do
   For Client mode, prefer wrap/4.
   """
   fn wrap_with_dataflow(name : String, mode : DataflowMode, strat : HydrateOn, state_json : String, ssr_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"" ++ dataflow_str(mode) ++ "\""
-    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
-    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
-    ++ ">"
-    ++ ssr_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="#{dataflow_str(mode)}" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}'>#{ssr_html}</div>"""
   end
 
   doc """
@@ -114,12 +100,7 @@ mod Islands do
   is entirely produced by the client-side WASM render function.
   """
   fn client_only(name : String, strat : HydrateOn, state_json : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
-    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
-    ++ "></div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}'></div>"""
   end
 
   -- ── CSS helpers ─────────────────────────────────────────────────────────
@@ -141,15 +122,7 @@ mod Islands do
     ssr_html   — server-rendered inner HTML
   """
   fn wrap_with_css(name : String, strat : HydrateOn, state_json : String, css : String, ssr_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
-    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
-    ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\""
-    ++ ">"
-    ++ ssr_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}' data-march-island-css="#{escape_dq(css)}">#{ssr_html}</div>"""
   end
 
   doc "Convenience: Client-mode eager wrap with scoped CSS."
@@ -176,15 +149,7 @@ mod Islands do
     ssr_html      — server-rendered inner HTML
   """
   fn wrap_with_channel(name : String, strat : HydrateOn, state_json : String, channel_topic : String, ssr_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\""
-    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
-    ++ " data-march-channel=\"" ++ escape_dq(channel_topic) ++ "\""
-    ++ ">"
-    ++ ssr_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="#{hydrate_attr(strat)}" data-march-state='#{escape_sq(state_json)}' data-march-channel="#{escape_dq(channel_topic)}">#{ssr_html}</div>"""
   end
 
   -- ── Parent-child binding ──────────────────────────────────────────────────
@@ -204,31 +169,12 @@ mod Islands do
     ssr_html   — server-rendered inner HTML
   """
   fn wrap_child(name : String, parent_id : String, on_event : String, state_json : String, ssr_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
-    ++ " data-march-parent=\"" ++ escape_dq(parent_id) ++ "\""
-    ++ " data-march-on-event=\"" ++ escape_dq(on_event) ++ "\""
-    ++ ">"
-    ++ ssr_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_sq(state_json)}' data-march-parent="#{escape_dq(parent_id)}" data-march-on-event="#{escape_dq(on_event)}">#{ssr_html}</div>"""
   end
 
   doc "Wrap a child island with scoped CSS."
   fn wrap_child_with_css(name : String, parent_id : String, on_event : String, state_json : String, css : String, ssr_html : String) : String do
-    "<div"
-    ++ " data-march-island=\"" ++ name ++ "\""
-    ++ " data-march-dataflow=\"client\""
-    ++ " data-march-hydrate=\"eager\""
-    ++ " data-march-state='" ++ escape_sq(state_json) ++ "'"
-    ++ " data-march-parent=\"" ++ escape_dq(parent_id) ++ "\""
-    ++ " data-march-on-event=\"" ++ escape_dq(on_event) ++ "\""
-    ++ " data-march-island-css=\"" ++ escape_dq(css) ++ "\""
-    ++ ">"
-    ++ ssr_html
-    ++ "</div>"
+    ~H"""<div data-march-island="#{name}" data-march-dataflow="client" data-march-hydrate="eager" data-march-state='#{escape_sq(state_json)}' data-march-parent="#{escape_dq(parent_id)}" data-march-on-event="#{escape_dq(on_event)}" data-march-island-css="#{escape_dq(css)}">#{ssr_html}</div>"""
   end
 
   doc "Convenience: Server-mode eager wrap (display-only island, no event listeners)."
@@ -248,7 +194,7 @@ mod Islands do
     base_url — URL prefix where island JS assets are served (e.g. "/_march/islands")
   """
   fn bootstrap_script(base_url : String) : String do
-    "<script type=\"module\" src=\"" ++ base_url ++ "/march-islands.js\"></script>"
+    ~H"""<script type="module" src="#{base_url}/march-islands.js"></script>"""
   end
 
   doc """
@@ -262,7 +208,7 @@ mod Islands do
     module_name — island module name (e.g. "Counter")
   """
   fn preload_hint(base_url : String, module_name : String) : String do
-    "<link rel=\"modulepreload\" href=\"" ++ base_url ++ "/" ++ module_name ++ ".wasm\">"
+    ~H"""<link rel="modulepreload" href="#{base_url}/#{module_name}.wasm">"""
   end
 
   -- ── Island Registry ──────────────────────────────────────────────────────
