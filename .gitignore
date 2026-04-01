@@ -1,2 +1,4 @@
 /.march/
 *.ll
+march-phases/
+trace/
