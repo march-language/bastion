@@ -384,9 +384,16 @@ mod IslandSocket do
     match find_handler(registry, module_name) do
     Some(handler) -> do
       match handler do
-      IslandHandler(_, _, _, render_fn, _, _) -> do
+      IslandHandler(_, dataflow, _, render_fn, _, _) -> do
         let html = render_fn(payload)
-        (new_store, [make_render_json(island_id, html), make_state_json(island_id, payload)])
+        -- Client-mode islands: include handoff:true so the JS runtime loads
+        -- the island's WASM module and handles subsequent events locally.
+        let render_msg = if dataflow == "client" do
+          make_render_handoff_json(island_id, html)
+        else
+          make_render_json(island_id, html)
+        end
+        (new_store, [render_msg, make_state_json(island_id, payload)])
       end
       end
     end
@@ -506,6 +513,12 @@ mod IslandSocket do
 
   pfn make_render_json(island_id : String, html : String) : String do
     "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"render\",\"payload\":\"" ++ json_escape(html) ++ "\"}"
+  end
+
+  -- Like make_render_json but adds "handoff":true, telling the JS runtime to
+  -- load the island's WASM module and take over subsequent updates locally.
+  pfn make_render_handoff_json(island_id : String, html : String) : String do
+    "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"render\",\"payload\":\"" ++ json_escape(html) ++ "\",\"handoff\":true}"
   end
 
   pfn make_state_json(island_id : String, state_json : String) : String do

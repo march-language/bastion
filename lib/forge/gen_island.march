@@ -1,0 +1,247 @@
+-- Forge.GenIsland — forge bastion.gen.island <Name>
+--
+-- Generates an @island module stub in lib/islands/<snake_name>.march and
+-- creates/updates priv/static/islands/manifest.json with the source path.
+--
+-- Usage:
+--   forge bastion.gen.island Counter
+--   forge bastion.gen.island Counter --server
+--   forge bastion.gen.island Counter --compile
+--
+-- Options:
+--   --server    Also generate a server-handler stub (for server-owned islands).
+--   --compile   Immediately compile the island to WASM after generating.
+--
+-- The generated module uses the JSON-string interface:
+--   fn init()                              : String  (initial state JSON)
+--   fn render(state_json : String)         : String  (HTML string)
+--   fn update(state_json, msg_json : String) : String (new state JSON)
+--
+-- The @island annotation tells forge bastion.build.islands to compile
+-- this module to wasm32-unknown-unknown.
+
+mod Forge.GenIsland do
+
+needs IO.File, IO.Dir, IO.Process
+
+-- ── Name helpers ─────────────────────────────────────────────────────────────
+
+pfn capitalize(s) do
+  if String.is_empty(s) do s
+  else String.to_uppercase(String.slice_bytes(s, 0, 1)) ++ String.slice_bytes(s, 1, String.byte_size(s) - 1)
+  end
+end
+
+pfn pascal_to_snake(s) do
+  let chars = String.split(s, "")
+  pascal_to_snake_loop(chars, "", true)
+end
+
+pfn pascal_to_snake_loop(chars, acc, first) do
+  match chars do
+  Nil -> acc
+  Cons(c, rest) -> do
+    let upper = String.to_uppercase(c)
+    let is_upper = c == upper && !String.is_empty(String.trim(c))
+    if is_upper && !first do
+      pascal_to_snake_loop(rest, acc ++ "_" ++ String.to_lowercase(c), false)
+    else
+      pascal_to_snake_loop(rest, acc ++ String.to_lowercase(c), false)
+    end
+  end
+  end
+end
+
+-- ── Template ─────────────────────────────────────────────────────────────────
+
+pfn island_template(pascal) do
+  "@island\nmod " ++ pascal ++ " do\n\n" ++
+  "-- Parse helpers — add fields as your state grows.\n" ++
+  "pfn parse_state(state_json) do\n" ++
+  "  match Json.parse(state_json) do\n" ++
+  "  Ok(json) -> json\n" ++
+  "  Err(_)   -> Object(Nil)\n" ++
+  "  end\n" ++
+  "end\n\n" ++
+  "-- Initial state returned on first hydration.\n" ++
+  "fn init() : String do\n" ++
+  "  \"{}\"\n" ++
+  "end\n\n" ++
+  "-- Pure render: state JSON → HTML string.\n" ++
+  "fn render(state_json : String) : String do\n" ++
+  "  \"<div>\" ++ state_json ++ \"</div>\"\n" ++
+  "end\n\n" ++
+  "-- Pure update: (state JSON, msg JSON) → new state JSON.\n" ++
+  "-- msg_json examples:\n" ++
+  "--   simple variant:   \"\\\"Increment\\\"\"\n" ++
+  "--   with payload:     \"{\\\"tag\\\":\\\"SetValue\\\",\\\"value\\\":3}\"\n" ++
+  "fn update(state_json : String, msg_json : String) : String do\n" ++
+  "  match msg_json do\n" ++
+  "  _ -> state_json\n" ++
+  "  end\n" ++
+  "end\n\n" ++
+  "end\n"
+end
+
+pfn server_handler_template(pascal) do
+  "-- Server-side handler for " ++ pascal ++ " island.\n" ++
+  "-- Register this with IslandSocket in your app's island_plug setup:\n" ++
+  "--\n" ++
+  "--   |> IslandSocket.register(\"" ++ pascal ++ "\",\n" ++
+  "--        " ++ pascal ++ "Handler.update,\n" ++
+  "--        " ++ pascal ++ "Handler.render)\n\n" ++
+  "mod " ++ pascal ++ "Handler do\n\n" ++
+  "pfn update_pair(pair : (String, String)) : String do\n" ++
+  "  match pair do\n" ++
+  "  (state_json, msg_json) -> " ++ pascal ++ ".update(state_json, msg_json)\n" ++
+  "  end\n" ++
+  "end\n\n" ++
+  "fn update(pair : (String, String)) : String do update_pair(pair) end\n\n" ++
+  "fn render(state_json : String) : String do\n" ++
+  "  " ++ pascal ++ ".render(state_json)\n" ++
+  "end\n\n" ++
+  "end\n"
+end
+
+-- ── Manifest helpers ─────────────────────────────────────────────────────────
+
+pfn manifest_path() do
+  "priv/static/islands/manifest.json"
+end
+
+pfn read_manifest() do
+  match File.read(manifest_path()) do
+  Ok(content) ->
+    match Json.parse(content) do
+    Ok(obj) -> obj
+    Err(_)  -> Object(Nil)
+    end
+  Err(_) -> Object(Nil)
+  end
+end
+
+-- Build updated manifest JSON string by adding/updating the entry for `name`.
+-- Preserves all existing entries.
+pfn write_manifest(name : String, source_path : String) do
+  let _ = Dir.mkdir_p("priv/static/islands")
+  let existing = read_manifest()
+  let entry = "{\"file\":\"" ++ name ++ ".wasm\",\"source\":\"" ++ source_path ++ "\"}"
+  let updated = insert_manifest_entry(existing, name, entry)
+  let _ = File.write(manifest_path(), updated)
+  Ok(())
+end
+
+-- Serialise the manifest Object, replacing or inserting the key `name`.
+pfn insert_manifest_entry(obj : JsonValue, name : String, entry_json : String) : String do
+  match obj do
+  Object(kvs) -> do
+    let filtered = List.filter(kvs, fn kv -> match kv do (k, _) -> k != name end)
+    let pairs_str = List.map(filtered, fn kv ->
+      match kv do
+      (k, v) -> "\"" ++ k ++ "\":" ++ Json.to_string(v)
+      end)
+    let existing_str = String.join(pairs_str, ",")
+    let sep = if String.is_empty(existing_str) do "" else "," end
+    "{" ++ existing_str ++ sep ++ "\"" ++ name ++ "\":" ++ entry_json ++ "}"
+  end
+  _ -> "{\"" ++ name ++ "\":" ++ entry_json ++ "}"
+  end
+end
+
+-- ── WASM compilation ─────────────────────────────────────────────────────────
+
+pfn compile_wasm(source_path : String, name : String) do
+  let out_path = "priv/static/islands/" ++ name ++ ".wasm"
+  let _ = Dir.mkdir_p("priv/static/islands")
+  println("  Compiling " ++ source_path ++ " → " ++ out_path ++ " ...")
+  match Process.run("march", ["--compile", "--target", "wasm32-unknown-unknown", source_path, "-o", out_path]) do
+  Ok(result) ->
+    if Process.ok(result) do
+      println("  Compiled: " ++ out_path)
+      Ok(out_path)
+    else
+      let err = Process.stderr(result)
+      println("  Error compiling WASM: " ++ err)
+      Err(err)
+    end
+  Err(msg) ->
+    println("  Failed to run march: " ++ msg)
+    Err(msg)
+  end
+end
+
+-- ── Main entry point ─────────────────────────────────────────────────────────
+
+fn run(args : List(String)) do
+  match args do
+  Nil -> do
+    println("Usage: forge bastion.gen.island <Name> [--server] [--compile]")
+    println("  <Name>      PascalCase island name (e.g. Counter, SearchBar)")
+    println("  --server    Also generate a server-handler stub")
+    println("  --compile   Compile to WASM immediately after generating")
+  end
+  Cons(name, rest) -> do
+    let want_server  = List.any(rest, fn a -> a == "--server")
+    let want_compile = List.any(rest, fn a -> a == "--compile")
+
+    let snake = pascal_to_snake(name)
+    let source_path = "lib/islands/" ++ snake ++ ".march"
+
+    -- Ensure lib/islands/ exists
+    let _ = Dir.mkdir_p("lib/islands")
+
+    -- Write the island module
+    match File.exists(source_path) do
+    true ->
+      println("  Skipping " ++ source_path ++ " (already exists)")
+    false -> do
+      let _ = File.write(source_path, island_template(name))
+      println("  Created  " ++ source_path)
+    end
+    end
+
+    -- Optionally write the server handler
+    if want_server do
+      let handler_path = "lib/islands/" ++ snake ++ "_handler.march"
+      match File.exists(handler_path) do
+      true  -> println("  Skipping " ++ handler_path ++ " (already exists)")
+      false -> do
+        let _ = File.write(handler_path, server_handler_template(name))
+        println("  Created  " ++ handler_path)
+      end
+      end
+    else () end
+
+    -- Update manifest with source path
+    let _ = write_manifest(name, source_path)
+    println("  Updated  " ++ manifest_path())
+
+    -- Optionally compile to WASM
+    if want_compile do
+      let _ = compile_wasm(source_path, name)
+      ()
+    else () end
+
+    -- Print registration instructions
+    println("")
+    println("Wire up in your island socket registry:")
+    println("  |> IslandSocket.register(\"" ++ name ++ "\",")
+    println("       fn pair -> " ++ name ++ ".update(pair),")
+    println("       " ++ name ++ ".render)")
+    println("")
+    println("Use in a page (server-rendered initial HTML):")
+    println("  Islands.wrap(\"" ++ name ++ "\", Islands.eager(),")
+    println("    " ++ name ++ ".init(),")
+    println("    " ++ name ++ ".render(" ++ name ++ ".init()))")
+    println("")
+    println("Or client-only (WASM renders first frame):")
+    println("  Islands.client_only(\"" ++ name ++ "\", Islands.eager(), " ++ name ++ ".init())")
+    println("")
+    if !want_compile do
+      println("WASM will compile on first request to /_bastion/islands/" ++ name ++ ".wasm")
+    else () end
+  end
+  end
+end
+
+end

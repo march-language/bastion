@@ -419,8 +419,19 @@
           instance.onMerge(msg.payload);
           break;
         case 'render':
-          // Server-rendered HTML (SSR islands or Server-mode)
+          // Server-rendered HTML — morph the DOM.
           instance.morph(msg.payload);
+          // handoff:true means this is a client-mode island: the server did
+          // the first render (SSR over WS) but the WASM module should take
+          // over subsequent events.  Start loading it now in the background.
+          if (msg.handoff && window.__bastionWasm) {
+            window.__bastionWasm.loadModule(instance.moduleName).then(wasmMod => {
+              if (wasmMod) {
+                instance.wasmModule = wasmMod;
+                console.log(`[bastion] WASM handoff: ${instance.moduleName} now handling events locally`);
+              }
+            });
+          }
           break;
         default:
           console.warn(`[bastion] Unknown message type: ${msg.type}`);

@@ -1,5 +1,7 @@
 mod BastionTest do
 
+needs IO.File, IO.Dir, IO.Process
+
 import Router
 import Middleware
 import TypedMiddleware

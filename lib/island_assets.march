@@ -32,6 +32,7 @@
 mod IslandAssets do
 
   import HttpServer
+  needs IO.File, IO.Dir, IO.Process
 
   -- Configuration for the asset server.
   --   base_path — URL prefix for island assets (e.g. "/_bastion")
@@ -145,9 +146,16 @@ mod IslandAssets do
   Returns 404 if the WASM file is not present.
   """
   fn serve_wasm_file(conn : Conn, filename : String) : Conn do
-    let primary_path  = "priv/static/islands/" ++ filename
+    let out_path = "priv/static/islands/" ++ filename
+    -- Derive the module name from the filename (strip .wasm suffix).
+    let module_name = match String.split_first(filename, ".") do
+      Some((stem, _)) -> stem
+      None            -> filename
+      end
+    -- In dev mode: if the .wasm is missing or stale, recompile on demand.
+    let _ = maybe_recompile(module_name, out_path)
     let fallback_path = "islands/" ++ filename
-    let content_opt = match File.read(primary_path) do
+    let content_opt = match File.read(out_path) do
       Ok(bytes) -> Some(bytes)
       Err(_) ->
         match File.read(fallback_path) do
@@ -167,6 +175,53 @@ mod IslandAssets do
       conn
       |> HttpServer.send_resp(404, "Island WASM not found: " ++ filename)
     end
+    end
+  end
+
+  -- Recompile the island's WASM if the .wasm file doesn't exist yet.
+  -- No-ops silently if the manifest doesn't list the island or march isn't found.
+  pfn maybe_recompile(module_name : String, out_path : String) do
+    if File.exists(out_path) do ()
+    else
+      match source_path_for(module_name) do
+      None -> ()
+      Some(src) -> do
+        let _ = compile_island_wasm(src, out_path)
+        ()
+      end
+      end
+    end
+  end
+
+  pfn source_path_for(module_name : String) : Option(String) do
+    let manifest_file = "priv/static/islands/manifest.json"
+    match File.read(manifest_file) do
+    Ok(content) ->
+      match Json.parse(content) do
+      Ok(json) ->
+        match Json.get(json, module_name) do
+        Some(entry) ->
+          match Json.get(entry, "source") do
+          Some(Str(src)) -> Some(src)
+          _              -> None
+          end
+        _ -> None
+        end
+      Err(_) -> None
+      end
+    Err(_) -> None
+    end
+  end
+
+  pfn compile_island_wasm(src : String, out_path : String) do
+    match Process.run("march", ["--compile", "--target", "wasm32-unknown-unknown", src, "-o", out_path]) do
+    Ok(result) ->
+      if !Process.ok(result) do
+        -- Log to stderr but don't crash the server — serve 404 instead.
+        let _ = Process.run("sh", ["-c", "echo '[bastion/islands] WASM compile failed: " ++ Process.stderr(result) ++ "' >&2"])
+        ()
+      else () end
+    Err(_) -> ()
     end
   end
 
