@@ -9,11 +9,19 @@ needs IO.File, IO.FS, IO.Process
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
+-- Capitalise the first character of a string.
+pfn capitalize(s) do
+  if String.is_empty(s) do s
+  else
+    String.to_uppercase(String.slice_bytes(s, 0, 1)) ++ String.slice_bytes(s, 1, String.byte_size(s) - 1)
+  end
+end
+
 -- Convert snake_case to PascalCase: "my_app" -> "MyApp"
 pfn snake_to_pascal(s) do
   let parts = String.split(s, "_")
   let non_empty = List.filter(parts, fn p -> !String.is_empty(p))
-  List.map(non_empty, fn p -> String.capitalize(p))
+  List.map(non_empty, fn p -> capitalize(p))
     |> String.join("")
 end
 
@@ -64,7 +72,7 @@ pfn config_test() do
 end
 
 pfn config_prod() do
-  "mod Config.Prod do\n  -- Set the PORT environment variable to configure the HTTP port.\n  let port = match Env.get(\"PORT\") do\n    Some(p) -> string_to_int(p)\n    None    -> 4000\n  end\nend\n"
+  "mod Config.Prod do\n  -- Set the PORT environment variable to configure the HTTP port.\n  let port = match Process.env(\"PORT\") do\n    Some(p) -> string_to_int(p)\n    None    -> 4000\n  end\nend\n"
 end
 
 pfn app_css(name) do
@@ -92,7 +100,7 @@ pfn gitignore() do
 end
 
 pfn readme(name) do
-  "# " ++ String.capitalize(name) ++ "\n"
+  "# " ++ capitalize(name) ++ "\n"
 end
 
 -- ── Scaffold ─────────────────────────────────────────────────────────────────
@@ -102,37 +110,38 @@ Scaffold a new Bastion application named `name` in a new directory.
 Returns Ok(()) on success or Err(msg) on failure.
 """
 fn scaffold(name) do
-  if FS.exists(name) do
+  if Dir.exists(name) do
     Err("directory '" ++ name ++ "' already exists")
   else
     let pascal = snake_to_pascal(name)
-    Dir.make_all(name ++ "/lib/" ++ name ++ "/controllers")
-    Dir.make_all(name ++ "/lib/" ++ name ++ "/templates/page")
-    Dir.make_all(name ++ "/config")
-    Dir.make_all(name ++ "/assets/css")
-    Dir.make_all(name ++ "/assets/js")
-    Dir.make_all(name ++ "/test/controllers")
-    let f = fn rel -> fn content ->
-      File.write(name ++ "/" ++ rel, content)
-    in
-    f("forge.toml")(forge_toml(name))
-    f(".editorconfig")(editorconfig())
-    f(".gitignore")(gitignore())
-    f("README.md")(readme(name))
-    f("lib/" ++ name ++ ".march")(main_source(pascal))
-    f("lib/" ++ name ++ "/router.march")(router_source(pascal))
-    f("lib/" ++ name ++ "/controllers/page_controller.march")(page_controller_source(pascal))
-    f("lib/" ++ name ++ "/templates/layout.march")(layout_source(name, pascal))
-    f("lib/" ++ name ++ "/templates/page/index.march")(page_index_source(name, pascal))
-    f("config/config.march")(config_main())
-    f("config/dev.march")(config_dev())
-    f("config/test.march")(config_test())
-    f("config/prod.march")(config_prod())
-    f("assets/css/app.css")(app_css(name))
-    f("assets/js/app.js")(app_js())
-    f("test/test_helper.march")(test_helper_source(pascal))
-    f("test/controllers/test_page_controller.march")(test_page_controller_source(pascal))
-    Process.exec_shell("git init " ++ name ++ " > /dev/null 2>&1")
+    let _ = Dir.mkdir_p(name ++ "/lib/" ++ name ++ "/controllers")
+    let _ = Dir.mkdir_p(name ++ "/lib/" ++ name ++ "/templates/page")
+    let _ = Dir.mkdir_p(name ++ "/config")
+    let _ = Dir.mkdir_p(name ++ "/assets/css")
+    let _ = Dir.mkdir_p(name ++ "/assets/js")
+    let _ = Dir.mkdir_p(name ++ "/test/controllers")
+    let write = fn path -> fn content -> do
+      let _ = File.write(name ++ "/" ++ path, content)
+      println("* creating " ++ name ++ "/" ++ path)
+    end
+    write("forge.toml")(forge_toml(name))
+    write(".editorconfig")(editorconfig())
+    write(".gitignore")(gitignore())
+    write("README.md")(readme(name))
+    write("lib/" ++ name ++ ".march")(main_source(pascal))
+    write("lib/" ++ name ++ "/router.march")(router_source(pascal))
+    write("lib/" ++ name ++ "/controllers/page_controller.march")(page_controller_source(pascal))
+    write("lib/" ++ name ++ "/templates/layout.march")(layout_source(name, pascal))
+    write("lib/" ++ name ++ "/templates/page/index.march")(page_index_source(name, pascal))
+    write("config/config.march")(config_main())
+    write("config/dev.march")(config_dev())
+    write("config/test.march")(config_test())
+    write("config/prod.march")(config_prod())
+    write("assets/css/app.css")(app_css(name))
+    write("assets/js/app.js")(app_js())
+    write("test/test_helper.march")(test_helper_source(pascal))
+    write("test/controllers/test_page_controller.march")(test_page_controller_source(pascal))
+    let _ = Process.run("sh", ["-c", "git init " ++ name ++ " > /dev/null 2>&1"])
     Ok(())
   end
 end

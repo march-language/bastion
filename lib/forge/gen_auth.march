@@ -24,6 +24,14 @@ mod Forge.GenAuth do
 
 needs IO.File, IO.FS
 
+-- Capitalise the first character of a string.
+pfn capitalize(s) do
+  if String.is_empty(s) do s
+  else
+    String.to_uppercase(String.slice_bytes(s, 0, 1)) ++ String.slice_bytes(s, 1, String.byte_size(s) - 1)
+  end
+end
+
 -- Produce a literal ${name} for use inside generated source templates.
 pfn iv(name) do
   "${" ++ name ++ "}"
@@ -36,10 +44,10 @@ end
 
 -- Derive the Pascal module name from the cwd basename.
 pfn detect_app_name() do
-  let name = Path.basename(FS.cwd())
+  let name = Path.basename(Process.cwd())
   let parts = String.split(name, "_")
   let non_empty = List.filter(parts, fn p -> !String.is_empty(p))
-  List.map(non_empty, fn p -> String.capitalize(p))
+  List.map(non_empty, fn p -> capitalize(p))
     |> String.join("")
 end
 
@@ -229,7 +237,7 @@ fn down() do
 end
 
 fn version() do
-  """ ++ Int.to_string(ts) ++ """
+  """ ++ String.from_int(ts) ++ """
 end
 
 end
@@ -261,7 +269,7 @@ fn down() do
 end
 
 fn version() do
-  """ ++ Int.to_string(ts) ++ """
+  """ ++ String.from_int(ts) ++ """
 end
 
 end
@@ -540,10 +548,20 @@ end
 
 fn create(conn) do
   let params = H.body_params(conn)
-  let email    = List.find_value(params, fn (k, v) -> if k == "email" do Some(v) else None end)
-  let password = List.find_value(params, fn (k, v) -> if k == "password" do Some(v) else None end)
-  let email_str    = match email    do Some(e) -> e | None -> "" end
-  let password_str = match password do Some(p) -> p | None -> "" end
+  let email_str = match List.filter_map(params, fn pair -> do
+      let (k, v) = pair
+      if k == "email" do Some(v) else None end
+    end) do
+    Cons(e, _) -> e
+    Nil -> ""
+  end
+  let password_str = match List.filter_map(params, fn pair -> do
+      let (k, v) = pair
+      if k == "password" do Some(v) else None end
+    end) do
+    Cons(p, _) -> p
+    Nil -> ""
+  end
   match Accounts.get_user_by_email_and_password(email_str, password_str) do
   None ->
     conn
@@ -751,14 +769,18 @@ pfn unique_email() do
     None -> 1
   end
   Vault.set(user_counter, "count", n)
-  "user" ++ int_to_string(n) ++ "@example.com"
+  "user" ++ String.from_int(n) ++ "@example.com"
 end
 
 fn user_fixture_attrs(overrides) do
   let defaults = [("email", unique_email()), ("password", "ValidPassword123!")]
-  List.foldl(overrides, defaults, fn (k, v), acc ->
-    List.keystore(acc, k, v)
-  )
+  List.fold_left(defaults, overrides, fn acc -> fn pair -> do
+    let (k, v) = pair
+    List.filter(acc, fn entry -> do
+      let (ek, _) = entry
+      ek != k
+    end) ++ [(k, v)]
+  end)
 end
 
 fn user_fixture(overrides) do
@@ -776,7 +798,10 @@ fn user_fixture(overrides) do
     end
   Err(gate) ->
     let errs = Depot.Gate.errors(gate)
-    let msg = List.map(errs, fn (f, m) -> f ++ ": " ++ m) |> List.join(", ")
+    let msg = List.map(errs, fn entry -> do
+      let (f, m) = entry
+      f ++ ": " ++ m
+    end) |> String.join(", ")
     error("user_fixture failed: " ++ msg)
   end
 end
@@ -797,8 +822,8 @@ end
 doc "Generate auth boilerplate in the current project directory."
 fn run() do
   let pascal      = detect_app_name()
-  let app_snake   = String.downcase(pascal)
-  let ts          = Time.unix_seconds()
+  let app_snake   = String.to_lowercase(pascal)
+  let ts          = DateTime.now()
   let ts2         = ts + 1
 
   let lib_dir       = "lib/" ++ app_snake
@@ -807,15 +832,15 @@ fn run() do
   let mig_dir       = "priv/depot/migrations"
   let support_dir   = "test/support"
 
-  Dir.make_all(accounts_dir)
-  Dir.make_all(auth_ctrl_dir)
-  Dir.make_all(mig_dir)
-  Dir.make_all(support_dir)
+  let _ = Dir.mkdir_p(accounts_dir)
+  let _ = Dir.mkdir_p(auth_ctrl_dir)
+  let _ = Dir.mkdir_p(mig_dir)
+  let _ = Dir.mkdir_p(support_dir)
 
-  let write = fn path -> fn content ->
-    File.write(path, content)
-    IO.println("* creating " ++ path)
-  in
+  let write = fn path -> fn content -> do
+    let _ = File.write(path, content)
+    println("* creating " ++ path)
+  end
 
   write(accounts_dir ++ "/user.march")(user_schema_source(pascal))
   write(accounts_dir ++ "/user_token.march")(user_token_schema_source(pascal))
@@ -826,44 +851,44 @@ fn run() do
   write(auth_ctrl_dir ++ "/session_controller.march")(session_controller_source(pascal))
   write(auth_ctrl_dir ++ "/user_settings_controller.march")(user_settings_controller_source(pascal))
   write(auth_ctrl_dir ++ "/confirmation_controller.march")(confirmation_controller_source(pascal))
-  write(mig_dir ++ "/" ++ Int.to_string(ts)  ++ "_create_users.march")(users_migration_source(ts))
-  write(mig_dir ++ "/" ++ Int.to_string(ts2) ++ "_create_user_tokens.march")(user_tokens_migration_source(ts2))
+  write(mig_dir ++ "/" ++ String.from_int(ts)  ++ "_create_users.march")(users_migration_source(ts))
+  write(mig_dir ++ "/" ++ String.from_int(ts2) ++ "_create_user_tokens.march")(user_tokens_migration_source(ts2))
   write(support_dir ++ "/accounts_fixtures.march")(accounts_fixtures_source(pascal))
 
-  let lower_app = String.downcase(pascal)
+  let lower_app = String.to_lowercase(pascal)
 
-  IO.println("")
-  IO.println("Done!  Files generated for " ++ pascal ++ ".")
-  IO.println("")
-  IO.println("Next steps")
-  IO.println("──────────")
-  IO.println("")
-  IO.println("1. Add auth routes to your router  (lib/" ++ lower_app ++ "/router.march):")
-  IO.println("")
-  IO.println("     (:post, Cons(\"users\", Cons(\"register\", Nil)))  -> " ++ pascal ++ ".Controllers.Auth.RegistrationController.create(conn)")
-  IO.println("     (:get,  Cons(\"users\", Cons(\"register\", Nil)))  -> " ++ pascal ++ ".Controllers.Auth.RegistrationController.new(conn)")
-  IO.println("     (:post, Cons(\"users\", Cons(\"log_in\", Nil)))    -> " ++ pascal ++ ".Controllers.Auth.SessionController.create(conn)")
-  IO.println("     (:get,  Cons(\"users\", Cons(\"log_in\", Nil)))    -> " ++ pascal ++ ".Controllers.Auth.SessionController.new(conn)")
-  IO.println("     (:delete, Cons(\"users\", Cons(\"log_out\", Nil))) -> " ++ pascal ++ ".Controllers.Auth.SessionController.delete(conn)")
-  IO.println("     (:get,  Cons(\"users\", Cons(\"settings\", Nil)))  -> " ++ pascal ++ ".Controllers.Auth.UserSettingsController.edit(conn)")
-  IO.println("     (:get,  Cons(\"users\", Cons(\"confirm\", Cons(_, Nil)))) -> " ++ pascal ++ ".Controllers.Auth.ConfirmationController.confirm(conn)")
-  IO.println("     (:post, Cons(\"users\", Cons(\"confirm\", Nil)))   -> " ++ pascal ++ ".Controllers.Auth.ConfirmationController.resend(conn)")
-  IO.println("")
-  IO.println("2. Plug the auth middleware into your router pipeline:")
-  IO.println("")
-  IO.println("     alias " ++ pascal ++ ".Auth as Auth")
-  IO.println("     let conn2 = Auth.load_current_user(conn)")
-  IO.println("")
-  IO.println("3. Run the migrations:")
-  IO.println("")
-  IO.println("     forge depot migrate")
-  IO.println("")
-  IO.println("4. (Optional) Protect routes that require authentication:")
-  IO.println("")
-  IO.println("     let conn3 = Auth.require_authenticated_user(conn2)")
-  IO.println("")
-  IO.println("5. Replace placeholder HTML in each controller with real ~H templates.")
-  IO.println("6. Implement " ++ pascal ++ ".Accounts.UserNotifier to send real emails.")
+  println("")
+  println("Done!  Files generated for " ++ pascal ++ ".")
+  println("")
+  println("Next steps")
+  println("──────────")
+  println("")
+  println("1. Add auth routes to your router  (lib/" ++ lower_app ++ "/router.march):")
+  println("")
+  println("     (:post, Cons(\"users\", Cons(\"register\", Nil)))  -> " ++ pascal ++ ".Controllers.Auth.RegistrationController.create(conn)")
+  println("     (:get,  Cons(\"users\", Cons(\"register\", Nil)))  -> " ++ pascal ++ ".Controllers.Auth.RegistrationController.new(conn)")
+  println("     (:post, Cons(\"users\", Cons(\"log_in\", Nil)))    -> " ++ pascal ++ ".Controllers.Auth.SessionController.create(conn)")
+  println("     (:get,  Cons(\"users\", Cons(\"log_in\", Nil)))    -> " ++ pascal ++ ".Controllers.Auth.SessionController.new(conn)")
+  println("     (:delete, Cons(\"users\", Cons(\"log_out\", Nil))) -> " ++ pascal ++ ".Controllers.Auth.SessionController.delete(conn)")
+  println("     (:get,  Cons(\"users\", Cons(\"settings\", Nil)))  -> " ++ pascal ++ ".Controllers.Auth.UserSettingsController.edit(conn)")
+  println("     (:get,  Cons(\"users\", Cons(\"confirm\", Cons(_, Nil)))) -> " ++ pascal ++ ".Controllers.Auth.ConfirmationController.confirm(conn)")
+  println("     (:post, Cons(\"users\", Cons(\"confirm\", Nil)))   -> " ++ pascal ++ ".Controllers.Auth.ConfirmationController.resend(conn)")
+  println("")
+  println("2. Plug the auth middleware into your router pipeline:")
+  println("")
+  println("     alias " ++ pascal ++ ".Auth as Auth")
+  println("     let conn2 = Auth.load_current_user(conn)")
+  println("")
+  println("3. Run the migrations:")
+  println("")
+  println("     forge depot migrate")
+  println("")
+  println("4. (Optional) Protect routes that require authentication:")
+  println("")
+  println("     let conn3 = Auth.require_authenticated_user(conn2)")
+  println("")
+  println("5. Replace placeholder HTML in each controller with real ~H templates.")
+  println("6. Implement " ++ pascal ++ ".Accounts.UserNotifier to send real emails.")
 
   Ok(())
 end

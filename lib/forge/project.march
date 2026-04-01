@@ -1,0 +1,266 @@
+-- Forge.Project — load and represent a Bastion project
+--
+-- Reads the forge.toml in (or above) the current working directory and
+-- returns a Project record that other Forge commands consume.
+--
+-- forge.toml format (TOML subset):
+--   [package]
+--   name    = "my_app"
+--   version = "0.1.0"
+--   type    = "app"
+--
+--   [deps]
+--   bastion       = "*"
+--   some_lib      = { path = "../some_lib" }
+--   other_lib     = { git = "https://...", tag = "v1.0" }
+--   another_lib   = { git = "https://...", branch = "main" }
+--   yet_another   = { git = "https://...", rev = "abc123" }
+
+mod Forge.Project do
+
+needs IO.File, IO.FS, IO.Process
+
+-- ── Types ────────────────────────────────────────────────────────────────────
+
+type Dep =
+    RegistryDep(String)
+  | PathDep(String)
+  | GitTagDep(String, String)
+  | GitBranchDep(String, String)
+  | GitRevDep(String, String)
+
+type Project = {
+  name:    String,
+  version: String,
+  root:    String,
+  deps:    List((String, Dep))
+}
+
+-- ── String helpers ───────────────────────────────────────────────────────────
+
+-- Strip surrounding double-quotes from a string (if present).
+pfn unquote(s) do
+  let len = String.byte_size(s)
+  if len >= 2 && String.starts_with(s, "\"") && String.ends_with(s, "\"") do
+    String.slice_bytes(s, 1, len - 2)
+  else
+    s
+  end
+end
+
+-- Extract a bare (unquoted) value: take chars until comma, }, or whitespace.
+pfn extract_bare(s, pos, n) do
+  if pos >= n do s
+  else
+    let c = String.slice_bytes(s, pos, 1)
+    if c == "," || c == "}" || c == " " || c == "\t" do
+      String.slice_bytes(s, 0, pos)
+    else
+      extract_bare(s, pos + 1, n)
+    end
+  end
+end
+
+-- Extract the first value from the start of a string (quoted or bare).
+pfn extract_value(s) do
+  if String.starts_with(s, "\"") do
+    let inner = String.slice_bytes(s, 1, String.byte_size(s) - 1)
+    match String.index_of(inner, "\"") do
+    None -> s
+    Some(end_idx) -> String.slice_bytes(s, 1, end_idx)
+    end
+  else
+    extract_bare(s, 0, String.byte_size(s))
+  end
+end
+
+-- Extract the value of a key from an inline TOML table string.
+pfn inline_get(s, key) do
+  let needle = key ++ " = "
+  let needle2 = key ++ "="
+  match String.index_of(s, needle) do
+  Some(pos) ->
+    let after = String.trim(String.slice_bytes(s, pos + String.byte_size(needle), String.byte_size(s) - pos - String.byte_size(needle)))
+    Some(extract_value(after))
+  None ->
+    match String.index_of(s, needle2) do
+    None -> None
+    Some(pos) ->
+      let after = String.trim(String.slice_bytes(s, pos + String.byte_size(needle2), String.byte_size(s) - pos - String.byte_size(needle2)))
+      Some(extract_value(after))
+    end
+  end
+end
+
+-- ── TOML parser (minimal subset) ─────────────────────────────────────────────
+
+-- Try to parse a line as `key = "value"` and return value if key matches.
+pfn parse_kv(line, key) do
+  match String.index_of(line, "=") do
+  None -> None
+  Some(eq) ->
+    let k = String.trim(String.slice_bytes(line, 0, eq))
+    if k == key do
+      let raw = String.trim(String.slice_bytes(line, eq + 1, String.byte_size(line) - eq - 1))
+      Some(unquote(raw))
+    else
+      None
+    end
+  end
+end
+
+-- Is this line a TOML section header like [package]?
+pfn is_section_header(trimmed) do
+  String.starts_with(trimmed, "[") && String.ends_with(trimmed, "]")
+end
+
+-- Extract section name from a header line.
+pfn section_name(trimmed) do
+  String.trim(String.slice_bytes(trimmed, 1, String.byte_size(trimmed) - 2))
+end
+
+-- Return the value of a key in a [section], e.g. name under [package].
+pfn get_section_value(lines, section, key) do
+  get_section_value_loop(lines, section, key, false)
+end
+
+pfn get_section_value_loop(lines, section, key, in_section) do
+  match lines do
+  Nil -> None
+  Cons(line, rest) ->
+    let trimmed = String.trim(line)
+    if is_section_header(trimmed) do
+      let sec = section_name(trimmed)
+      get_section_value_loop(rest, section, key, sec == section)
+    else
+      if in_section do
+        match parse_kv(trimmed, key) do
+        Some(v) -> Some(v)
+        None    -> get_section_value_loop(rest, section, key, true)
+        end
+      else
+        get_section_value_loop(rest, section, key, false)
+      end
+    end
+  end
+end
+
+-- ── Dep parser ───────────────────────────────────────────────────────────────
+
+-- Parse an inline table dep like { path = "../lib" } or { git = "...", tag = "v1" }
+pfn parse_inline_dep(s) do
+  match inline_get(s, "path") do
+  Some(p) -> PathDep(p)
+  None ->
+    match inline_get(s, "git") do
+    None -> RegistryDep("*")
+    Some(url) ->
+      match inline_get(s, "tag") do
+      Some(tag) -> GitTagDep(url, tag)
+      None ->
+        match inline_get(s, "branch") do
+        Some(b) -> GitBranchDep(url, b)
+        None ->
+          match inline_get(s, "rev") do
+          Some(r) -> GitRevDep(url, r)
+          None    -> RegistryDep("*")
+          end
+        end
+      end
+    end
+  end
+end
+
+pfn parse_dep_line(line) do
+  match String.index_of(line, "=") do
+  None -> None
+  Some(eq) ->
+    let name = String.trim(String.slice_bytes(line, 0, eq))
+    let rhs  = String.trim(String.slice_bytes(line, eq + 1, String.byte_size(line) - eq - 1))
+    let dep = if String.starts_with(rhs, "{") do
+      parse_inline_dep(rhs)
+    else
+      RegistryDep(unquote(rhs))
+    end
+    Some((name, dep))
+  end
+end
+
+pfn is_dep_line(trimmed) do
+  !String.is_empty(trimmed) && !String.starts_with(trimmed, "--")
+end
+
+-- Parse lines in the [deps] section into a list of (name, Dep) pairs.
+pfn parse_deps(lines) do
+  List.reverse(parse_deps_loop(lines, false, []))
+end
+
+pfn parse_deps_loop(lines, in_deps, acc) do
+  match lines do
+  Nil -> acc
+  Cons(line, rest) ->
+    let trimmed = String.trim(line)
+    if is_section_header(trimmed) do
+      let sec = section_name(trimmed)
+      parse_deps_loop(rest, sec == "deps", acc)
+    else
+      if in_deps && is_dep_line(trimmed) do
+        match parse_dep_line(trimmed) do
+        None      -> parse_deps_loop(rest, true, acc)
+        Some(dep) -> parse_deps_loop(rest, true, Cons(dep, acc))
+        end
+      else
+        parse_deps_loop(rest, in_deps, acc)
+      end
+    end
+  end
+end
+
+-- ── Root finder ───────────────────────────────────────────────────────────────
+
+-- Walk up from `dir` looking for a forge.toml file.
+pfn find_root(dir) do
+  let toml = dir ++ "/forge.toml"
+  if File.exists(toml) do
+    Some(dir)
+  else
+    let parent = Path.dirname(dir)
+    if parent == dir do
+      None
+    else
+      find_root(parent)
+    end
+  end
+end
+
+-- ── Public API ────────────────────────────────────────────────────────────────
+
+doc """
+Load the Bastion project from the nearest forge.toml, searching up from cwd.
+Returns Ok(Project) on success or Err(msg) on failure.
+"""
+fn load() do
+  let cwd = Process.cwd()
+  match find_root(cwd) do
+  None -> Err("forge.toml not found (searched from " ++ cwd ++ ")")
+  Some(root) ->
+    let toml_path = root ++ "/forge.toml"
+    match File.read(toml_path) do
+    Err(e) -> Err("could not read " ++ toml_path ++ ": " ++ e)
+    Ok(src) ->
+      let lines = String.split(src, "\n")
+      let name    = match get_section_value(lines, "package", "name") do
+        Some(n) -> n
+        None    -> Path.basename(root)
+      end
+      let version = match get_section_value(lines, "package", "version") do
+        Some(v) -> v
+        None    -> "0.1.0"
+      end
+      let deps = parse_deps(lines)
+      Ok({ name = name, version = version, root = root, deps = deps })
+    end
+  end
+end
+
+end
