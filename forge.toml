@@ -9,4 +9,8 @@ author = ""
 command = "bastion.gen.island"
 module  = "lib/forge/gen_island.march"
 
+[archive.task.bastion.build.islands]
+command = "bastion.build.islands"
+module  = "lib/forge/build_islands.march"
+
 [deps]

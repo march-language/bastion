@@ -1,0 +1,279 @@
+-- Forge.BuildIslands — forge bastion.build.islands
+--
+-- Compiles all @island modules to WASM, content-hashes the output files,
+-- and writes priv/static/islands/manifest.json.
+--
+-- Usage:
+--   forge bastion.build.islands
+--   forge bastion.build.islands --clean    # delete stale .wasm before building
+--
+-- Scans lib/ recursively for .march files containing the @island annotation,
+-- compiles each to wasm32-unknown-unknown, renames the output to include an
+-- 8-char SHA-256 content hash (e.g. counter-a1b2c3d4.wasm), and writes a
+-- fresh manifest mapping module names to hashed filenames.
+--
+-- Manifest format (priv/static/islands/manifest.json):
+--   {
+--     "Counter":   { "file": "counter-a1b2c3d4.wasm",   "hash": "a1b2c3d4",
+--                    "source": "lib/islands/counter.march" },
+--     "SearchBar": { "file": "search_bar-e5f6g7h8.wasm", "hash": "e5f6g7h8",
+--                    "source": "lib/islands/search_bar.march" }
+--   }
+
+mod Forge.BuildIslands do
+
+needs IO.File, IO.Dir, IO.Process
+
+-- ── Name helpers ─────────────────────────────────────────────────────────────
+
+fn pascal_to_snake(s) do
+  let chars = String.split(s, "")
+  pascal_to_snake_loop(chars, "", true)
+end
+
+pfn pascal_to_snake_loop(chars, acc, first) do
+  match chars do
+  Nil -> acc
+  Cons(c, rest) -> do
+    let upper = String.to_uppercase(c)
+    let is_upper = c == upper && !String.is_empty(String.trim(c))
+    if is_upper && !first do
+      pascal_to_snake_loop(rest, acc ++ "_" ++ String.to_lowercase(c), false)
+    else
+      pascal_to_snake_loop(rest, acc ++ String.to_lowercase(c), false)
+    end
+  end
+  end
+end
+
+-- ── @island scanner ───────────────────────────────────────────────────────────
+
+-- Recursively collect all .march files under a directory.
+pfn collect_march_files(dir) do
+  match Dir.list_full(dir) do
+  Ok(entries) ->
+    List.flat_map(entries, fn path -> do
+      if String.ends_with(path, ".march") do
+        [path]
+      else if Dir.exists(path) do
+        collect_march_files(path)
+      else
+        Nil
+      end end
+    end)
+  Err(_) -> Nil
+  end
+end
+
+-- Extract the module name from a line like "mod Counter do" or "mod Counter.Sub do".
+-- Returns None if the line doesn't match.
+fn extract_mod_name(line) do
+  let trimmed = String.trim(line)
+  if String.starts_with(trimmed, "mod ") do
+    let rest = String.slice_bytes(trimmed, 4, String.byte_size(trimmed) - 4)
+    -- take everything up to the first space or "do"
+    match String.index_of(rest, " ") do
+    Some(k) -> Some(String.slice_bytes(rest, 0, k))
+    None    ->
+      -- "mod Foo" with no trailing space — use the whole rest
+      if String.is_empty(rest) do None else Some(String.trim(rest)) end
+    end
+  else
+    None
+  end
+end
+
+-- Scan a single .march file for @island annotations.
+-- Returns a list of (module_name, source_path) pairs.
+pfn scan_file(path) do
+  match File.read_lines(path) do
+  Ok(lines) -> scan_lines(lines, path, false, Nil)
+  Err(_)    -> Nil
+  end
+end
+
+pfn scan_lines(lines, path, next_is_island, acc) do
+  match lines do
+  Nil -> List.reverse(acc)
+  Cons(line, rest) -> do
+    let trimmed = String.trim(line)
+    if trimmed == "@island" do
+      scan_lines(rest, path, true, acc)
+    else if next_is_island do
+      match extract_mod_name(trimmed) do
+      Some(name) -> scan_lines(rest, path, false, Cons((name, path), acc))
+      None       -> scan_lines(rest, path, true,  acc)  -- skip blank/comment lines
+      end
+    else
+      scan_lines(rest, path, false, acc)
+    end end
+  end
+  end
+end
+
+-- Scan lib/ (and islands/) for all @island modules.
+pfn discover_islands() do
+  let lib_files    = collect_march_files("lib")
+  let island_files = collect_march_files("islands")
+  let all = List.append(lib_files, island_files)
+  List.flat_map(all, fn path -> scan_file(path))
+end
+
+-- ── WASM compilation ─────────────────────────────────────────────────────────
+
+pfn compile_to_wasm(source_path, out_path) do
+  match Process.run("march", ["--compile", "--target", "wasm32-unknown-unknown", source_path, "-o", out_path]) do
+  Ok(result) ->
+    if Process.ok(result) do Ok(out_path)
+    else Err(Process.stderr(result))
+    end
+  Err(msg) -> Err("failed to run march: " ++ msg)
+  end
+end
+
+-- Compute an 8-char SHA-256 prefix of a file (content hash for cache-busting).
+pfn content_hash(path) do
+  match Process.run("sh", ["-c", "shasum -a 256 " ++ path ++ " | cut -c1-8"]) do
+  Ok(result) ->
+    let h = String.trim(Process.stdout(result))
+    if String.is_empty(h) do "00000000" else h end
+  Err(_) -> "00000000"
+  end
+end
+
+-- Build one island: compile → hash → rename to hashed filename.
+-- Returns Ok((hashed_filename, hash)) or Err(msg).
+pfn build_one(name, source_path) do
+  let snake    = pascal_to_snake(name)
+  let tmp_path = "priv/static/islands/_" ++ snake ++ ".wasm"
+  println("  Compiling " ++ source_path ++ " ...")
+  match compile_to_wasm(source_path, tmp_path) do
+  Err(e) -> do
+    println("  Error: " ++ e)
+    Err(e)
+  end
+  Ok(_) -> do
+    let hash         = content_hash(tmp_path)
+    let hashed_name  = snake ++ "-" ++ hash ++ ".wasm"
+    let hashed_path  = "priv/static/islands/" ++ hashed_name
+    let _            = File.rename(tmp_path, hashed_path)
+    println("  Built    " ++ hashed_path)
+    Ok((hashed_name, hash))
+  end
+  end
+end
+
+-- ── Manifest ─────────────────────────────────────────────────────────────────
+
+pfn manifest_path() do "priv/static/islands/manifest.json" end
+
+-- Build a fresh manifest JSON string from a list of
+-- (module_name, hashed_filename, hash, source_path) tuples.
+pfn build_manifest_json(entries) do
+  let pairs = List.map(entries, fn e -> do
+    let (name, file, hash, src) = e
+    "\"" ++ name ++ "\":{\"file\":\"" ++ file ++ "\",\"hash\":\"" ++ hash ++ "\",\"source\":\"" ++ src ++ "\"}"
+  end)
+  "{" ++ String.join(pairs, ",") ++ "}"
+end
+
+-- ── Clean ─────────────────────────────────────────────────────────────────────
+
+pfn clean_wasm_dir() do
+  match Dir.list_full("priv/static/islands") do
+  Ok(entries) ->
+    let _ = List.map(entries, fn path ->
+      if String.ends_with(path, ".wasm") do
+        let _ = File.delete(path)
+        ()
+      else () end)
+    ()
+  Err(_) -> ()
+  end
+end
+
+-- ── Main build loop ───────────────────────────────────────────────────────────
+
+pfn build_all(islands, want_clean) do
+  let _ = Dir.mkdir_p("priv/static/islands")
+  if want_clean do clean_wasm_dir() else () end
+  let results = List.map(islands, fn pair -> do
+    let (name, src) = pair
+    match build_one(name, src) do
+    Ok((file, hash)) -> Some((name, file, hash, src))
+    Err(_)           -> None
+    end
+  end)
+  let built = List.filter_map(results, fn x -> x)
+  let json  = build_manifest_json(built)
+  let _     = File.write(manifest_path(), json)
+  (List.length(built), List.length(islands))
+end
+
+-- ── Entry point ───────────────────────────────────────────────────────────────
+
+fn run(args) do
+  let want_clean = List.any(args, fn a -> a == "--clean")
+  println("Scanning for @island modules ...")
+  let islands = discover_islands()
+  match islands do
+  Nil -> println("No @island modules found.")
+  _   -> do
+    let n = List.length(islands)
+    println("Found " ++ String.from_int(n) ++ " island(s). Building ...")
+    let (built, total) = build_all(islands, want_clean)
+    println("")
+    println("Done. " ++ String.from_int(built) ++ "/" ++ String.from_int(total) ++ " islands compiled.")
+    println("Manifest written to " ++ manifest_path())
+  end
+  end
+end
+
+fn main() do
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  run(args)
+end
+
+-- ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe "pascal_to_snake" do
+  test "single word" do
+    assert (pascal_to_snake("Counter") == "counter")
+  end
+  test "two words" do
+    assert (pascal_to_snake("SearchBar") == "search_bar")
+  end
+  test "three words" do
+    assert (pascal_to_snake("UserProfile") == "user_profile")
+  end
+  test "already lowercase" do
+    assert (pascal_to_snake("counter") == "counter")
+  end
+  test "empty string" do
+    assert (pascal_to_snake("") == "")
+  end
+end
+
+describe "extract_mod_name" do
+  test "mod Counter do" do
+    assert (extract_mod_name("mod Counter do") == Some("Counter"))
+  end
+  test "mod SearchBar do" do
+    assert (extract_mod_name("mod SearchBar do") == Some("SearchBar"))
+  end
+  test "fn line returns None" do
+    assert (extract_mod_name("fn init() do") == None)
+  end
+  test "empty string returns None" do
+    assert (extract_mod_name("") == None)
+  end
+  test "comment line returns None" do
+    assert (extract_mod_name("-- mod Ignored do") == None)
+  end
+  test "indented mod line" do
+    assert (extract_mod_name("  mod MyIsland do") == Some("MyIsland"))
+  end
+end
+
+end
