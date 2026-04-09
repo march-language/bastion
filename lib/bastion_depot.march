@@ -1,0 +1,29 @@
+-- Bastion.Depot — database connection pool middleware.
+--
+-- Attaches a connection pool to the Conn assigns under the key "db",
+-- making it available to downstream handlers.
+--
+-- Usage:
+--
+--   conn
+--   |> BastionDepot.with_pool(MyApp.Repo.pool())
+--   |> MyApp.Router.route()
+--
+--   -- Retrieve in a handler:
+--   let db = HttpServer.get_assign(conn, "db")
+--   MyApp.Users.list_all(db)
+
+mod BastionDepot do
+
+  doc """
+  Pool middleware.  Attaches a connection pool to the conn's assigns under
+  the string key `"db"`, making it available to downstream handlers.
+
+  The pool value is opaque — any value works: a process PID, a pool
+  reference, or a mock string during tests.
+  """
+  fn with_pool(conn, pool) do
+    HttpServer.assign(conn, "db", pool)
+  end
+
+end -- mod BastionDepot

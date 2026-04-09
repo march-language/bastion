@@ -1,0 +1,22 @@
+-- Bastion.Components — reusable HTML view helpers for Bastion templates.
+--
+-- Usage:
+--
+--   BastionComponents.error_tag(form, "email")
+--   -- => "<span class=\"field-error\">has invalid format</span>"
+--   -- => "" (when no errors for the field)
+
+mod BastionComponents do
+
+  doc """
+  Renders the first error message for a form field as an HTML span,
+  or an empty string if the field has no errors.
+  """
+  fn error_tag(form, field) do
+    match Depot.Form.get_errors(form, field) do
+    Nil          -> ""
+    Cons(msg, _) -> "<span class=\"field-error\">" ++ Html.escape(msg) ++ "</span>"
+    end
+  end
+
+end -- mod BastionComponents

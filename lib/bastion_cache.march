@@ -1,0 +1,199 @@
+-- Bastion.Cache — ETag, response caching, fragment caching, and Cache-Control helpers.
+--
+-- Provides caching middleware that composes into the HttpServer Conn pipeline.
+--
+-- Typical usage:
+--
+--   conn
+--   |> MyApp.Router.route()
+--   |> Bastion.Cache.etag()
+--
+--   -- Full-response cache:
+--   Bastion.Cache.cached(conn, "posts:index", 60, fn c ->
+--     HttpServer.send_resp(c, 200, posts_html())
+--   end)
+--
+--   -- Fragment cache:
+--   Bastion.Cache.fragment("stats:global", 300, fn ->
+--     IOList.from_string("<div>" ++ compute_stats() ++ "</div>")
+--   end)
+
+mod BastionCache do
+
+  -- ── Private helpers ───────────────────────────────────────────────────────
+
+  pfn get_table(name) do
+    match Vault.whereis(name) do
+    Some(tbl) -> tbl
+    None      -> Vault.new(name)
+    end
+  end
+
+  pfn format_etag(hash) do
+    "\"" ++ hash ++ "\""
+  end
+
+  pfn store_response(tbl, key, st, body, ttl_secs) do
+    let entry = (st, body)
+    if ttl_secs == 0 do
+      Vault.set(tbl, key, entry)
+    else
+      Vault.set_ttl(tbl, key, entry, ttl_secs)
+    end
+  end
+
+  pfn restore_cached_response(conn, entry) do
+    match entry do
+    (st, body) -> HttpServer.send_resp(conn, st, body)
+    end
+  end
+
+  pfn store_fragment(tbl, key, frag, ttl_secs) do
+    if ttl_secs == 0 do
+      Vault.set(tbl, key, frag)
+    else
+      Vault.set_ttl(tbl, key, frag, ttl_secs)
+    end
+  end
+
+  -- ── ETag middleware ───────────────────────────────────────────────────────
+
+  doc """
+  ETag middleware.  Computes a weak ETag from the response body hash,
+  sets the `ETag` response header, and short-circuits to `304 Not Modified`
+  when the client's `If-None-Match` header matches.
+
+  Call after the response body has been set but before sending.
+
+      conn
+      |> MyApp.Router.route()
+      |> BastionCache.etag()
+  """
+  fn etag(conn) do
+    let body     = HttpServer.resp_body(conn)
+    let hash     = IOList.hash(IOList.from_string(body))
+    let tag      = format_etag(hash)
+    let with_tag = HttpServer.put_resp_header(conn, "etag", tag)
+    match HttpServer.get_req_header(conn, "if-none-match") do
+    Some(client_tag) ->
+      if client_tag == tag do
+        HttpServer.send_resp(with_tag, 304, "")
+      else
+        with_tag
+      end
+    None -> with_tag
+    end
+  end
+
+  -- ── Response caching ──────────────────────────────────────────────────────
+
+  doc """
+  Full-response cache middleware.  On a cache hit the stored status and body
+  are restored onto `conn` and the generator is skipped.  On a miss the
+  generator runs, its result is stored in Vault with the given TTL, and
+  then returned.
+
+  `key`       — string cache key, e.g. `"posts:index"`
+  `ttl_secs`  — time-to-live in seconds; `0` caches forever
+  `generator` — `fn(Conn) -> Conn` that builds the response
+
+      BastionCache.cached(conn, "posts:index", 60, fn c ->
+        HttpServer.send_resp(c, 200, posts_html())
+      end)
+  """
+  fn cached(conn, key, ttl_secs, generator) do
+    let tbl = get_table("response_cache")
+    match Vault.get(tbl, key) do
+    Some(entry) -> restore_cached_response(conn, entry)
+    None -> do
+      let result = generator(conn)
+      store_response(tbl, key, HttpServer.status(result), HttpServer.resp_body(result), ttl_secs)
+      result
+    end
+    end
+  end
+
+  -- ── Fragment caching ──────────────────────────────────────────────────────
+
+  doc """
+  Fragment cache.  On a hit returns the cached IOList directly.
+  On a miss calls the generator, stores with `ttl_secs`, and returns it.
+
+  `key`       — string cache key, e.g. `"stats:global"`
+  `ttl_secs`  — TTL in seconds; `0` caches forever
+  `generator` — `fn() -> IOList`
+
+      BastionCache.fragment("stats:global", 300, fn () ->
+        IOList.from_string("<div>" ++ compute_stats() ++ "</div>")
+      end)
+  """
+  fn fragment(key, ttl_secs, generator) do
+    let tbl = get_table("fragment_cache")
+    match Vault.get(tbl, key) do
+    Some(cached_frag) -> cached_frag
+    None -> do
+      let frag = generator()
+      store_fragment(tbl, key, frag, ttl_secs)
+      frag
+    end
+    end
+  end
+
+  -- ── Cache invalidation ────────────────────────────────────────────────────
+
+  doc """
+  Delete a single entry from the named Vault table by key.
+  No-op if the table or key does not exist.
+
+      BastionCache.invalidate("response_cache", "posts:index")
+  """
+  fn invalidate(table_name, key) do
+    match Vault.whereis(table_name) do
+    Some(tbl) -> Vault.drop(tbl, key)
+    None      -> :ok
+    end
+  end
+
+  doc """
+  Delete all entries whose string key starts with `prefix` from the named
+  Vault table.  O(n) scan — avoid on very large tables.
+
+      BastionCache.invalidate_prefix("fragment_cache", "user:42:")
+  """
+  fn invalidate_prefix(table_name, prefix) do
+    let prefix_len = string_byte_length(prefix)
+    fn drop_matching(tbl, keys) do
+      match keys do
+      Nil -> :ok
+      Cons(k, rest) -> do
+        let key_len = string_byte_length(k)
+        let matches = key_len >= prefix_len && string_slice(k, 0, prefix_len) == prefix
+        if matches do Vault.drop(tbl, k) else :ok end
+        drop_matching(tbl, rest)
+      end
+      end
+    end
+    match Vault.whereis(table_name) do
+    Some(tbl) -> drop_matching(tbl, Vault.keys(tbl))
+    None      -> :ok
+    end
+  end
+
+  -- ── Cache-Control helpers ─────────────────────────────────────────────────
+
+  doc "Set an arbitrary `Cache-Control` header value on the response."
+  fn cache_control(conn, directives) do
+    HttpServer.put_resp_header(conn, "cache-control", directives)
+  end
+
+  doc "Set `Cache-Control: no-store, no-cache, must-revalidate` — no caching."
+  fn no_cache(conn) do
+    cache_control(conn, "no-store, no-cache, must-revalidate")
+  end
+
+  doc "Set `Cache-Control: public, max-age=<seconds>`."
+  fn public_cache(conn, max_age_secs) do
+    cache_control(conn, "public, max-age=" ++ int_to_string(max_age_secs))
+  end
+
+end -- mod BastionCache
