@@ -40,7 +40,7 @@ mod Router do
   import Controller
 
   -- A single registered route.
-  type Route = Route(Method, List(String), Conn -> Conn)
+  type Route = Route(Atom, List(String), Conn -> Conn)
 
   -- Fallback handler: receives conn + ActionResult, returns Conn.
   -- Default renders ErrorView HTML pages.
@@ -99,27 +99,27 @@ mod Router do
     Router.get(router, "/users/:id", show_user)
   """
   fn get(router : Router, pattern : String, handler : Conn -> Conn) : Router do
-    add_route(router, Get, pattern, handler)
+    add_route(router, :get, pattern, handler)
   end
 
   doc "Register a POST handler for the given path pattern."
   fn post(router : Router, pattern : String, handler : Conn -> Conn) : Router do
-    add_route(router, Post, pattern, handler)
+    add_route(router, :post, pattern, handler)
   end
 
   doc "Register a PUT handler for the given path pattern."
   fn put(router : Router, pattern : String, handler : Conn -> Conn) : Router do
-    add_route(router, Put, pattern, handler)
+    add_route(router, :put, pattern, handler)
   end
 
   doc "Register a PATCH handler for the given path pattern."
   fn patch(router : Router, pattern : String, handler : Conn -> Conn) : Router do
-    add_route(router, Patch, pattern, handler)
+    add_route(router, :patch, pattern, handler)
   end
 
   doc "Register a DELETE handler for the given path pattern."
   fn delete(router : Router, pattern : String, handler : Conn -> Conn) : Router do
-    add_route(router, Delete, pattern, handler)
+    add_route(router, :delete, pattern, handler)
   end
 
   doc """
@@ -133,7 +133,7 @@ mod Router do
   Example:
     Router.action(router, Get, "/users/:id", fn conn -> UserController.show(conn))
   """
-  fn action(router : Router, method : Method, pattern : String, handler : Conn -> ActionResult) : Router do
+  fn action(router : Router, method : Atom, pattern : String, handler : Conn -> ActionResult) : Router do
     match router do
     Router(routes, fb) -> do
       let segs = split_path(pattern)
@@ -193,7 +193,7 @@ mod Router do
 
   -- ── Internal helpers ──────────────────────────────────────────────
 
-  pfn add_route(router : Router, method : Method, pattern : String, handler : Conn -> Conn) : Router do
+  pfn add_route(router : Router, method : Atom, pattern : String, handler : Conn -> Conn) : Router do
     let segs = split_path(pattern)
     match router do
     Router(routes, fb) ->
@@ -228,7 +228,7 @@ mod Router do
   -- Walk the route list and dispatch to the first match.
   -- On no match, apply the fallback with a 404 error — the fallback is
   -- the last arm of the match.
-  pfn find_and_call(routes : List(Route), method : Method, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
+  pfn find_and_call(routes : List(Route), method : Atom, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
     match routes do
     Nil ->
       apply_fallback(fb, conn, ActionError(404, "Not Found"))
@@ -248,8 +248,8 @@ mod Router do
   end
 
   -- Check if this route's method matches, then try its path pattern.
-  pfn try_route(m : Method, pattern : List(String), handler : Conn -> Conn, rest : List(Route), method : Method, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
-    match Http.method_to_string(m) == Http.method_to_string(method) do
+  pfn try_route(m : Atom, pattern : List(String), handler : Conn -> Conn, rest : List(Route), method : Atom, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
+    match m == method do
     true ->
       dispatch_result(match_path(pattern, path_segs), handler, rest, method, path_segs, conn, fb)
     false ->
@@ -258,7 +258,7 @@ mod Router do
   end
 
   -- Handle the result of path matching: bind params and call handler, or try next route.
-  pfn dispatch_result(result : Option(List((String, String))), handler : Conn -> Conn, rest : List(Route), method : Method, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
+  pfn dispatch_result(result : Option(List((String, String))), handler : Conn -> Conn, rest : List(Route), method : Atom, path_segs : List(String), conn : Conn, fb : Fallback) : Conn do
     match result do
     Some(params) -> do
       let bound = bind_params(conn, params)

@@ -27,7 +27,7 @@ ptype Upgrade = NoUpgrade | WebSocketUpgrade(a)
 
 ptype Conn = Conn(
   Int,                    -- fd
-  Method,                 -- request method
+  Atom,                   -- request method
   String,                 -- path (raw)
   List(String),           -- path_info (split segments, empty filtered)
   String,                 -- query_string
@@ -47,21 +47,21 @@ pfn make_conn(meth, path_, qs, req_hdrs, req_body) do
 end
 
 pfn make_get(path_) do
-  make_conn(Get, path_, "", Nil, "")
+  make_conn(:get, path_, "", Nil, "")
 end
 
 pfn make_get_qs(path_, qs) do
-  make_conn(Get, path_, qs, Nil, "")
+  make_conn(:get, path_, qs, Nil, "")
 end
 
 pfn make_post(path_, body) do
-  make_conn(Post, path_, "",
+  make_conn(:post, path_, "",
     Cons(Header("content-type", "application/json"), Nil),
     body)
 end
 
 pfn make_post_form(path_, body) do
-  make_conn(Post, path_, "",
+  make_conn(:post, path_, "",
     Cons(Header("content-type", "application/x-www-form-urlencoded"), Nil),
     body)
 end
@@ -979,24 +979,24 @@ end
 describe "Middleware.allow_methods" do
   test "passes request with allowed method" do
     let conn = make_get("/")
-    let plug = allow_methods(Cons(Get, Nil))
+    let plug = allow_methods(Cons(:get, Nil))
     assert (not (HttpServer.halted(plug(conn))))
   end
   test "blocks disallowed method with 405" do
     let conn = make_post("/", "")
-    let plug = allow_methods(Cons(Get, Nil))
+    let plug = allow_methods(Cons(:get, Nil))
     let out  = plug(conn)
     assert (HttpServer.halted(out))
     assert (HttpServer.status(out) == 405)
   end
   test "allows any method in a multi-method list" do
-    let conn = make_method(Put, "/")
-    let plug = allow_methods(Cons(Get, Cons(Post, Cons(Put, Nil))))
+    let conn = make_method(:put, "/")
+    let plug = allow_methods(Cons(:get, Cons(:post, Cons(:put, Nil))))
     assert (not (HttpServer.halted(plug(conn))))
   end
   test "blocks method not in multi-method list" do
-    let conn = make_method(Delete, "/")
-    let plug = allow_methods(Cons(Get, Cons(Post, Nil)))
+    let conn = make_method(:delete, "/")
+    let plug = allow_methods(Cons(:get, Cons(:post, Nil)))
     let out  = plug(conn)
     assert (HttpServer.halted(out))
     assert (HttpServer.status(out) == 405)
@@ -1005,7 +1005,7 @@ end
 
 describe "Middleware.request_id" do
   test "uses x-request-id header value when present" do
-    let conn = make_conn(Get, "/", "",
+    let conn = make_conn(:get, "/", "",
       Cons(Header("x-request-id", "my-id"), Nil), "")
     let out  = request_id(conn)
     assert (opt_eq(HttpServer.get_assign(out, "request_id"), "my-id"))
@@ -1234,19 +1234,19 @@ describe "Router HTTP methods" do
   test "put route matches PUT" do
     let router = Router.new()
                  |> Router.put("/users/1", fn conn -> HttpServer.text(conn, 200, "updated"))
-    let out    = Router.dispatch(router, make_method(Put, "/users/1"))
+    let out    = Router.dispatch(router, make_method(:put, "/users/1"))
     assert (HttpServer.status(out) == 200)
   end
   test "patch route matches PATCH" do
     let router = Router.new()
                  |> Router.patch("/users/1", fn conn -> HttpServer.text(conn, 200, "patched"))
-    let out    = Router.dispatch(router, make_method(Patch, "/users/1"))
+    let out    = Router.dispatch(router, make_method(:patch, "/users/1"))
     assert (HttpServer.status(out) == 200)
   end
   test "delete route matches DELETE" do
     let router = Router.new()
                  |> Router.delete("/users/1", fn conn -> HttpServer.send_resp(conn, 204, ""))
-    let out    = Router.dispatch(router, make_method(Delete, "/users/1"))
+    let out    = Router.dispatch(router, make_method(:delete, "/users/1"))
     assert (HttpServer.status(out) == 204)
   end
   test "different methods on same path dispatch to correct handler" do
@@ -1256,7 +1256,7 @@ describe "Router HTTP methods" do
                  |> Router.delete("/x", fn conn -> HttpServer.text(conn, 200, "delete"))
     assert (HttpServer.resp_body(Router.dispatch(router, make_get("/x")))               == "get")
     assert (HttpServer.resp_body(Router.dispatch(router, make_post("/x", "")))           == "post")
-    assert (HttpServer.resp_body(Router.dispatch(router, make_method(Delete, "/x")))    == "delete")
+    assert (HttpServer.resp_body(Router.dispatch(router, make_method(:delete, "/x")))    == "delete")
   end
 end
 
@@ -1310,7 +1310,7 @@ end
 describe "Router.action" do
   test "Ok result is returned as conn" do
     let router = Router.new()
-                 |> Router.action(Get, "/items", fn conn ->
+                 |> Router.action(:get, "/items", fn conn ->
                       ActionOk(HttpServer.text(conn, 200, "list")))
     let out = Router.dispatch(router, make_get("/items"))
     assert (HttpServer.status(out)    == 200)
@@ -1318,7 +1318,7 @@ describe "Router.action" do
   end
   test "Error result goes through default fallback (HTML error)" do
     let router = Router.new()
-                 |> Router.action(Get, "/items/:id", fn _conn ->
+                 |> Router.action(:get, "/items/:id", fn _conn ->
                       ActionError(404, "Item not found"))
     let out = Router.dispatch(router, make_get("/items/99"))
     assert (HttpServer.status(out) == 404)
@@ -1348,7 +1348,7 @@ describe "Router.fallback" do
                       ActionError(s, m) ->
                         HttpServer.text(conn, s, "CUSTOM:" ++ m)
                       end)
-                 |> Router.action(Get, "/fail", fn _conn ->
+                 |> Router.action(:get, "/fail", fn _conn ->
                       ActionError(400, "bad request"))
     let out = Router.dispatch(router, make_get("/fail"))
     assert (HttpServer.status(out)    == 400)
