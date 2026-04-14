@@ -23,6 +23,8 @@
 
 mod ConnStates do
 
+  import HttpServer
+
   -- ── Type state tags ───────────────────────────────────────────────
   --
   -- Each tag represents a point in the middleware pipeline.
@@ -33,6 +35,17 @@ mod ConnStates do
   type WithSession   = WithSession
   type Authenticated = Authenticated
   type WithDB        = WithDB
+
+  -- ── TypedConn(s) — phantom-tagged connection wrapper ──────────────
+  --
+  -- Wraps HttpServer.Conn with a phantom state parameter `s`.  The `s`
+  -- parameter does NOT appear in the constructor payload — it exists
+  -- only at the type level to enforce middleware ordering.
+  --
+  -- Use TypedMiddleware.wrap/1 to enter the typed pipeline, and
+  -- TypedMiddleware.unwrap/1 to exit back to HttpServer.Conn for the
+  -- response.
+  type TypedConn(s) = TypedConn(Conn)
 
   -- ── Session ───────────────────────────────────────────────────────
   --

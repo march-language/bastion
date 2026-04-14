@@ -1,38 +1,54 @@
 -- Bastion.TypedMiddleware — typed middleware pipeline for Bastion.
 --
--- Each middleware function transforms a Conn from one type state to another.
--- The type parameter on Conn(a) makes middleware ordering a compile-time
--- guarantee when the March type system supports parameterized types.
+-- Each middleware function transforms a TypedConn(s) from one state to
+-- the next.  The phantom type parameter `s` makes pipeline ordering a
+-- compile-time guarantee: passing TypedConn(Raw) where TypedConn(WithSession)
+-- is expected is a type error caught by the March typechecker.
 --
--- Intended type signatures:
+-- Enforced type signatures:
 --
---   parse_body   : Conn(Raw)         -> Conn(Parsed)
---   load_session : Conn(Parsed)      -> Conn(WithSession)
---   require_auth : Conn(WithSession) -> Result(Conn(Authenticated), Conn(WithSession))
---   with_db      : Conn(a)           -> Conn(a & WithDB)
+--   wrap         : HttpServer.Conn     -> TypedConn(Raw)
+--   parse_body   : TypedConn(Raw)      -> TypedConn(Parsed)
+--   load_session : TypedConn(Parsed)   -> TypedConn(WithSession)
+--   require_auth : TypedConn(WithSession) -> TypedConn(Authenticated)
+--   unwrap       : TypedConn(s)        -> HttpServer.Conn
+--   with_db      : HttpServer.Conn     -> HttpServer.Conn  (WithDB
+--                    compositionality deferred: needs intersection/row types)
 --
 -- Standard endpoint pipeline:
 --
 --   fn call(conn) do
---     conn
---     |> TypedMiddleware.parse_body()
---     |> TypedMiddleware.load_session(MyApp.Config.secret_key_base())
---     |> TypedMiddleware.with_db(MyApp.Repo.pool())
---     |> MyApp.Router.route()
---   end
---
--- Protected routes with authentication:
---
---   fn route(conn, :get, ["dashboard" | rest]) do
---     match TypedMiddleware.require_auth(conn) do
---     Ok(authed_conn) -> DashboardHandler.index(authed_conn)
---     Error(err_conn) -> err_conn |> redirect("/login")
---     end
+--     let c = TypedMiddleware.wrap(conn)
+--            |> TypedMiddleware.parse_body()
+--            |> TypedMiddleware.load_session(MyApp.Config.secret_key_base())
+--            |> TypedMiddleware.require_auth()
+--     TypedMiddleware.unwrap(c) |> MyApp.Router.route()
 --   end
 
 mod TypedMiddleware do
 
   import HttpServer
+  import ConnStates
+
+  -- ── Typed pipeline entry / exit ───────────────────────────────────
+
+  doc """
+  Enter the typed middleware pipeline.  Tags a raw HttpServer.Conn with
+  the initial `Raw` state so it can flow through the typed stages.
+  """
+  fn wrap(conn : Conn) : TypedConn(Raw) do
+    TypedConn(conn)
+  end
+
+  doc """
+  Exit the typed middleware pipeline back to a raw HttpServer.Conn.
+  Works at any pipeline stage thanks to the polymorphic phantom `s`.
+  """
+  fn unwrap(tc) do
+    match tc do
+    TypedConn(c) -> c
+    end
+  end
 
   -- ── Body parsing ──────────────────────────────────────────────────
 
@@ -42,9 +58,14 @@ mod TypedMiddleware do
   Stores the raw body in assigns under "_body". The parsed form is also
   available via get_body_string/1. For JSON bodies, use Request.json_body/1.
 
-  Intended type: Conn(Raw) -> Conn(Parsed)
+  Enforced type: TypedConn(Raw) -> TypedConn(Parsed)
   """
-  fn parse_body(conn) do
+  fn parse_body(tc : TypedConn(Raw)) : TypedConn(Parsed) do
+    let conn = unwrap(tc)
+    TypedConn(parse_body_raw(conn))
+  end
+
+  pfn parse_body_raw(conn) do
     let body = HttpServer.req_body(conn)
     HttpServer.assign(conn, "_body", body)
   end
@@ -69,9 +90,14 @@ mod TypedMiddleware do
   implementation uses HMAC-SHA256; this stub extracts the payload after
   the first "." separator (sig.payload format).
 
-  Intended type: Conn(Parsed) -> Conn(WithSession)
+  Enforced type: TypedConn(Parsed) -> TypedConn(WithSession)
   """
-  fn load_session(conn, secret_key_base) do
+  fn load_session(tc : TypedConn(Parsed), secret_key_base : String) : TypedConn(WithSession) do
+    let conn = unwrap(tc)
+    TypedConn(load_session_raw(conn, secret_key_base))
+  end
+
+  pfn load_session_raw(conn, secret_key_base) do
     let raw    = extract_session_cookie(conn)
     let payload = verify_and_decode(raw, secret_key_base)
     HttpServer.assign(conn, "_session", payload)
@@ -117,16 +143,19 @@ mod TypedMiddleware do
   Returns Ok(conn) if the conn carries an authenticated user ID, or
   Error(conn) with a 401 Unauthorized response if not.
 
-  Intended type: Conn(WithSession) -> Result(Conn(Authenticated), Conn(WithSession))
+  Enforced type: TypedConn(WithSession) -> TypedConn(Authenticated)
 
-  Typical usage in a router:
-
-    match TypedMiddleware.require_auth(conn) do
-    Ok(authed_conn) -> UserHandler.show(authed_conn)
-    Error(err_conn) -> err_conn |> redirect("/login")
-    end
+  If the current_user_id assign is missing, the underlying conn is
+  halted with 401 Unauthorized but still tagged Authenticated so the
+  pipeline can continue without branching at the type level.  Handlers
+  should check HttpServer.halted/1 on the unwrapped conn.
   """
-  fn require_auth(conn) do
+  fn require_auth(tc : TypedConn(WithSession)) : TypedConn(Authenticated) do
+    let conn = unwrap(tc)
+    TypedConn(require_auth_raw(conn))
+  end
+
+  pfn require_auth_raw(conn) do
     match HttpServer.get_assign(conn, "current_user_id") do
     None    -> HttpServer.text(conn, 401, "Unauthorized")
     Some(_) -> conn
@@ -208,26 +237,29 @@ mod TypedMiddleware do
   doc """
   Standard web pipeline: parse body then load session.
 
-  Equivalent to:
-    conn |> parse_body() |> load_session(secret)
+  Takes and returns a raw HttpServer.Conn so existing call sites keep
+  working.  Internally runs the typed pipeline and unwraps at the end.
   """
   fn web_pipeline(conn, secret) do
-    conn
-    |> parse_body()
-    |> load_session(secret)
+    unwrap(
+      wrap(conn)
+      |> parse_body()
+      |> load_session(secret))
   end
 
   doc """
   Full pipeline: parse body, load session, attach DB pool.
 
-  Equivalent to:
-    conn |> parse_body() |> load_session(secret) |> with_db(pool)
+  Takes and returns a raw HttpServer.Conn.  with_db/2 is applied to the
+  raw conn after unwrapping because WithDB composes at any stage and
+  intersection/row types are not yet supported.
   """
   fn full_pipeline(conn, secret, pool) do
-    conn
-    |> parse_body()
-    |> load_session(secret)
-    |> with_db(pool)
+    let c = unwrap(
+      wrap(conn)
+      |> parse_body()
+      |> load_session(secret))
+    with_db(c, pool)
   end
 
   -- ── Internal helpers ──────────────────────────────────────────────

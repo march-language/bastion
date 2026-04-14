@@ -1070,42 +1070,47 @@ end
 describe "TypedMiddleware.parse_body" do
   test "assigns body string to _body key" do
     let conn = make_post("/", "{\"x\":1}")
-    let out  = parse_body(conn)
-    assert (get_body_string(out) == "{\"x\":1}")
+    let out  = TypedMiddleware.wrap(conn) |> parse_body()
+    assert (get_body_string(unwrap(out)) == "{\"x\":1}")
   end
   test "empty string for GET with no body" do
     let conn = make_get("/")
-    let out  = parse_body(conn)
-    assert (get_body_string(out) == "")
+    let out  = TypedMiddleware.wrap(conn) |> parse_body()
+    assert (get_body_string(unwrap(out)) == "")
   end
   test "does not halt the conn" do
     let conn = make_post("/", "data")
-    assert (not (HttpServer.halted(parse_body(conn))))
+    let out  = TypedMiddleware.wrap(conn) |> parse_body()
+    assert (not (HttpServer.halted(unwrap(out))))
   end
 end
 
 describe "TypedMiddleware.require_auth" do
   test "halts conn when no user is set" do
     let conn   = make_get("/protected")
-    let result = require_auth(conn)
-    assert (HttpServer.halted(result))
+    let tc     = TypedMiddleware.wrap(conn) |> parse_body() |> load_session("")
+    let result = require_auth(tc)
+    assert (HttpServer.halted(unwrap(result)))
   end
   test "halted conn has 401 status" do
     let conn   = make_get("/protected")
-    let result = require_auth(conn)
-    assert (HttpServer.status(result) == 401)
+    let tc     = TypedMiddleware.wrap(conn) |> parse_body() |> load_session("")
+    let result = require_auth(tc)
+    assert (HttpServer.status(unwrap(result)) == 401)
   end
   test "returns non-halted conn when current_user_id is set" do
     let conn   = make_get("/protected")
     let conn2  = set_current_user(conn, "42")
-    let result = require_auth(conn2)
-    assert (not (HttpServer.halted(result)))
+    let tc     = TypedMiddleware.wrap(conn2) |> parse_body() |> load_session("")
+    let result = require_auth(tc)
+    assert (not (HttpServer.halted(unwrap(result))))
   end
   test "authenticated conn preserves the path" do
     let conn   = make_get("/protected")
     let conn2  = set_current_user(conn, "99")
-    let result = require_auth(conn2)
-    assert (HttpServer.path(result) == "/protected")
+    let tc     = TypedMiddleware.wrap(conn2) |> parse_body() |> load_session("")
+    let result = require_auth(tc)
+    assert (HttpServer.path(unwrap(result)) == "/protected")
   end
 end
 
