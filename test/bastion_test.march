@@ -1174,11 +1174,36 @@ describe "TypedMiddleware pipeline shortcuts" do
   test "full_pipeline applies parse_body, load_session, with_db" do
     let conn = make_post("/", "data")
     let out  = full_pipeline(conn, "secret", "db-pool")
-    assert (get_body_string(out) == "data")
-    match get_db(out) do
-    Some(_) -> ()
-    None    -> assert false
+    -- Destructure once and inspect the assigns list directly.  Two
+    -- separate `get_assign`-style reads on the same Conn (here
+    -- get_body_string + get_db) trigger a Perceus RC bug in the
+    -- March compiler: the second traversal of the assigns list sees
+    -- stale data and returns None.  Extracting the assigns list in a
+    -- single match sidesteps the bug until the compiler is fixed.
+    match out do
+    Conn(_, _, _, _, _, _, _, _, _, _, _, a, _) -> do
+      assert (full_pipeline_assign_get(a, "_body") == "data")
+      assert (full_pipeline_assign_has(a, "_db_pool"))
     end
+    end
+  end
+end
+
+-- Helpers for the full_pipeline test — walk the assigns list directly
+-- to avoid the RC bug described above.  Kept private to this test module.
+pfn full_pipeline_assign_get(pairs, key) do
+  match pairs do
+  Nil -> ""
+  Cons((k, v), rest) ->
+    if k == key do v else full_pipeline_assign_get(rest, key) end
+  end
+end
+
+pfn full_pipeline_assign_has(pairs, key) do
+  match pairs do
+  Nil -> false
+  Cons((k, _), rest) ->
+    if k == key do true else full_pipeline_assign_has(rest, key) end
   end
 end
 
