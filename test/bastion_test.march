@@ -949,20 +949,48 @@ describe "Middleware.logger" do
 end
 
 describe "Middleware.cors" do
-  test "adds Access-Control-Allow-Origin: *" do
-    let conn = make_get("/")
-    let out  = cors(conn)
+  test "echoes Origin back when on the allowlist" do
+    let plug = cors(["https://app.example.com"])
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("origin", "https://app.example.com"), Nil), "")
+    let out  = plug(conn)
     let hdrs = HttpServer.resp_headers(out)
     let ok   = List.any(hdrs, fn h ->
       match h do
       Header(n, v) ->
-        string_to_lowercase(n) == "access-control-allow-origin" && v == "*"
+        string_to_lowercase(n) == "access-control-allow-origin" && v == "https://app.example.com"
       end)
     assert (ok)
   end
+  test "omits Access-Control-Allow-Origin when Origin is not allowlisted" do
+    let plug = cors(["https://app.example.com"])
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("origin", "https://evil.example.com"), Nil), "")
+    let out  = plug(conn)
+    let hdrs = HttpServer.resp_headers(out)
+    let has_ao = List.any(hdrs, fn h ->
+      match h do
+      Header(n, _) -> string_to_lowercase(n) == "access-control-allow-origin"
+      end)
+    assert (not(has_ao))
+  end
+  test "never emits wildcard Access-Control-Allow-Origin" do
+    let plug = cors(["https://a.example.com"])
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("origin", "https://a.example.com"), Nil), "")
+    let out  = plug(conn)
+    let hdrs = HttpServer.resp_headers(out)
+    let has_star = List.any(hdrs, fn h ->
+      match h do
+      Header(n, v) ->
+        string_to_lowercase(n) == "access-control-allow-origin" && v == "*"
+      end)
+    assert (not(has_star))
+  end
   test "adds Access-Control-Allow-Methods header" do
+    let plug = cors(["https://app.example.com"])
     let conn = make_get("/")
-    let out  = cors(conn)
+    let out  = plug(conn)
     let hdrs = HttpServer.resp_headers(out)
     let ok   = List.any(hdrs, fn h ->
       match h do
@@ -970,9 +998,22 @@ describe "Middleware.cors" do
       end)
     assert (ok)
   end
-  test "does not halt the conn" do
+  test "adds Vary: Origin" do
+    let plug = cors(["https://app.example.com"])
     let conn = make_get("/")
-    assert (not (HttpServer.halted(cors(conn))))
+    let out  = plug(conn)
+    let hdrs = HttpServer.resp_headers(out)
+    let ok   = List.any(hdrs, fn h ->
+      match h do
+      Header(n, v) ->
+        string_to_lowercase(n) == "vary" && v == "Origin"
+      end)
+    assert (ok)
+  end
+  test "does not halt the conn" do
+    let plug = cors(["https://app.example.com"])
+    let conn = make_get("/")
+    assert (not (HttpServer.halted(plug(conn))))
   end
 end
 
@@ -1447,6 +1488,41 @@ describe "Router + Middleware integration" do
     -- Router was not called; original response stands
     assert (HttpServer.status(out)    == 401)
     assert (HttpServer.resp_body(out) == "Unauthorized")
+  end
+end
+
+-- Static path-traversal safety is enforced by Static.is_unsafe_path inside
+-- Static.handle (see lib/static.march).  We cannot easily unit-test it here
+-- because calling any Static public function that transitively invokes
+-- String.split across a module boundary trips a reference-counting bug in
+-- march 0.1.0 ("local RC underflow" / out-of-memory in the test runner).
+-- The production path is exercised by integration tests that drive a real
+-- HTTP server.
+
+describe "ErrorView.render HTML escaping" do
+  test "escapes angle brackets in the message" do
+    let html = ErrorView.render(404, "<script>alert(1)</script>")
+    assert (not (String.contains(html, "<script>alert(1)</script>")))
+    assert (String.contains(html, "&lt;script&gt;"))
+  end
+  test "escapes ampersand in the message" do
+    let html = ErrorView.render(500, "foo & bar")
+    assert (String.contains(html, "foo &amp; bar"))
+  end
+  test "escapes double quotes in the message" do
+    let html = ErrorView.render(400, "she said \"hi\"")
+    assert (String.contains(html, "she said &quot;hi&quot;"))
+  end
+  test "escapes single quotes as numeric entity" do
+    let html = ErrorView.render(400, "it's bad")
+    assert (String.contains(html, "it&#39;s bad"))
+  end
+  test "does not double-escape existing entities from user input" do
+    -- The escaper is intentionally naive — it escapes the raw string
+    -- verbatim.  An input of \"&amp;\" should become \"&amp;amp;\" so
+    -- the rendered page shows the literal text the user typed.
+    let html = ErrorView.render(400, "&amp;")
+    assert (String.contains(html, "&amp;amp;"))
   end
 end
 

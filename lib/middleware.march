@@ -70,12 +70,36 @@ mod Middleware do
     HttpServer.put_resp_header(conn, "content-type", "text/html; charset=utf-8")
   end
 
-  doc "Permissive CORS middleware: adds Access-Control-Allow-Origin: * and standard CORS headers."
-  fn cors(conn : Conn) : Conn do
-    conn
-    |> HttpServer.put_resp_header("access-control-allow-origin", "*")
-    |> HttpServer.put_resp_header("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-    |> HttpServer.put_resp_header("access-control-allow-headers", "content-type, authorization")
+  doc """
+  CORS middleware builder.  Takes an explicit list of allowed origins and
+  returns a plug that echoes the request's Origin header back if — and only
+  if — it is on the allowlist.  Unlisted origins receive no
+  Access-Control-Allow-Origin header, which browsers interpret as a block.
+
+  There is deliberately no wildcard helper:  `*` with credentials-bearing
+  requests is the classic CORS misconfiguration that leaks authenticated
+  responses to any site.  If you truly need a public API with no cookies,
+  pass a single-element list containing the literal origin, or write your
+  own plug.
+
+  Example:
+    let cors = Middleware.cors(["https://app.example.com", "https://admin.example.com"])
+  """
+  fn cors(allowed_origins : List(String)) : Conn -> Conn do
+    fn conn -> do
+      let with_common = conn
+        |> HttpServer.put_resp_header("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+        |> HttpServer.put_resp_header("access-control-allow-headers", "content-type, authorization")
+        |> HttpServer.put_resp_header("vary", "Origin")
+      match HttpServer.get_req_header(conn, "origin") do
+      Some(origin) ->
+        match List.any(allowed_origins, fn o -> o == origin) do
+        true  -> HttpServer.put_resp_header(with_common, "access-control-allow-origin", origin)
+        false -> with_common
+        end
+      None -> with_common
+      end
+    end
   end
 
   doc """

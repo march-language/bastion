@@ -101,7 +101,12 @@ pfn build_query_string(params) do
   go(params, "")
 end
 
--- Fill :param slots in a pattern with positional segment values.
+-- Fill :param slots in a pattern with positional segment values.  Panics if
+-- the caller provides fewer segments than the pattern has dynamic slots —
+-- previously we would quietly leave ":id" literal in the generated URL,
+-- which made bad callers silently produce broken links instead of failing
+-- loudly during development.  Extra trailing segments are ignored so that
+-- callers can pass optional tail arguments without juggling.
 pfn fill_pattern(pattern, segments) do
   let parts = List.filter(String.split(pattern, "/"), fn s -> not(string_is_empty(s)))
   fn go(ps, segs, acc) do
@@ -110,7 +115,8 @@ pfn fill_pattern(pattern, segments) do
     Cons(part, rest) ->
       if String.starts_with(part, ":") do
         match segs do
-        Nil         -> go(rest, Nil, acc ++ "/" ++ part)
+        Nil ->
+          panic("BastionRoutes.path: not enough segments for pattern " ++ pattern ++ " (missing value for " ++ part ++ ")")
         Cons(s, ss) -> go(rest, ss, acc ++ "/" ++ s)
         end
       else

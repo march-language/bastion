@@ -149,7 +149,6 @@ mod Blog do
     |> Router.get("/posts/:id", get_post)
     |> Router.post("/posts",    create_post)
     |> Router.scope("/api/v1",  api)
-    |> Router.scope("/static",  Static.serve("/public"))
   end
 
   -- ── Entry point ───────────────────────────────────────────────────────────
@@ -157,15 +156,29 @@ mod Blog do
   fn main() : Unit do
     let router = build_router()
 
-    -- Wrap the router plug with middleware using Middleware.compose so that
-    -- every request flows through logger -> request_id -> cors -> router.
+    -- Static files are served by a standalone plug in front of the router,
+    -- not via Router.scope (which takes a sub-Router, not a plain plug).
+    let static_plug = Static.serve_with_prefix("priv/static", "/static")
+
+    -- Build a single plug that threads the request through logger ->
+    -- request_id -> static files -> router.  Middleware.pipeline runs a
+    -- list of plugs in order and halts early if any of them marks the
+    -- conn as sent/halted.  (Middleware.compose is a two-plug helper; use
+    -- pipeline for arbitrary lists.)  CORS is not wired in because the
+    -- blog is same-origin — add Middleware.cors(["https://..."]) if you
+    -- need cross-origin access.
     let router_plug = Router.to_plug(router)
-    let plugs = Cons(Middleware.logger, Cons(Middleware.request_id, Cons(Middleware.cors, Cons(router_plug, Nil))))
-    let handler = Middleware.compose(plugs, fn conn -> conn)
+    let pipeline = fn conn ->
+      Middleware.pipeline([
+        Middleware.logger,
+        Middleware.request_id,
+        static_plug,
+        router_plug
+      ], conn)
 
     let opts = Bastion.default_opts(4000)
     Logger.info("Blog listening on port " ++ int_to_string(4000))
-    Bastion.start(router, opts)
+    BastionServer.start_plug(pipeline, opts)
   end
 
 end
