@@ -72,6 +72,36 @@ pfn replay_headers(conn, headers) do
   go(headers, conn)
 end
 
+-- Capture response headers from a conn as a serialisable list of (name, val)
+-- tuples.  We do this conversion rather than storing the raw Header values
+-- because idempotency state is persisted in Vault and needs to be a plain
+-- data structure.  Skips the bookkeeping headers that we re-add on replay
+-- (`idempotency-key`, `x-idempotent-replayed`) so we don't double up.
+pfn capture_headers(conn) do
+  let raw = HttpServer.resp_headers(conn)
+  collect_headers(raw, Nil)
+end
+
+pfn collect_headers(hs, acc) do
+  match hs do
+  Nil -> list_reverse(acc, Nil)
+  Cons(Header(n, v), rest) ->
+    let lname = string_to_lowercase(n)
+    if lname == "idempotency-key" || lname == "x-idempotent-replayed" do
+      collect_headers(rest, acc)
+    else
+      collect_headers(rest, Cons((n, v), acc))
+    end
+  end
+end
+
+pfn list_reverse(xs, acc) do
+  match xs do
+  Nil        -> acc
+  Cons(h, t) -> list_reverse(t, Cons(h, acc))
+  end
+end
+
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 doc """
@@ -175,7 +205,11 @@ pfn protect_with_key(conn, handler, vault_table, scope, ikey) do
       Vault.drop(tbl, cache_key)
       HttpServer.put_resp_header(result, "idempotency-key", ikey)
     else
-      let completed = Completed(result_status, Nil, HttpServer.resp_body(result), 0)
+      -- Capture response headers so the next replay reproduces the original
+      -- Content-Type, Set-Cookie, Location, etc.  Previously this stored Nil
+      -- and every cached replay dropped every header the handler set.
+      let captured  = capture_headers(result)
+      let completed = Completed(result_status, captured, HttpServer.resp_body(result), 0)
       Vault.set(tbl, cache_key, completed)
       let r1 = HttpServer.put_resp_header(result, "idempotency-key", ikey)
       HttpServer.put_resp_header(r1, "x-idempotent-replayed", "false")

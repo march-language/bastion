@@ -23,9 +23,23 @@ mod BastionServer do
     BastionServer.start(router, Bastion.default_opts(4000))
   """
   fn start(router : Router, opts : Opts) : Unit do
+    start_plug(Router.to_plug(router), opts)
+  end
+
+  doc """
+  Start the Bastion server with a pre-built plug and options.  Use this when
+  you need to wrap the router in middleware (logger, static-file, etc.)
+  before serving — the plug you supply is the single handler that every
+  request flows through.
+
+  Example:
+    let pipeline = fn conn ->
+      Middleware.pipeline([Middleware.logger, static_plug, Router.to_plug(router)], conn)
+    BastionServer.start_plug(pipeline, Bastion.default_opts(4000))
+  """
+  fn start_plug(plug : Conn -> Conn, opts : Opts) : Unit do
     match opts do
     Opts(port, mc, it) -> do
-      let plug = Router.to_plug(router)
       HttpServer.new(port)
       |> HttpServer.max_connections(mc)
       |> HttpServer.idle_timeout(it)

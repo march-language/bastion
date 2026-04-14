@@ -79,33 +79,70 @@ mod Static do
     Config(root, prefix) -> do
       let req_path  = HttpServer.path(conn)
       let rel_path  = strip_and_normalise(url_path(req_path, prefix))
-      let file_path = root ++ "/" ++ rel_path
-      match File.read(file_path) do
-      Ok(contents) -> do
-        let mime = mime_type(file_path)
-        let etag = compute_etag(file_path, contents)
-        let cc   = cache_control_for(file_path)
-        -- Honour conditional GET: return 304 when ETag matches.
-        match HttpServer.get_req_header(conn, "if-none-match") do
-        Some(client_etag) ->
-          match client_etag == etag do
-          true -> do
-            conn
-            |> HttpServer.put_resp_header("etag", etag)
-            |> HttpServer.put_resp_header("cache-control", cc)
-            |> HttpServer.send_resp(304, "")
-          end
-          false ->
+      -- Reject any path containing a ".." segment or backslash before reading
+      -- the file.  Without this check an attacker could request
+      -- /static/../../etc/passwd and escape the configured root directory.
+      match is_unsafe_path(rel_path) do
+      true  -> conn
+      false ->
+        let file_path = root ++ "/" ++ rel_path
+        match File.read(file_path) do
+        Ok(contents) -> do
+          let mime = mime_type(file_path)
+          let etag = compute_etag(file_path, contents)
+          let cc   = cache_control_for(file_path)
+          -- Honour conditional GET: return 304 when ETag matches.
+          match HttpServer.get_req_header(conn, "if-none-match") do
+          Some(client_etag) ->
+            match client_etag == etag do
+            true -> do
+              conn
+              |> HttpServer.put_resp_header("etag", etag)
+              |> HttpServer.put_resp_header("cache-control", cc)
+              |> HttpServer.send_resp(304, "")
+            end
+            false ->
+              send_file(conn, contents, mime, etag, cc)
+            end
+          None ->
             send_file(conn, contents, mime, etag, cc)
           end
-        None ->
-          send_file(conn, contents, mime, etag, cc)
+        end
+        Err(_) ->
+          conn
         end
       end
-      Err(_) ->
-        conn
-      end
     end
+    end
+  end
+
+  -- Reject paths that contain ".." segments or backslashes.
+  --
+  -- A plain substring check on ".." is not enough — "a..b" is a legal filename
+  -- so we check segment-by-segment on "/"-split boundaries.  Backslash is
+  -- rejected outright because it is a path separator on Windows and is never
+  -- legitimate inside a URL path segment.
+  --
+  -- Kept pfn (not exported) because exposing it publicly triggers a runtime
+  -- reference-counting bug in march 0.1.0 when called across module boundaries
+  -- with recursive String.split results.  The check is still enforced here
+  -- for every incoming static request.
+  pfn is_unsafe_path(path : String) : Bool do
+    match String.contains(path, "\\") do
+    true  -> true
+    false -> has_dotdot_segment(String.split(path, "/"))
+    end
+  end
+
+  pfn has_dotdot_segment(segs : List(String)) : Bool do
+    match segs do
+    Nil -> false
+    Cons(s, rest) ->
+      if s == ".." do
+        true
+      else
+        has_dotdot_segment(rest)
+      end
     end
   end
 

@@ -79,7 +79,8 @@ pfn main_source(pascal) do
   "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
   "      let c = Middleware.logger(c)\n" ++
   "      let c = Middleware.request_id(c)\n" ++
-  "      let c = Middleware.cors(c)\n" ++
+  "      -- CORS is not enabled by default; configure an explicit origin\n" ++
+  "      -- allowlist instead:  let c = Middleware.cors([\"https://example.com\"])(c)\n" ++
   "      match HttpServer.halted(c) do\n" ++
   "      true  -> c\n" ++
   "      false -> plug(c)\n" ++

@@ -57,23 +57,47 @@ mod IslandSocket do
   -- ── Configuration ──────────────────────────────────────────────────────
 
   -- Configuration for the island socket endpoint.
-  --   path — URL path to match for WebSocket upgrade (e.g. "/_bastion/ws")
-  type Config = Config(String)
+  --   path            — URL path to match for WebSocket upgrade
+  --   allowed_origins — cross-origin WebSocket clients whose Origin header
+  --                     is on this list are allowed to connect.  Same-origin
+  --                     requests (Origin matches Host scheme://authority) are
+  --                     always allowed.  A WebSocket handshake with no Origin
+  --                     header, or one whose Origin is not on the list and
+  --                     does not match the Host, is rejected with 403.
+  type Config = Config(String, List(String))
 
-  doc "Create a default config that listens on /_bastion/ws."
+  doc "Create a default config listening on /_bastion/ws with same-origin only."
   fn default_config() : Config do
-    Config("/_bastion/ws")
+    Config("/_bastion/ws", Nil)
   end
 
-  doc "Create a config with a custom WebSocket path."
+  doc "Create a config with a custom WebSocket path (same-origin only)."
   fn make_config(path : String) : Config do
-    Config(path)
+    Config(path, Nil)
+  end
+
+  doc """
+  Create a config that allows WebSocket upgrades from an explicit list of
+  cross-origin clients (in addition to same-origin).
+
+  Example:
+    IslandSocket.make_config_with_origins("/_bastion/ws", ["https://admin.example.com"])
+  """
+  fn make_config_with_origins(path : String, origins : List(String)) : Config do
+    Config(path, origins)
   end
 
   doc "Return the path from a config."
   fn config_path(cfg : Config) : String do
     match cfg do
-    Config(p) -> p
+    Config(p, _) -> p
+    end
+  end
+
+  doc "Return the allowed cross-origin list from a config."
+  fn config_allowed_origins(cfg : Config) : List(String) do
+    match cfg do
+    Config(_, os) -> os
     end
   end
 
@@ -304,17 +328,53 @@ mod IslandSocket do
   doc """
   Build a Conn -> Conn plug that upgrades matching requests to an island
   WebSocket with server-side rendering.
+
+  Rejects WebSocket handshakes with a missing Origin header, or an Origin
+  that does not match the request Host and is not on the config's
+  allowed-origin list.  This defends against cross-site WebSocket hijacking:
+  browsers do not enforce the same-origin policy on WebSocket connections,
+  so the server must validate the Origin itself.
   """
   fn plug(cfg : Config, registry : Registry) : Conn -> Conn do
     let socket_path = config_path(cfg)
+    let allowed     = config_allowed_origins(cfg)
     fn conn -> do
       let req_path = HttpServer.path(conn)
       if req_path == socket_path do
-        WebSocket.upgrade(conn, fn ws_sock -> ws_loop(ws_sock, empty_state(), registry))
+        match origin_allowed(conn, allowed) do
+        true  -> WebSocket.upgrade(conn, fn ws_sock -> ws_loop(ws_sock, empty_state(), registry))
+        false -> HttpServer.send_resp(conn, 403, "origin not allowed")
+        end
       else
         conn
       end
     end
+  end
+
+  -- Decide whether a request's Origin header permits a WebSocket upgrade.
+  -- Returns true only when the Origin is present AND either:
+  --   - matches the Host header (same-origin), or
+  --   - is on the configured allowed-origin list.
+  pfn origin_allowed(conn : Conn, allowed : List(String)) : Bool do
+    match HttpServer.get_req_header(conn, "origin") do
+    None -> false
+    Some(origin) ->
+      if List.any(allowed, fn o -> o == origin) do
+        true
+      else
+        match HttpServer.get_req_header(conn, "host") do
+        None       -> false
+        Some(host) -> origin_matches_host(origin, host)
+        end
+      end
+    end
+  end
+
+  -- Check if Origin "scheme://host[:port]" refers to the same authority as
+  -- the Host header.  We accept both http:// and https:// schemes because the
+  -- server doesn't know from the Conn alone whether it's behind TLS.
+  pfn origin_matches_host(origin : String, host : String) : Bool do
+    origin == "http://" ++ host || origin == "https://" ++ host
   end
 
   -- ── WebSocket loop ──────────────────────────────────────────────────────
@@ -357,7 +417,7 @@ mod IslandSocket do
     Ok(msg) -> do
       let island_id = json_string_field(msg, "island")
       let msg_type  = json_string_field(msg, "type")
-      let payload   = extract_payload_raw(text)
+      let payload   = extract_payload(msg)
       match msg_type do
       "init"        -> handle_init_pure(msg, payload, island_id, store, registry)
       "msg"         -> handle_msg_pure(payload, island_id, store, registry)
@@ -417,7 +477,12 @@ mod IslandSocket do
           end
           end
         end
-        None -> (store, [make_state_json(island_id, msg_payload)])
+        -- Handler not registered for this module (e.g. the island was
+        -- unregistered between init and msg).  Previously we echoed the
+        -- *incoming* msg_payload back as state, which both mis-represented
+        -- authoritative state and gave clients a state-injection surface.
+        -- Keep state unchanged and send an error message instead.
+        None -> (store, [make_error_json(island_id, "handler_not_registered")])
         end
       end
       end
@@ -529,6 +594,13 @@ mod IslandSocket do
     "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"merge\",\"payload\":" ++ state_json ++ "}"
   end
 
+  -- Error frame for client diagnostics.  The "code" field is a short
+  -- machine-readable identifier (e.g. "handler_not_registered"); front-end
+  -- code can surface it without having to parse human prose.
+  pfn make_error_json(island_id : String, code : String) : String do
+    "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"error\",\"payload\":{\"code\":\"" ++ json_escape(code) ++ "\"}}"
+  end
+
   -- ── Response helpers ──────────────────────────────────────────────────
 
   pfn send_render(ws_sock : WsSocket, island_id : String, html : String) : Unit do
@@ -558,17 +630,16 @@ mod IslandSocket do
     end
   end
 
-  -- Extract the raw JSON value for the "payload" field from the original
-  -- message string. The payload field is always last in the message, so we
-  -- read from after "payload": to the end, trimming the closing brace.
-  pfn extract_payload_raw(text : String) : String do
-    match String.index_of(text, "\"payload\":") do
-    Some(i) ->
-      let start = i + 10
-      let total = String.byte_size(text)
-      let len   = total - start - 1
-      String.slice_bytes(text, start, len)
-    None -> "null"
+  -- Extract the "payload" field from an already-parsed JsonValue and
+  -- serialise it back to JSON text.  Using Json.get + Json.to_string avoids
+  -- the old substring-based extraction which assumed the payload key was
+  -- always last and trimmed exactly one byte from the end — a fragile
+  -- assumption that broke whenever the payload was a nested object or the
+  -- message had trailing whitespace.
+  pfn extract_payload(msg : JsonValue) : String do
+    match Json.get(msg, "payload") do
+    Some(v) -> Json.to_string(v)
+    None    -> "null"
     end
   end
 

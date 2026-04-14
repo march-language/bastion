@@ -13,7 +13,9 @@ mod ErrorView do
   doc """
   Render an HTML error page for the given HTTP status code and message.
 
-  Returns a complete HTML document string with inline styling.
+  Returns a complete HTML document string with inline styling.  The message
+  argument is HTML-escaped before being inserted into the page so that
+  user-controlled content cannot inject markup or scripts.
 
   Example:
     ErrorView.render(404, "Not Found")
@@ -40,11 +42,24 @@ mod ErrorView do
     "  <div class=\"error\">\n" ++
     "    <h1>" ++ int_to_string(status) ++ "</h1>\n" ++
     "    <h2>" ++ status_text(status) ++ "</h2>\n" ++
-    "    <p>" ++ message ++ "</p>\n" ++
+    "    <p>" ++ escape_html(message) ++ "</p>\n" ++
     "    <p><a href=\"/\">Back to home</a></p>\n" ++
     "  </div>\n" ++
     "</body>\n" ++
     "</html>"
+  end
+
+  -- HTML-escape a string so it is safe to interpolate into element text
+  -- content.  Escapes the five characters the HTML spec calls out: &, <, >,
+  -- ", and '.  The single-quote replacement uses the numeric entity &#39;
+  -- because &apos; is not recognised in HTML4 / legacy browsers.
+  pfn escape_html(s : String) : String do
+    s
+    |> String.replace_all("&",  "&amp;")
+    |> String.replace_all("<",  "&lt;")
+    |> String.replace_all(">",  "&gt;")
+    |> String.replace_all("\"", "&quot;")
+    |> String.replace_all("'",  "&#39;")
   end
 
   doc """
