@@ -102,7 +102,6 @@ Deferred. Do not start until v1 is stable.
 - [ ] Auto-generate TypeScript types from March island types
 - [ ] CSP auto-generation from actual resource usage ([open-questions.md](open-questions.md))
 - [ ] PubSub system ([pubsub.md](pubsub.md))
-- [ ] Job/workflow system ([job-workflow-system.md](job-workflow-system.md))
 
 ---
 
