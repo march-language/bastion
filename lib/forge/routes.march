@@ -307,16 +307,33 @@ pfn pad(s, n) do
   else s ++ String.repeat(" ", n - len) end
 end
 
+-- Locally-defined max folds.  The stdlib `List.fold_left` currently has a
+-- type-inference quirk with user-supplied callbacks (see march stdlib issue),
+-- so we use explicit recursion here.
+pfn max_method_width(routes, acc) do
+  match routes do
+  Nil        -> acc
+  Cons(r, t) ->
+    let w = String.byte_size(r.method_str)
+    if w > acc do max_method_width(t, w) else max_method_width(t, acc) end
+  end
+end
+
+pfn max_path_width(routes, acc) do
+  match routes do
+  Nil        -> acc
+  Cons(r, t) ->
+    let w = String.byte_size(r.path)
+    if w > acc do max_path_width(t, w) else max_path_width(t, acc) end
+  end
+end
+
 pfn print_routes(routes) do
   if List.is_empty(routes) do
     println("No routes found.")
   else
-    let col1 = List.fold_left(6, routes, fn (acc, r) ->
-      if String.byte_size(r.method_str) > acc do String.byte_size(r.method_str) else acc end
-    )
-    let col2 = List.fold_left(4, routes, fn (acc, r) ->
-      if String.byte_size(r.path) > acc do String.byte_size(r.path) else acc end
-    )
+    let col1 = max_method_width(routes, 6)
+    let col2 = max_path_width(routes, 4)
     let sep_len = col1 + col2 + String.byte_size("  CONTROLLER") + 6
     let sep = String.repeat("-", sep_len)
     println(pad("METHOD", col1) ++ "  " ++ pad("PATH", col2) ++ "  CONTROLLER")

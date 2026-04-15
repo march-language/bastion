@@ -7,8 +7,6 @@
 
 mod Request do
 
-  import HttpServer
-
   -- ── Query string ──────────────────────────────────────────────────
 
   doc """

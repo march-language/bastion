@@ -221,7 +221,7 @@ pfn app_css() do
   ".counter button:hover { background: #f0f0f0; }\n"
 end
 
-pfn test_source(name, pascal) do
+pfn test_source(_name, pascal) do
   "mod " ++ pascal ++ "Test do\n\n" ++
   "  import Counter\n\n" ++
   "  describe \"Counter island\" do\n\n" ++

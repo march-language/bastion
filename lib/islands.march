@@ -39,7 +39,10 @@ mod Islands do
     | OnVisible    -- load when scrolled into view (IntersectionObserver)
 
   -- Dataflow mode — describes who owns the island's state.
-  type DataflowMode = Server | Client
+  -- Constructors are ServerOwned/ClientOwned rather than Server/Client because
+  -- the unqualified names collide with HttpServer.Server and HttpClient.Client
+  -- from the stdlib.
+  type DataflowMode = ServerOwned | ClientOwned
 
   -- Event — a named event with a JSON payload, dispatched from a child island upward.
   type Event = Event(String, String)
@@ -65,9 +68,9 @@ mod Islands do
   doc "Return the OnVisible hydration strategy."
   fn on_visible()     do OnVisible end
   doc "Return the Client dataflow mode."
-  fn client_mode()    do Client end
+  fn client_mode()    do ClientOwned end
   doc "Return the Server dataflow mode."
-  fn server_mode()    do Server end
+  fn server_mode()    do ServerOwned end
   doc "Construct an Event value."
   fn new_event(name : String, payload : String) do Event(name, payload) end
   doc "Construct a FormConfig value."
@@ -117,8 +120,8 @@ mod Islands do
   doc "Convert a DataflowMode to the data-march-dataflow attribute string."
   fn dataflow_str(mode) : String do
     match mode do
-    Server -> "server"
-    Client -> "client"
+    ServerOwned -> "server"
+    ClientOwned -> "client"
     end
   end
 
@@ -294,7 +297,7 @@ mod Islands do
 
   doc "Convenience: Server-mode eager wrap (display-only island, no event listeners)."
   fn wrap_server(name : String, state_json : String, ssr_html : String) : String do
-    wrap_with_dataflow(name, Eager, Server, state_json, "", ssr_html)
+    wrap_with_dataflow(name, Eager, ServerOwned, state_json, "", ssr_html)
   end
 
   -- ── Form islands ─────────────────────────────────────────────────────────
