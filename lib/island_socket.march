@@ -284,10 +284,18 @@ mod IslandSocket do
   end
 
   pfn put_entry(entries : List((String, IslandEntry)), id : String, entry : IslandEntry) : List((String, IslandEntry)) do
+    put_entry_loop(entries, id, entry, Nil)
+  end
+
+  pfn put_entry_loop(entries : List((String, IslandEntry)), id : String, entry : IslandEntry, acc : List((String, IslandEntry))) : List((String, IslandEntry)) do
     match entries do
-    Nil -> Cons((id, entry), Nil)
+    Nil -> List.reverse(Cons((id, entry), acc))
     Cons((k, v), rest) ->
-      if k == id do Cons((id, entry), rest) else Cons((k, v), put_entry(rest, id, entry)) end
+      if k == id do
+        List.append(List.reverse(acc), Cons((id, entry), rest))
+      else
+        put_entry_loop(rest, id, entry, Cons((k, v), acc))
+      end
     end
   end
 
@@ -313,10 +321,18 @@ mod IslandSocket do
   end
 
   pfn remove_entry(entries : List((String, IslandEntry)), id : String) : List((String, IslandEntry)) do
+    remove_entry_loop(entries, id, Nil)
+  end
+
+  pfn remove_entry_loop(entries : List((String, IslandEntry)), id : String, acc : List((String, IslandEntry))) : List((String, IslandEntry)) do
     match entries do
-    Nil -> Nil
+    Nil -> List.reverse(acc)
     Cons((k, v), rest) ->
-      if k == id do rest else Cons((k, v), remove_entry(rest, id)) end
+      if k == id do
+        List.append(List.reverse(acc), rest)
+      else
+        remove_entry_loop(rest, id, Cons((k, v), acc))
+      end
     end
   end
 
@@ -622,8 +638,8 @@ mod IslandSocket do
 
   pfn json_string_field(obj : JsonValue, key : String) : String do
     match Json.get(obj, key) do
-    Some(Str(s)) -> s
-    _            -> ""
+    Some(JsonValue.Str(s)) -> s
+    _                      -> ""
     end
   end
 

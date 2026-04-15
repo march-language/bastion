@@ -23,8 +23,6 @@
 
 mod ConnStates do
 
-  import HttpServer
-
   -- ── Type state tags ───────────────────────────────────────────────
   --
   -- Each tag represents a point in the middleware pipeline.

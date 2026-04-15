@@ -20,8 +20,6 @@
 
 mod Forge.Assets do
 
-needs IO.File, IO.FS, IO.Process
-
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 -- List all regular files immediately inside dir (non-recursive).
@@ -152,6 +150,8 @@ fn build() do
         end
       Err(e) -> Err("esbuild failed: " ++ e)
       end
+    else
+      Err(e) -> Err(e)
     end
   end
 end
@@ -178,6 +178,8 @@ fn deploy() do
         end
       Err(e) -> Err("esbuild failed: " ++ e)
       end
+    else
+      Err(e) -> Err(e)
     end
   end
 end
@@ -196,6 +198,8 @@ fn watch() do
       Ok(_) -> Ok(())
       Err(e) -> Err("esbuild failed: " ++ e)
       end
+    else
+      Err(e) -> Err(e)
     end
   end
 end

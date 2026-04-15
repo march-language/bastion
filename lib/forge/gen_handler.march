@@ -17,8 +17,6 @@
 
 mod Forge.GenHandler do
 
-needs IO.File, IO.FS
-
 -- ── Name helpers ─────────────────────────────────────────────────────────────
 
 pfn capitalize(s) do

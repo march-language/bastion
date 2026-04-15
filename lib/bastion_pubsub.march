@@ -42,21 +42,22 @@ pfn list_contains(lst, elem) do
 end
 
 pfn list_remove_first(lst, elem) do
+  list_remove_first_loop(lst, elem, Nil)
+end
+
+pfn list_remove_first_loop(lst, elem, acc) do
   match lst do
-  Nil -> Nil
+  Nil -> List.reverse(acc)
   Cons(h, t) -> do
-    if h == elem then t
-    else Cons(h, list_remove_first(t, elem))
+    if h == elem then List.append(List.reverse(acc), t)
+    else list_remove_first_loop(t, elem, Cons(h, acc))
   end
   end
 end
 
 -- Append elem to end of list (used for ordered inbox delivery).
 pfn list_append_one(lst, elem) do
-  match lst do
-  Nil -> Cons(elem, Nil)
-  Cons(h, t) -> Cons(h, list_append_one(t, elem))
-  end
+  List.reverse(Cons(elem, List.reverse(lst)))
 end
 
 -- ── Topic matching ──────────────────────────────────────────────────────────
