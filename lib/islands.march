@@ -73,6 +73,34 @@ mod Islands do
   doc "Construct a FormConfig value."
   fn new_form_config(channel : String, redirect : String) do FormConfig(channel, redirect) end
 
+  -- ── Island interface ────────────────────────────────────────────────────
+  --
+  -- Implement Island(s) for any module that serves as a WASM island.  The type
+  -- parameter s is the island's state type.
+  --
+  -- Required methods:
+  --   render(state : s) : String
+  --       Server-side HTML from state; also called after every client update.
+  --
+  --   update(state : s, msg : String) : s
+  --       Apply a JSON-encoded event message, return next state.  The JS
+  --       runtime calls this with serialized user events.
+  --
+  -- Example:
+  --   impl Island(Counter.State) do
+  --     fn render(state) do Counter.render(state) end
+  --     fn update(state, msg_json) do
+  --       Counter.update(state, Counter.decode_msg(msg_json))
+  --     end
+  --   end
+  --
+  -- TODO: When WASM codegen (Tier 4) lands, the compiler will verify
+  -- impl Island(T) exports match the expected WASM function signatures.
+  interface Island(s) do
+    fn render : s -> String
+    fn update : s -> String -> s
+  end
+
   -- ── Hydration strategy helpers ──────────────────────────────────────────
 
   doc "Convert a HydrateOn strategy to the data-march-hydrate attribute string."
