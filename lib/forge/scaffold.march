@@ -5,8 +5,6 @@
 
 mod Forge.Scaffold do
 
-needs IO.File, IO.FS, IO.Process
-
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 -- Capitalise the first character of a string.
@@ -27,8 +25,8 @@ end
 
 -- Produce a literal ${name} placeholder for use inside generated source files.
 -- Needed because March triple-quoted strings evaluate ${...} at compile time.
-pfn iv(name) do
-  "${" ++ name ++ "}"
+pfn iv(_name) do
+  "${" ++ _name ++ "}"
 end
 
 -- ── Templates ────────────────────────────────────────────────────────────────

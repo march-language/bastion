@@ -32,7 +32,6 @@
 mod IslandAssets do
 
   import HttpServer
-  needs IO.File, IO.Dir, IO.Process
 
   -- Configuration for the asset server.
   --   base_path — URL prefix for island assets (e.g. "/_bastion")
@@ -202,8 +201,8 @@ mod IslandAssets do
         match Json.get(json, module_name) do
         Some(entry) ->
           match Json.get(entry, "source") do
-          Some(Str(src)) -> Some(src)
-          _              -> None
+          Some(JsonValue.Str(src)) -> Some(src)
+          _                        -> None
           end
         _ -> None
         end
@@ -244,8 +243,8 @@ mod IslandAssets do
         match Json.get(json, module_name) do
         Some(entry) ->
           match Json.get(entry, "file") do
-          Some(Str(filename)) -> Some(base ++ "/islands/" ++ filename)
-          _                   -> None
+          Some(JsonValue.Str(filename)) -> Some(base ++ "/islands/" ++ filename)
+          _                             -> None
           end
         _ -> None
         end

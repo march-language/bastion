@@ -27,7 +27,6 @@
 
 mod TypedMiddleware do
 
-  import HttpServer
   import ConnStates
 
   -- ── Typed pipeline entry / exit ───────────────────────────────────

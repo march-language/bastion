@@ -289,8 +289,8 @@ mod Static do
       match Json.parse(content) do
       Ok(json) ->
         match Json.get(json, filename) do
-        Some(Str(url)) -> url
-        _              -> "/static/" ++ filename
+        Some(JsonValue.Str(url)) -> url
+        _                        -> "/static/" ++ filename
         end
       Err(_) -> "/static/" ++ filename
       end

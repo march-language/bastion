@@ -14,8 +14,6 @@
 
 mod Forge.Routes do
 
-needs IO.File, IO.FS
-
 -- A single recognised route (named ParsedRoute to avoid collision with Router.Route).
 type ParsedRoute = { method_str: String, path: String, handler: String }
 
@@ -283,18 +281,18 @@ pfn route_key(r) do
 end
 
 pfn dedup(routes) do
-  dedup_loop(routes, [])
+  List.reverse(dedup_loop(routes, [], []))
 end
 
-pfn dedup_loop(routes, seen) do
+pfn dedup_loop(routes, seen, acc) do
   match routes do
-  Nil -> []
+  Nil -> acc
   Cons(r, rest) ->
     let k = route_key(r)
     if List.any(seen, fn s -> s == k) do
-      dedup_loop(rest, seen)
+      dedup_loop(rest, seen, acc)
     else
-      Cons(r, dedup_loop(rest, Cons(k, seen)))
+      dedup_loop(rest, Cons(k, seen), Cons(r, acc))
     end
   end
 end

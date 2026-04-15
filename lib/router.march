@@ -216,10 +216,14 @@ mod Router do
   end
 
   pfn prefix_routes(routes : List(Route), prefix : List(String)) : List(Route) do
+    prefix_routes_loop(routes, prefix, Nil)
+  end
+
+  pfn prefix_routes_loop(routes : List(Route), prefix : List(String), acc : List(Route)) : List(Route) do
     match routes do
-    Nil -> Nil
+    Nil -> List.reverse(acc)
     Cons(Route(m, segs, h), rest) ->
-      Cons(Route(m, List.append(prefix, segs), h), prefix_routes(rest, prefix))
+      prefix_routes_loop(rest, prefix, Cons(Route(m, List.append(prefix, segs), h), acc))
     end
   end
 

@@ -22,8 +22,6 @@
 
 mod Forge.GenIsland do
 
-needs IO.File, IO.Dir, IO.Process
-
 -- ── Name helpers ─────────────────────────────────────────────────────────────
 
 pfn capitalize(s) do

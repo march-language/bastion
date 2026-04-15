@@ -22,8 +22,6 @@
 
 mod Forge.BuildIslands do
 
-needs IO.File, IO.Dir, IO.Process
-
 -- ── Name helpers ─────────────────────────────────────────────────────────────
 
 fn pascal_to_snake(s) do

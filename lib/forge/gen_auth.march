@@ -22,8 +22,6 @@
 
 mod Forge.GenAuth do
 
-needs IO.File, IO.FS
-
 -- Capitalise the first character of a string.
 pfn capitalize(s) do
   if String.is_empty(s) do s
@@ -33,8 +31,8 @@ pfn capitalize(s) do
 end
 
 -- Produce a literal ${name} for use inside generated source templates.
-pfn iv(name) do
-  "${" ++ name ++ "}"
+pfn iv(_name) do
+  "${" ++ _name ++ "}"
 end
 
 -- Produce a literal """ for use inside generated source templates.
