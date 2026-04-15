@@ -36,8 +36,6 @@
 mod Router do
 
   import HttpServer
-  import ErrorView
-  import Controller
 
   -- A single registered route.
   type Route = Route(Atom, List(String), Conn -> Conn)
