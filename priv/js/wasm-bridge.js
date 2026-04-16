@@ -115,8 +115,17 @@
 
     /**
      * Apply a message to the state.
-     * msgPayload is a string (variant name like "Increment") or a JSON object.
-     * Returns true if the state was updated, false if the server should handle it.
+     *
+     * msgPayload is either:
+     *   - A plain string like "Increment" — a zero-field enum variant name.
+     *   - An object like { tag: "Increment" } — zero-field enum (no extra fields).
+     *   - An object like { tag: "SetValue", value: 3 } — enum with payload.
+     *
+     * For zero-field enum messages, uses march_island_msg_from_name() to
+     * construct the typed Msg value directly without JSON serialization.
+     * For payloaded messages, falls back to JSON string serialization.
+     *
+     * Returns true if the state was updated, false otherwise.
      * @param {string|Object} msgPayload
      * @returns {boolean}
      */
@@ -124,27 +133,14 @@
       if (!this.statePtr) return false;
       if (typeof this.exports.march_island_update !== 'function') return false;
 
-      // Normalise to a JSON string — islands use fn update(state_json, msg_json)
-      // so the msg is always passed as a March String on the WASM side.
-      let msgStr;
-      if (typeof msgPayload === 'string') {
-        // Already a string: pass as-is (e.g. a variant name like "Increment"
-        // or a JSON value like "{\"tag\":\"SetValue\",\"value\":3}").
-        msgStr = msgPayload;
-      } else {
-        msgStr = JSON.stringify(msgPayload);
-      }
-
-      // Write the message string into WASM linear memory as a March String.
-      let msgPtr = 0;
-      try {
-        msgPtr = this._writeString(msgStr);
-      } catch (e) {
-        console.warn(`[bastion/wasm] failed to write msg string for "${msgStr}":`, e);
-        return false;
-      }
-
-      if (!msgPtr) return false;
+      // ── Fast path: zero-field enum via march_island_msg_from_name ────────────
+      //
+      // A zero-field enum message is one that only has a "tag" key and no other
+      // payload fields (e.g. { tag: "Increment" } or the bare string "Increment").
+      // The compiler exports march_island_msg_from_name(ptr, len) → Msg ptr for
+      // these variants; it avoids JSON parsing on the WASM side.
+      const msgPtr = this._buildMsgPtr(msgPayload);
+      if (msgPtr === null) return false;
 
       try {
         const newStatePtr = this.exports.march_island_update(this.statePtr, msgPtr);
@@ -156,6 +152,72 @@
         console.warn(`[bastion/wasm] ${this.moduleName}.update() failed:`, e);
       }
       return false;
+    }
+
+    /**
+     * Build a WASM Msg pointer from msgPayload.
+     *
+     * Zero-field enum fast path (march_island_msg_from_name):
+     *   - Plain string payload: use the string directly as the variant name.
+     *   - Object with only a "tag" key: use tag as the variant name.
+     *
+     * JSON fallback (for payloaded messages):
+     *   - Object with fields beyond "tag": serialize to JSON string.
+     *
+     * Returns the WASM Msg ptr, or null on error.
+     * @param {string|Object} msgPayload
+     * @returns {number|null}
+     */
+    _buildMsgPtr(msgPayload) {
+      // Determine if this is a zero-field enum
+      let variantName = null;
+
+      if (typeof msgPayload === 'string') {
+        // Plain string — always a zero-field variant name
+        variantName = msgPayload;
+      } else if (msgPayload && typeof msgPayload === 'object') {
+        const keys = Object.keys(msgPayload);
+        if (keys.length === 1 && keys[0] === 'tag') {
+          // Object with only a "tag" key — zero-field enum
+          variantName = msgPayload.tag;
+        }
+      }
+
+      // Zero-field enum: use march_island_msg_from_name if exported
+      if (variantName !== null && typeof this.exports.march_island_msg_from_name === 'function') {
+        try {
+          const encoded = new TextEncoder().encode(variantName);
+          const len = encoded.length;
+          const rawPtr = this.exports.march_alloc_export(BigInt(len + 1));
+          if (!rawPtr) return null;
+          const heap = new Uint8Array(this.memory.buffer);
+          heap.set(encoded, rawPtr);
+          heap[rawPtr + len] = 0;
+          const msgPtr = this.exports.march_island_msg_from_name(rawPtr, len);
+          if (msgPtr) return msgPtr;
+          // march_island_msg_from_name returned null — variant name not found.
+          // Fall through to JSON path so the WASM side can report the error.
+        } catch (e) {
+          console.warn(`[bastion/wasm] march_island_msg_from_name failed for "${variantName}":`, e);
+        }
+      }
+
+      // JSON fallback: serialize the payload and pass as a March String
+      let msgStr;
+      if (typeof msgPayload === 'string') {
+        // Plain string but no march_island_msg_from_name — wrap in JSON tag object
+        msgStr = JSON.stringify({ tag: msgPayload });
+      } else {
+        msgStr = JSON.stringify(msgPayload);
+      }
+
+      try {
+        const ptr = this._writeString(msgStr);
+        return ptr || null;
+      } catch (e) {
+        console.warn(`[bastion/wasm] failed to write msg string for "${msgStr}":`, e);
+        return null;
+      }
     }
 
     /**

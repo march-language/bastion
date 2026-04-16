@@ -48,6 +48,7 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Security headers | `security_headers.march` | `SecurityHeaders.defaults/1` — x-frame-options, x-content-type-options, x-xss-protection, referrer-policy, permissions-policy, COOP, COEP; `hsts/2`; `csp_base/1`, `csp_with_ws/2`; individual overrides |
 | CORS middleware | `cors.march` | `Cors.allow/2` + `CorsConfig` record; `config/1`, `config_open/0`, `config_credentialed/1`; handles preflight (OPTIONS), origin matching, vary header, credentials |
 | Deferred island hydration | `priv/js/march-islands.js` | `data-march-hydrate` strategies: `lazy` (window load), `idle` (requestIdleCallback), `interaction` (first click/focus/key), `on-visible` (IntersectionObserver 10%); `_hydrateOne` + `_scheduleHydration` refactor |
+| WASM msg fast path | `priv/js/wasm-bridge.js` | `_buildMsgPtr()` uses `march_island_msg_from_name` for zero-field enum messages (plain string / `{tag:…}`); JSON fallback for payloaded variants or missing export |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---
