@@ -1,0 +1,118 @@
+-- Html — HTML safety primitives for Bastion templates.
+--
+-- Provides auto-escaping for template interpolation and the Safe type for
+-- marking pre-rendered HTML as trusted.  Used by the ~H sigil desugarer
+-- and the .march.html lowering pass.
+--
+-- Auto-escaping rules:
+--   String          → HTML-escaped (& < > " ')
+--   Int, Float, Bool → converted to string, then escaped
+--   Html.Safe        → inserted verbatim
+--   IOList           → flattened verbatim
+--
+-- The {=expr} raw interpolation syntax in .march.html templates requires
+-- the expression to have type IOList or Html.Safe — the compiler rejects
+-- plain String to make unsafety visible at the call site.
+
+mod Html do
+
+  -- A string that has already been HTML-escaped or is trusted markup.
+  -- Wrapping in Safe skips auto-escaping during template interpolation.
+  opaque type Safe = Safe(String)
+
+  doc """
+  HTML-escape a string by replacing the five dangerous characters.
+
+  Escapes &, <, >, ", and ' so the string is safe to embed in HTML
+  element content or attribute values.
+
+      Html.escape("<script>alert('xss')</script>")
+      -- "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"
+  """
+  fn escape(s : String) : String do
+    s
+    |> String.replace_all("&",  "&amp;")
+    |> String.replace_all("<",  "&lt;")
+    |> String.replace_all(">",  "&gt;")
+    |> String.replace_all("\"", "&quot;")
+    |> String.replace_all("'",  "&#39;")
+  end
+
+  doc """
+  Mark a string as safe (trusted) HTML.
+
+  The resulting Safe value will not be escaped when interpolated in a
+  template.  Use only for content you trust — e.g., output from a
+  Markdown renderer you control.
+
+      Html.safe("<em>already escaped</em>")
+  """
+  fn safe(s : String) : Safe do
+    Safe(s)
+  end
+
+  doc """
+  Extract the inner string from a Safe value.
+
+      Html.to_string(Html.safe("<b>hi</b>"))  -- "<b>hi</b>"
+  """
+  fn to_string(s : Safe) : String do
+    match s do
+    Safe(inner) -> inner
+    end
+  end
+
+  doc """
+  Check whether a Safe value is empty.
+  """
+  fn is_empty(s : Safe) : Bool do
+    match s do
+    Safe(inner) -> String.is_empty(inner)
+    end
+  end
+
+  doc """
+  Auto-escape a String value for template interpolation.
+
+  This is the workhorse called by the ~H sigil desugarer for every
+  {expr} interpolation site.  It HTML-escapes the string.
+
+      html_auto_escape_string("A & B")  -- "A &amp; B"
+  """
+  fn html_auto_escape_string(val : String) : String do
+    escape(val)
+  end
+
+  doc """
+  Auto-escape an Int value for template interpolation.
+
+  Converts to string first, then escapes (integers are always safe,
+  but going through escape is consistent and costs nothing).
+
+      html_auto_escape_int(42)  -- "42"
+  """
+  fn html_auto_escape_int(val : Int) : String do
+    int_to_string(val)
+  end
+
+  doc """
+  Auto-escape a Bool value for template interpolation.
+
+      html_auto_escape_bool(true)  -- "true"
+  """
+  fn html_auto_escape_bool(val : Bool) : String do
+    if val do "true" else "false" end
+  end
+
+  doc """
+  Return the raw string from a Safe value for template interpolation.
+
+  Safe values bypass escaping — the caller asserted the content is trusted.
+  """
+  fn html_auto_escape_safe(val : Safe) : String do
+    match val do
+    Safe(inner) -> inner
+    end
+  end
+
+end

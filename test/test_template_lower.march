@@ -1,0 +1,174 @@
+-- test/test_template_lower.march
+-- Tests for the .march.html → .march lowering pass (Forge.Lower).
+
+mod TestTemplateLower do
+
+-- ── Frontmatter parsing ──────────────────────────────────────────────────────
+
+describe "Forge.Lower.lower: frontmatter" do
+  test "extracts fn signature from frontmatter" do
+    let input = "---\nfn render(title: String)\n---\n<h1>{title}</h1>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/templates/home.march.html")
+    assert (string_contains(source, "fn render(title: String)"))
+  end
+
+  test "extracts use declarations from frontmatter" do
+    let input = "---\nfn render(x: Int)\nuse Bastion.Helpers\n---\n<p>{x}</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/templates/page.march.html")
+    assert (string_contains(source, "use Bastion.Helpers"))
+  end
+
+  test "generates default signature when no frontmatter" do
+    let input = "<h1>Hello</h1>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/templates/hello.march.html")
+    assert (string_contains(source, "fn render(assigns : Map(String, Any))"))
+  end
+
+  test "extracts import declarations" do
+    let input = "---\nfn render()\nimport MyApp.Helpers\n---\n<p>hi</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/templates/test.march.html")
+    assert (string_contains(source, "import MyApp.Helpers"))
+  end
+
+  test "extracts alias declarations" do
+    let input = "---\nfn render()\nalias Long.Module.Name as Short\n---\n<p>hi</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/templates/test.march.html")
+    assert (string_contains(source, "alias Long.Module.Name as Short"))
+  end
+end
+
+-- ── Module name derivation ───────────────────────────────────────────────────
+
+describe "Forge.Lower.lower: module name derivation" do
+  test "derives module name from src path" do
+    let input = "<p>hi</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/templates/home.march.html")
+    assert (string_contains(source, "mod MyApp.Templates.Home do"))
+  end
+
+  test "derives nested module name" do
+    let input = "<p>hi</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/templates/pages/about.march.html")
+    assert (string_contains(source, "mod MyApp.Templates.Pages.About do"))
+  end
+
+  test "derives component module name" do
+    let input = "<p>hi</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/components/nav.march.html")
+    assert (string_contains(source, "mod MyApp.Components.Nav do"))
+  end
+
+  test "converts snake_case segments to PascalCase" do
+    let input = "<p>hi</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/my_app/templates/user_profile.march.html")
+    assert (string_contains(source, "mod MyApp.Templates.UserProfile do"))
+  end
+end
+
+-- ── Expression interpolation ─────────────────────────────────────────────────
+
+describe "Forge.Lower.lower: expressions" do
+  test "passes through {expr} as sigil interpolation" do
+    let input = "---\nfn render(name: String)\n---\n<h1>{name}</h1>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "$" ++ "{name}"))
+  end
+
+  test "passes through {=expr} as raw interpolation" do
+    let input = "---\nfn render(body: IOList)\n---\n<div>{=body}</div>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "$" ++ "{body}"))
+  end
+
+  test "preserves literal HTML" do
+    let input = "<div class=\"container\"><p>Hello</p></div>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "<div class=\"container\"><p>Hello</p></div>"))
+  end
+end
+
+-- ── Control flow ─────────────────────────────────────────────────────────────
+
+describe "Forge.Lower.lower: control flow" do
+  test "lowers {#if} to conditional" do
+    let input = "---\nfn render(show: Bool)\n---\n{#if show}<p>Visible</p>{/if}"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "if show do"))
+  end
+
+  test "lowers {#if}/{:else}/{/if}" do
+    let input = "---\nfn render(x: Bool)\n---\n{#if x}<p>Yes</p>{:else}<p>No</p>{/if}"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "if x do"))
+    assert (string_contains(source, "else"))
+  end
+
+  test "lowers {#for} to List.map" do
+    let input = "---\nfn render(items: List(String))\n---\n{#for item in items}<li>{item}</li>{/for}"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "List.map(items"))
+    assert (string_contains(source, "fn item"))
+  end
+
+  test "lowers {let} to binding" do
+    let input = "---\nfn render(name: String)\n---\n{let upper = String.upcase(name)}<p>{upper}</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "let upper = String.upcase(name)"))
+  end
+end
+
+-- ── Component calls ──────────────────────────────────────────────────────────
+
+describe "Forge.Lower.lower: components" do
+  test "lowers self-closing component to render call" do
+    let input = "---\nfn render()\n---\n<.Nav active=\"home\" />"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "Nav.render("))
+  end
+
+  test "passes static string props" do
+    let input = "---\nfn render()\n---\n<.Button label=\"Submit\" />"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "label: \"Submit\""))
+  end
+
+  test "passes dynamic expression props" do
+    let input = "---\nfn render(user: User)\n---\n<.Card user={user} />"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "user: user"))
+  end
+end
+
+-- ── Output structure ─────────────────────────────────────────────────────────
+
+describe "Forge.Lower.lower: output structure" do
+  test "wraps body in ~H triple-quoted sigil" do
+    let input = "<p>Hello</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, "~H\"\"\""))
+    assert (string_contains(source, "\"\"\""))
+  end
+
+  test "declares return type as IOList" do
+    let input = "<p>Hello</p>"
+    let (source, _spans) = Forge.Lower.lower(input, "src/app/templates/t.march.html")
+    assert (string_contains(source, ": IOList do"))
+  end
+
+  test "generates spans table" do
+    let input = "---\nfn render()\n---\n<h1>Title</h1>\n<p>Body</p>"
+    let (_source, spans) = Forge.Lower.lower(input, "src/app/templates/page.march.html")
+    assert (string_contains(spans, "src/app/templates/page.march.html"))
+  end
+end
+
+-- ── Helpers ──────────────────────────────────────────────────────────────────
+
+pfn string_contains(haystack : String, needle : String) : Bool do
+  match String.index_of(haystack, needle) do
+  Some(_) -> true
+  None -> false
+  end
+end
+
+end

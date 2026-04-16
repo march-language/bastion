@@ -49,4 +49,11 @@ module  = "lib/forge/gen_channel.march"
 command = "bastion.gen.migration"
 module  = "lib/forge/gen_migration.march"
 
+[archive.task.bastion.lower]
+command = "bastion.lower"
+module  = "lib/forge/lower.march"
+
+[preprocessors]
+".march.html" = "bastion lower"
+
 [deps]

@@ -1,0 +1,43 @@
+-- Css — inline style helpers for Bastion templates.
+--
+-- Provides Css.style/1 for building CSS style strings from a list of
+-- property/value pairs.  Used in .march.html templates:
+--
+--   <div style={Css.style([
+--     ("color", Some(brand_color)),
+--     ("font-weight", if user.is_admin do Some("bold") else None end)
+--   ])}>
+
+mod Css do
+
+  doc """
+  Build a CSS style string from a list of (property, Option(value)) pairs.
+
+  Pairs where the value is None are filtered out.  This lets you
+  conditionally include CSS properties without string gymnastics.
+
+      Css.style([
+        ("color", Some("red")),
+        ("display", None),
+        ("font-size", Some("14px"))
+      ])
+      -- "color: red; font-size: 14px;"
+  """
+  fn style(pairs : List((String, Option(String)))) : String do
+    build_style(pairs, "")
+  end
+
+  pfn build_style(pairs : List((String, Option(String))), acc : String) : String do
+    match pairs do
+    Nil -> acc
+    Cons((prop, val), rest) ->
+      match val do
+      None -> build_style(rest, acc)
+      Some(v) ->
+        let decl = prop ++ ": " ++ v ++ "; "
+        build_style(rest, acc ++ decl)
+      end
+    end
+  end
+
+end
