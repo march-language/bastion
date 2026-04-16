@@ -6,7 +6,7 @@
 
 ## Open Design Questions
 
-1. **Sigil implementation**: Triple-quoted `~H"""..."""` parser production is missing in `lib/parser/parser.mly` — the lexer handles it but the parser has no rule combining `SIGIL_PREFIX` with a triple-quoted string. See [template-file-format.md](template-file-format.md) §Layer 1a for the fix.
+1. ~~**Sigil implementation**~~ — **Resolved (diagnosis was wrong).** The March lexer's `read_triple_string` rule returns the same `STRING` token as regular single-quoted strings — both `"..."` and `"""..."""` produce `STRING`. The existing parser production `SIGIL_PREFIX STRING` therefore already handles triple-quoted sigils. No parser change needed. `~H"""..."""` works today.
 
 2. ~~**WASM compilation target**~~ — **Resolved.** The `wasm32-unknown-unknown` target is fully implemented in `lib/tir/llvm_emit.ml` (target triple, pointer size, island export functions, bump allocator runtime). The compiler accepts `--target wasm32-unknown-unknown` and produces valid browser WASM. Forge's `cmd_build.ml` already uses it for `@island` modules. Remaining work is JS-side: deferred hydration strategies and `march_island_msg_from_name` wiring in `priv/js/`. See todos.md.
 

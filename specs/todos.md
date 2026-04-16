@@ -10,13 +10,13 @@ Derived from [open-questions.md](open-questions.md), the individual spec files, 
 
 The most impactful unblocked work. These are preconditions for most other features.
 
-- [ ] **`~H` triple-quoted sigil** (March compiler) — Add the missing `SIGIL_PREFIX + triple_string` parser production in `lib/parser/parser.mly`. The lexer already tokenises `~H` and triple-quoted strings correctly; the parser just lacks the production that combines them. See [template-file-format.md](template-file-format.md) §Layer 1a.
+- [x] ~~**`~H` triple-quoted sigil**~~ — **Not a blocker.** `read_triple_string` in the lexer returns the same `STRING` token as regular strings; the existing `SIGIL_PREFIX STRING` parser rule already handles `~H"""..."""`. No fix needed.
 - [ ] **`.march.spans` sidecar support** (March compiler) — Accept a span-override sidecar file alongside a `.march` source so the lowering pass can map generated node positions back to `.march.html` line/col. Errors then report positions in the original template file. See [template-file-format.md](template-file-format.md) §Layer 1b.
-- [ ] **`[preprocessors]` hook in forge** — Add a `[preprocessors]` table to `forge.toml` that maps file extensions to commands. Forge runs matched commands before compilation and adds `.forge/generated/` to `MARCH_LIB_PATH`. Incremental: only re-run when source hash changes. See [template-file-format.md](template-file-format.md) §Layer 2.
-- [ ] **`bastion lower` CLI subcommand** (Bastion) — Implement the `.march.html` → `.march` lowering pass: frontmatter extraction, HTML parsing, component resolution, slot assembly, code generation, span table output. See [template-file-format.md](template-file-format.md) §Layer 3b.
-- [ ] **`Html` runtime module** — `Html.escape/1`, `Html.safe/1`, `Html.Safe` type, `html_auto_escape/1`. Called by `desugar.ml` already; needs a runtime implementation in `lib/html.march`.
-- [ ] **`IOList` runtime module** — Complete `IOList.from_strings/1`, `IOList.empty/0`, `IOList.to_string/1` in `lib/io_list.march`.
-- [ ] **`Css.style/1` helper** — New `lib/css.march` module. Builds a CSS string from a `List((String, Option(String)))`, filtering `None` values.
+- [x] ~~**`[preprocessors]` hook in forge**~~ — Already in `forge.toml` as `[preprocessors] ".march.html" = "bastion lower"`.
+- [x] ~~**`bastion lower` CLI subcommand**~~ — Implemented in `lib/forge/lower.march`.
+- [x] ~~**`Html` runtime module**~~ — Implemented in `lib/html.march`.
+- [x] ~~**`IOList` runtime module**~~ — Implemented in `lib/io_list.march`.
+- [x] ~~**`Css.style/1` helper**~~ — Implemented in `lib/css.march`.
 - [ ] **Islands data flow implementation** — Implement the `Server` / `Client` dataflow modes, parent-child prop binding, and explicit event dispatch as specced in [islands-data-flow.md](islands-data-flow.md). Depends on `~H` for template rendering in islands.
 - [ ] **Kill `window.marchIslands.send` global bus** — Replace with the parent-child dispatch model from [islands-data-flow.md](islands-data-flow.md). See wasm-islands.md current design.
 - [ ] **Channel server implementation** — Spec is complete ([channels.md](channels.md)), implementation needed. Unblocks: island-to-server sync, real-time features, Presence.
@@ -25,16 +25,18 @@ The most impactful unblocked work. These are preconditions for most other featur
   - [ ] Step 0b: Wire `Conn.after_send_hooks` dispatch in `bastion_server.march`; call `Session.commit_from_conn` for "session_commit" hook
   - [ ] Step 1: `lib/crypto.march` — `random_bytes`, `secure_compare`, `sha256`, `hkdf`, AES-256-GCM encrypt/decrypt, HMAC-SHA256 sign/verify, Argon2id `hash_password`/`verify_password`
   - [ ] Step 1b: Upgrade `session.march` crypto — replace `stub_hmac` with `Crypto.hmac_sha256`; add AES-256-GCM encrypt/decrypt
-  - [ ] Step 2: `lib/depot_middleware.march` — `with_pool`, `after_send` pool checkin
+  - [ ] Step 2: Add Depot as a `[deps]` entry in Bastion's `forge.toml` — it is a separate lib at `/Users/80197052/code/depot` with real Postgres wire protocol (`connection.march`, `pool.march`), query builder, Gate, schema, migrations, and test sandbox. Currently Bastion does not declare it as a dependency.
+  - [ ] Step 2b: `lib/depot_middleware.march` — `with_pool` (pool attach), `after_send` pool checkin hook; wraps `Pool.checkout` / `Pool.checkin`
+  - [ ] Step 2c: Wire `Depot.Query` SQL generation — `Depot.Query` currently filters in-memory; needs a `to_sql/1` path that generates SQL strings executed via `Connection.exec_prepared`
   - [x] Step 3: `lib/session.march` — cookie session API complete; crypto stubs in place (upgrade after Step 1)
   - [x] Step 4: `lib/flash.march` — `put`, `get`, `loaded_flashes`, `clear`, `delete`; `Form.FlashGroup` component
   - [ ] Step 5: `lib/csrf.march` — already has token/protect/skip; upgrade token generation to use `Crypto.random_bytes` after Step 1
   - [ ] Step 6: `lib/auth_middleware.march` — `load_current_user`, `require_auth`, `authenticated`, `log_in` (with remember-me), `log_out`
   - [ ] Step 7: `lib/vault.march` — in-memory KV actor, TTL sweeper (core API only: `put/get/delete/put_new`)
   - [ ] Step 8: `lib/rate_limit.march` — sliding window rate limiter backed by Vault; `x-ratelimit-*` headers; 429 response
-  - [ ] Step 9: Depot migrations — `forge depot.migrate` / `forge depot.rollback`; `schema_migrations` table
+  - [ ] Step 9: `forge depot.migrate` / `forge depot.rollback` wired in Bastion — `Depot.Migration` in depot repo generates SQL DDL strings; needs the forge commands brought over and wired to execute via `Connection.simple_query`
   - [ ] Step 10: `forge gen.auth session` generator — `users` + `user_tokens` migrations; Accounts context (`authenticate`, `create_remember_token`, `create_reset_token`, `reset_password`); AuthController (login, logout, register, password reset); templates; router patch; rate limiting wired to login/register/reset routes
-  - [ ] Step 11: `Bastion.Test.Depot.checkout` test sandbox + `Bastion.Test.Auth.log_in_user` helper
+  - [ ] Step 11: `Bastion.Test.Depot.checkout` test sandbox + `Bastion.Test.Auth.log_in_user` helper — `Depot.Test` sandbox exists in depot repo; needs wiring into Bastion test helpers
 
 ---
 
