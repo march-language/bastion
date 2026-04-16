@@ -84,7 +84,7 @@ Specced and designed but not yet fully implemented. These are the active build a
 | WASM island compilation | [wasm-islands.md](wasm-islands.md) | **JS runtime complete** | All JS-side work done (hydration strategies, `march_island_msg_from_name`, Cmd executor, FFI layer, public API); pending: end-to-end integration test |
 | Islands data flow | [islands-data-flow.md](islands-data-flow.md) | **Complete** — `IslandServer.push/2` (PubSub fan-out), `IslandSocket` ↔ PubSub wiring (subscribe on init, unsubscribe on destroy/close), LWW `channel_push` forwarding, JS `init` carries channel field | None |
 | Channels / WebSocket | [channels.md](channels.md) | Server + PubSub + test helpers fully implemented | None — fully done |
-| CSP nonce injection | [csp.md](csp.md) | Draft spec | **Unblocked** — `~H` compiler pass confirmed done; nonce injection can be added to desugar pass or Bastion middleware |
+| CSP nonce injection | [csp.md](csp.md) | `bastion_csp.march` (`BastionCSP`): `assign_nonce`, `nonce`, `set_header`, `protect`, `protect_with_overrides`, `disable`, `report_only`; `wasm-unsafe-eval` in default script-src; `Islands.bootstrap_script_with_nonce/2` | Automatic `<script nonce={…}>` injection in `~H` templates requires March `desugar.ml` change (reads `@csp_nonce` assign and rewrites script/style tags) |
 | Route verification | [route-verification.md](route-verification.md) | Draft spec | Needs compiler integration for route helper generation |
 
 ---

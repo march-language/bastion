@@ -28,14 +28,17 @@
 
 mod BastionCSP do
 
+  import Crypto
+
 -- ---------------------------------------------------------------------------
 -- Private helpers
 -- ---------------------------------------------------------------------------
 
 -- Build the default directive list with the nonce substituted in.
+-- 'wasm-unsafe-eval' is required for WASM island execution in browsers.
 pfn default_directives(nonce_val) do
   Cons(("default-src", "'self'"),
-  Cons(("script-src", "'self' 'nonce-" ++ nonce_val ++ "'"),
+  Cons(("script-src", "'self' 'nonce-" ++ nonce_val ++ "' 'wasm-unsafe-eval'"),
   Cons(("style-src", "'self' 'nonce-" ++ nonce_val ++ "'"),
   Cons(("img-src", "'self' data: https:"),
   Cons(("font-src", "'self'"),
@@ -133,8 +136,9 @@ the Conn under the key "csp_nonce".  Returns the updated Conn.
     conn = BastionCSP.assign_nonce(conn)
 """
 fn assign_nonce(conn) do
-  let bytes     = random_bytes(16)
-  let nonce_val = base64_encode(bytes)
+  -- generate_token(16) produces 16 random bytes rendered as a URL-safe
+  -- base64 string (~22 chars) — safe to use directly as a nonce value.
+  let nonce_val = Crypto.generate_token(16)
   HttpServer.assign(conn, "csp_nonce", nonce_val)
 end
 

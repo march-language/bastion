@@ -435,6 +435,25 @@ mod Islands do
   end
 
   doc """
+  Generate the <script type="module"> tag for the island runtime, with a
+  CSP nonce attribute.  Use this overload when Bastion.CSP is in the pipeline.
+
+  Parameters:
+    base_url — URL prefix for island JS assets
+    nonce    — CSP nonce from BastionCSP.nonce(conn)
+
+  Example:
+    Islands.bootstrap_script_with_nonce("/_march/islands", BastionCSP.nonce(conn))
+  """
+  fn bootstrap_script_with_nonce(base_url : String, nonce : String) : String do
+    if nonce == "" do
+      bootstrap_script(base_url)
+    else
+      "<script type=\"module\" nonce=\"" ++ escape_dq(nonce) ++ "\" src=\"" ++ base_url ++ "/march-islands.js\"></script>"
+    end
+  end
+
+  doc """
   Generate a <link rel="modulepreload"> hint for a specific island's WASM file.
 
   Tells the browser to start fetching the WASM file early, before the runtime
