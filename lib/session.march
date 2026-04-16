@@ -208,11 +208,11 @@ mod Session do
   end
 
   pfn parse_session(data : String) : List((String, String)) do
-    if String.is_empty(data) then []
+    if String.is_empty(data) do []
     else
       List.filter_map(String.split(data, ";"), fn part ->
         match String.split_first(part, "=") do
-        Some((k, v)) -> if String.is_empty(k) then None else Some((k, v))
+        Some((k, v)) -> if String.is_empty(k) do None else Some((k, v)) end
         None         -> None
         end
       )
@@ -235,7 +235,7 @@ mod Session do
       match String.split_first(part, "=") do
       None         -> find_session_key(rest, key)
       Some((k, v)) ->
-        if k == key then Some(v)
+        if k == key do Some(v)
         else find_session_key(rest, key)
         end
       end
@@ -267,7 +267,7 @@ mod Session do
     Some((mac, payload)) ->
       let signing_key = Crypto.derive_key(secret, "session_signing")
       let expected    = Crypto.hmac_sha256(signing_key, payload)
-      if Crypto.secure_compare(mac, expected) then
+      if Crypto.secure_compare(mac, expected) do
         match Crypto.base64_decode(payload) do
         Ok(b)  -> Crypto.bytes_to_string(b)
         Err(_) -> ""

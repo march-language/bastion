@@ -110,7 +110,7 @@ mod Bastion.Idempotency do
 
   pfn replay_cached(conn, cached) do
     let (cached_status, cached_headers, cached_body) = cached
-    let with_headers = List.fold_left(cached_headers, conn, fn c pair ->
+    let with_headers = List.fold_left(cached_headers, conn, fn (c, pair) ->
       let (hk, hv) = pair
       HttpServer.put_resp_header(c, hk, hv)
     )
@@ -135,12 +135,12 @@ mod Bastion.Idempotency do
   Return true if an idempotency-key response is currently cached.
   Useful in tests to assert that a key was stored after a successful request.
   """
-  fn cached?(key : String) : Bool do
-    cached_with_scope?(key, "")
+  fn is_cached(key : String) : Bool do
+    is_cached_with_scope(key, "")
   end
 
   doc "Return true if an idempotency-key response is cached under a given scope."
-  fn cached_with_scope?(key : String, scope : String) : Bool do
+  fn is_cached_with_scope(key : String, scope : String) : Bool do
     let table = Vault.open(table_name)
     Vault.has(table, build_key(key, scope))
   end

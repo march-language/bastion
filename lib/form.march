@@ -33,7 +33,7 @@ mod Form do
   """
   fn form_tag(conn : Conn, action : String, method : String, class : String, content : String) : String do
     let csrf_input = CSRF.tag_string(conn)
-    let class_attr = if String.is_empty(class) then "" else " class=\"" ++ Html.escape(class) ++ "\""
+    let class_attr = if String.is_empty(class) do "" else " class=\"" ++ Html.escape(class) ++ "\"" end
     "<form action=\"" ++ Html.escape(action) ++ "\" method=\"" ++ Html.escape(method) ++ "\"" ++ class_attr ++ ">" ++
     csrf_input ++
     content ++
@@ -79,10 +79,10 @@ mod Form do
   fn select_tag(name : String, options : List((String, String)), selected : String, attrs : List((String, String))) : String do
     let escaped_name = Html.escape(name)
     let extra = render_attrs(attrs)
-    let option_html = String.join(List.map(options, fn (label, value) ->
-      let sel = if value == selected then " selected" else ""
+    let option_html = String.join(List.map(options, fn (label, value) -> do
+      let sel = if value == selected do " selected" else "" end
       "<option value=\"" ++ Html.escape(value) ++ "\"" ++ sel ++ ">" ++ Html.escape(label) ++ "</option>"
-    ), "")
+    end), "")
     "<select name=\"" ++ escaped_name ++ "\" id=\"" ++ escaped_name ++ "\"" ++
     extra ++ ">" ++ option_html ++ "</select>"
   end
@@ -110,8 +110,9 @@ mod Form do
       Form.field_tag("email", "Email", input_html, Gate.error_for(gate, "email"))
   """
   fn field_tag(name : String, label_text : String, input_html : String, error : Option(String)) : String do
-    let label_html = if String.is_empty(label_text) then ""
+    let label_html = if String.is_empty(label_text) do ""
                      else "<label for=\"" ++ Html.escape(name) ++ "\">" ++ Html.escape(label_text) ++ "</label>"
+                     end
     let error_html  = error_tag(error)
     let aria_attrs  = match error do
       None    -> ""
@@ -166,9 +167,9 @@ mod Form do
         Some(g) -> Gate.error_for(g, name)
         None    -> None
         end
-      let label_text = if required then label ++ " *" else label
-      let type_str   = if String.is_empty(type_) then "text" else type_
-      let extra_attrs = if String.is_empty(class) then [] else [("class", class)]
+      let label_text = if required do label ++ " *" else label end
+      let type_str   = if String.is_empty(type_) do "text" else type_ end
+      let extra_attrs = if String.is_empty(class) do [] else [("class", class)] end
       let input_html = Form.input_tag(name, type_str, actual_value, extra_attrs)
       IOList.from_string(Form.field_tag(name, label_text, input_html, error))
     end
@@ -195,8 +196,8 @@ mod Form do
         Some(g) -> Gate.error_for(g, name)
         None    -> None
         end
-      let label_text = if required then label ++ " *" else label
-      let extra_attrs = if String.is_empty(class) then [] else [("class", class)]
+      let label_text = if required do label ++ " *" else label end
+      let extra_attrs = if String.is_empty(class) do [] else [("class", class)] end
       let textarea_html = Form.textarea_tag(name, actual_value, extra_attrs)
       IOList.from_string(Form.field_tag(name, label_text, textarea_html, error))
     end
@@ -225,8 +226,8 @@ mod Form do
         Some(g) -> Gate.error_for(g, name)
         None    -> None
         end
-      let label_text = if required then label ++ " *" else label
-      let extra_attrs = if String.is_empty(class) then [] else [("class", class)]
+      let label_text = if required do label ++ " *" else label end
+      let extra_attrs = if String.is_empty(class) do [] else [("class", class)] end
       let select_html = Form.select_tag(name, options, selected, extra_attrs)
       IOList.from_string(Form.field_tag(name, label_text, select_html, error))
     end
@@ -248,10 +249,11 @@ mod Form do
         Some(g) -> Gate.error_for(g, name)
         None    -> None
         end
-      let label_text = if required then label ++ " *" else label
+      let label_text = if required do label ++ " *" else label end
       let escaped_name = Html.escape(name)
-      let label_html = if String.is_empty(label_text) then ""
+      let label_html = if String.is_empty(label_text) do ""
                        else "<label for=\"" ++ escaped_name ++ "\">" ++ Html.escape(label_text) ++ "</label>"
+                       end
       let error_html = match error do
         None    -> ""
         Some(e) ->
@@ -289,7 +291,7 @@ mod Form do
   -- Naive implementation: finds the first ">" and inserts attrs before it,
   -- unless the tag is self-closing ("/>" ends it).
   pfn inject_aria(input_html : String, aria_attrs : String, name : String) : String do
-    if String.is_empty(aria_attrs) then input_html
+    if String.is_empty(aria_attrs) do input_html
     else
       match String.index_of(input_html, "/>") do
       Some(i) ->

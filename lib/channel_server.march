@@ -37,8 +37,10 @@
 mod Bastion.ChannelServer do
 
   import HttpServer
-  import Bastion.Channel as Channel
-  import Bastion.PubSub as PubSub
+  import Bastion.Channel
+  alias Bastion.Channel as Channel
+  import Bastion.PubSub
+  alias Bastion.PubSub as PubSub
   import Crypto
 
   -- ── Route type ────────────────────────────────────────────────────────────
@@ -111,7 +113,7 @@ mod Bastion.ChannelServer do
       HttpServer.plug(ChannelServer.plug_at("/socket/websocket", routes))
   """
   fn plug_at(path : String, routes : ChannelRoutes) do
-    fn conn ->
+    fn conn -> do
       if HttpServer.path(conn) == path do
         WebSocket.upgrade(conn, fn ws_sock ->
           let conn_id = Crypto.generate_token(16)

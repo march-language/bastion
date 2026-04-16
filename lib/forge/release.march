@@ -238,12 +238,12 @@ mod Forge.Release do
 
     let result =
       build_islands()
-      |> Result.and_then(fn _ -> build_binary(name, want_embed))
-      |> Result.and_then(fn _ ->
+      |> Result.flat_map(fn _ -> build_binary(name, want_embed))
+      |> Result.flat_map(fn _ ->
         if want_embed do Ok(())
         else copy_static(name)
         end)
-      |> Result.and_then(fn _ ->
+      |> Result.flat_map(fn _ ->
         if want_dockerfile do write_dockerfile(name, want_embed)
         else Ok(())
         end)

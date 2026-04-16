@@ -86,6 +86,15 @@ pfn opt_none(opt : Option(String)) : Bool do
   end
 end
 
+-- Helper: extract a Conn from Result(TypedConn(Authenticated), Conn).
+-- Used to inspect the conn returned by require_auth regardless of branch.
+pfn auth_result_conn(result) do
+  match result do
+  Ok(tc) -> unwrap(tc)
+  Err(c) -> c
+  end
+end
+
 -- ── Static.mime_type ──────────────────────────────────────────────
 
   fn test_mime_html() : Unit do
@@ -1090,39 +1099,39 @@ describe "TypedMiddleware.require_auth" do
     let conn   = make_get("/protected")
     let tc     = TypedMiddleware.wrap(conn) |> parse_body() |> load_session("")
     let result = require_auth(tc)
-    assert (HttpServer.halted(unwrap(result)))
+    assert (HttpServer.halted(auth_result_conn(result)))
   end
   test "halted conn has 401 status" do
     let conn   = make_get("/protected")
     let tc     = TypedMiddleware.wrap(conn) |> parse_body() |> load_session("")
     let result = require_auth(tc)
-    assert (HttpServer.status(unwrap(result)) == 401)
+    assert (HttpServer.status(auth_result_conn(result)) == 401)
   end
   test "returns non-halted conn when current_user_id is set" do
     let conn   = make_get("/protected")
-    let conn2  = set_current_user(conn, "42")
+    let conn2  = set_current_user_id(conn, "42")
     let tc     = TypedMiddleware.wrap(conn2) |> parse_body() |> load_session("")
     let result = require_auth(tc)
-    assert (not (HttpServer.halted(unwrap(result))))
+    assert (not (HttpServer.halted(auth_result_conn(result))))
   end
   test "authenticated conn preserves the path" do
     let conn   = make_get("/protected")
-    let conn2  = set_current_user(conn, "99")
+    let conn2  = set_current_user_id(conn, "99")
     let tc     = TypedMiddleware.wrap(conn2) |> parse_body() |> load_session("")
     let result = require_auth(tc)
-    assert (HttpServer.path(unwrap(result)) == "/protected")
+    assert (HttpServer.path(auth_result_conn(result)) == "/protected")
   end
 end
 
 describe "TypedMiddleware user helpers" do
   test "get_current_user_id returns None when not set" do
     let conn = make_get("/")
-    assert (opt_none(get_current_user_id(conn)))
+    assert (opt_none(HttpServer.get_assign(conn, "current_user_id")))
   end
-  test "set_current_user then get_current_user_id returns Some" do
+  test "set_current_user_id then get returns Some" do
     let conn  = make_get("/")
-    let conn2 = set_current_user(conn, "77")
-    assert (opt_eq(get_current_user_id(conn2), "77"))
+    let conn2 = set_current_user_id(conn, "77")
+    assert (opt_eq(HttpServer.get_assign(conn2, "current_user_id"), "77"))
   end
 end
 
@@ -1296,13 +1305,19 @@ describe "Router HTTP methods" do
     assert (HttpServer.status(out) == 204)
   end
   test "different methods on same path dispatch to correct handler" do
-    let router = Router.new()
-                 |> Router.get("/x",    fn conn -> HttpServer.text(conn, 200, "get"))
-                 |> Router.post("/x",   fn conn -> HttpServer.text(conn, 200, "post"))
-                 |> Router.delete("/x", fn conn -> HttpServer.text(conn, 200, "delete"))
-    assert (HttpServer.resp_body(Router.dispatch(router, make_get("/x")))               == "get")
-    assert (HttpServer.resp_body(Router.dispatch(router, make_post("/x", "")))           == "post")
-    assert (HttpServer.resp_body(Router.dispatch(router, make_method(:delete, "/x")))    == "delete")
+    -- Build a fresh router for each dispatch to avoid march 0.1.0 RC-reuse bug
+    -- (the same let-bound router cannot safely be passed to dispatch more than once).
+    let mk = fn _ignored ->
+      Router.new()
+      |> Router.get("/x",    fn conn -> HttpServer.text(conn, 200, "get"))
+      |> Router.post("/x",   fn conn -> HttpServer.text(conn, 200, "post"))
+      |> Router.delete("/x", fn conn -> HttpServer.text(conn, 200, "delete"))
+    let out_get    = Router.dispatch(mk(0), make_get("/x"))
+    let out_post   = Router.dispatch(mk(1), make_post("/x", ""))
+    let out_delete = Router.dispatch(mk(2), make_method(:delete, "/x"))
+    assert (HttpServer.resp_body(out_get)    == "get")
+    assert (HttpServer.resp_body(out_post)   == "post")
+    assert (HttpServer.resp_body(out_delete) == "delete")
   end
 end
 
@@ -1427,11 +1442,16 @@ describe "Router.scope" do
              |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "v1"))
     let v2 = Router.new()
              |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "v2"))
-    let router = Router.new()
-                 |> Router.scope("/api/v1", v1)
-                 |> Router.scope("/api/v2", v2)
-    assert (HttpServer.resp_body(Router.dispatch(router, make_get("/api/v1/ping"))) == "v1")
-    assert (HttpServer.resp_body(Router.dispatch(router, make_get("/api/v2/ping"))) == "v2")
+    -- Use let bindings to avoid march 0.1.0 RC-reuse bug when dispatching the
+    -- same router across multiple statements.
+    let mk = fn _i ->
+      Router.new()
+      |> Router.scope("/api/v1", Router.new() |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "v1")))
+      |> Router.scope("/api/v2", Router.new() |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "v2")))
+    let out_v1 = Router.dispatch(mk(0), make_get("/api/v1/ping"))
+    let out_v2 = Router.dispatch(mk(1), make_get("/api/v2/ping"))
+    assert (HttpServer.resp_body(out_v1) == "v1")
+    assert (HttpServer.resp_body(out_v2) == "v2")
   end
   test "scoped routes with params work" do
     let sub    = Router.new()
@@ -1449,50 +1469,61 @@ describe "Router.scope" do
   end
 end
 
+-- Helper: build a Router.to_plug for /ping and call it immediately.
+-- Returns the response Conn so callers never hold a let-bound reference
+-- to the plug itself — avoids the march 0.1.0 RC-underflow bug that
+-- occurs when a let-bound closure is freed and then its captured router's
+-- fields are also referenced by the already-computed `out` conn.
+pfn call_ping_plug(path_) do
+  let plug = Router.to_plug(
+    Router.new() |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "pong"))
+  )
+  plug(make_get(path_))
+end
+
 describe "Router.to_plug" do
   test "converts router to a Conn -> Conn function" do
-    let router = Router.new()
-                 |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "pong"))
-    let plug   = Router.to_plug(router)
-    let out    = plug(make_get("/ping"))
-    assert (HttpServer.status(out)    == 200)
-    assert (HttpServer.resp_body(out) == "pong")
+    assert (HttpServer.status(call_ping_plug("/ping"))    == 200)
+    assert (HttpServer.resp_body(call_ping_plug("/ping")) == "pong")
   end
   test "plug returns 404 for unmatched routes" do
-    let router = Router.new()
-                 |> Router.get("/ping", fn conn -> HttpServer.text(conn, 200, "pong"))
-    let plug   = Router.to_plug(router)
-    let out    = plug(make_get("/other"))
-    assert (HttpServer.status(out) == 404)
+    assert (HttpServer.status(call_ping_plug("/other")) == 404)
   end
+end
+
+-- Helper: dispatch a request through a request_id-aware router plug.
+-- Returns the Conn immediately so tests call this inline in assert expressions,
+-- avoiding let-bound `out` references across statement boundaries (RC bug).
+pfn call_request_id_plug(path_) do
+  let plug = Router.to_plug(
+    Router.new() |> Router.get("/", fn conn -> do
+      match HttpServer.get_assign(conn, "request_id") do
+      Some(_) -> HttpServer.text(conn, 200, "with-id")
+      None    -> HttpServer.text(conn, 200, "no-id")
+      end
+    end)
+  )
+  plug(request_id(make_get(path_)))
+end
+
+-- Helper: dispatch a pre-halted conn through a pipeline containing a router plug.
+pfn call_halted_pipeline(path_) do
+  let plug   = Router.to_plug(
+    Router.new() |> Router.get("/", fn conn -> HttpServer.text(conn, 200, "reached"))
+  )
+  let halted = HttpServer.send_resp(make_get(path_), 401, "Unauthorized")
+  pipeline(Cons(plug, Nil), halted)
 end
 
 describe "Router + Middleware integration" do
   test "request_id middleware assigns id before router sees conn" do
-    let router = Router.new()
-                 |> Router.get("/", fn conn -> do
-                      match HttpServer.get_assign(conn, "request_id") do
-                      Some(_) -> HttpServer.text(conn, 200, "with-id")
-                      None    -> HttpServer.text(conn, 200, "no-id")
-                      end
-                    end)
-    let plug   = Router.to_plug(router)
-    let conn   = make_get("/")
-    let out    = plug(request_id(conn))
-    assert (HttpServer.status(out)    == 200)
-    assert (HttpServer.resp_body(out) == "with-id")
+    assert (HttpServer.status(call_request_id_plug("/"))    == 200)
+    assert (HttpServer.resp_body(call_request_id_plug("/")) == "with-id")
   end
   test "halted conn is not dispatched to router by pipeline" do
-    let router = Router.new()
-                 |> Router.get("/", fn conn -> HttpServer.text(conn, 200, "reached"))
-    let plug   = Router.to_plug(router)
-    let conn   = make_get("/")
-    -- Pre-halt the conn
-    let halted = HttpServer.send_resp(conn, 401, "Unauthorized")
-    let out    = pipeline(Cons(plug, Nil), halted)
-    -- Router was not called; original response stands
-    assert (HttpServer.status(out)    == 401)
-    assert (HttpServer.resp_body(out) == "Unauthorized")
+    -- Router was not called; original 401 response stands
+    assert (HttpServer.status(call_halted_pipeline("/"))    == 401)
+    assert (HttpServer.resp_body(call_halted_pipeline("/")) == "Unauthorized")
   end
 end
 

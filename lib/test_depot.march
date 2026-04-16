@@ -22,7 +22,8 @@
 
 mod Bastion.Test.Depot do
 
-  import Depot.Test as DepotTest
+  import Depot.Test
+  alias Depot.Test as DepotTest
 
   doc """
   Start the Depot test sandbox. Call once before your test suite.

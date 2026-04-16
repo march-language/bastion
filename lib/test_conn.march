@@ -142,7 +142,7 @@ mod Bastion.Test.Conn do
   fn assert_header(conn, key : String, value : String) do
     let lower_key = String.downcase(key)
     let headers   = HttpServer.resp_headers(conn)
-    let found = List.any(headers, fn pair ->
+    let found = List.any(headers, fn pair -> do
       let (hk, hv) = pair
       String.downcase(hk) == lower_key && hv == value
     end)
@@ -234,7 +234,7 @@ mod Bastion.Test.Conn do
   fn get_resp_header(conn, key : String) : Option(String) do
     let lower_key = String.downcase(key)
     let headers   = HttpServer.resp_headers(conn)
-    List.find_map(headers, fn pair ->
+    List.find_map(headers, fn pair -> do
       let (hk, hv) = pair
       if String.downcase(hk) == lower_key do Some(hv) else None end
     end)
@@ -251,7 +251,7 @@ mod Bastion.Test.Conn do
   end
 
   doc "Return true if the response has been sent (status is non-zero)."
-  fn responded?(conn) : Bool do
+  fn responded(conn) : Bool do
     HttpServer.status(conn) != 0
   end
 
@@ -284,7 +284,7 @@ mod Bastion.Test.Conn do
   -- Encode a list of (key, value) pairs as a URL query string.
   -- e.g. [("page", "2"), ("limit", "10")] → "page=2&limit=10"
   pfn encode_query_params(params : List((String, String))) : String do
-    let parts = List.map(params, fn pair ->
+    let parts = List.map(params, fn pair -> do
       let (k, v) = pair
       url_encode(k) ++ "=" ++ url_encode(v)
     end)
@@ -295,7 +295,7 @@ mod Bastion.Test.Conn do
   -- Encodes spaces as %20 and common special chars.
   pfn url_encode(s : String) : String do
     String.chars(s)
-    |> List.map(fn c ->
+    |> List.map(fn c -> do
       if c == " " do "%20"
       else if c == "&" do "%26"
       else if c == "=" do "%3D"

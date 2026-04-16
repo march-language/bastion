@@ -61,7 +61,8 @@ mod BastionServer do
   fn spawn_n(router : Router, opts : Opts, n : Int) : Int do
     match opts do
     Opts(port, mc, it) -> do
-      let plug = fn conn -> run_after_send(Router.to_plug(router)(conn))
+      let router_plug = Router.to_plug(router)
+      let plug = fn conn -> run_after_send(router_plug(conn))
       HttpServer.new(port)
       |> HttpServer.max_connections(mc)
       |> HttpServer.idle_timeout(it)
@@ -89,7 +90,7 @@ mod BastionServer do
   --   "session_commit" — flushes the session cookie via Session.commit_from_conn
 
   pfn run_after_send(conn : Conn) : Conn do
-    List.fold_left(Conn.after_send_hooks(conn), conn, fn acc hook_key ->
+    List.fold_left(Conn.after_send_hooks(conn), conn, fn (acc, hook_key) ->
       dispatch_hook(acc, hook_key)
     )
   end

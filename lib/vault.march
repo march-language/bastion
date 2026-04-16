@@ -41,7 +41,7 @@
 
 mod Vault do
 
-  import Vault as StdVault
+  alias Vault as StdVault
 
   -- ── Table management ──────────────────────────────────────────────────────
 

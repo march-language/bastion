@@ -46,19 +46,16 @@ mod Bastion.JS do
 
   -- ── Types ──────────────────────────────────────────────────────────────────
 
-  doc """
-  An opaque handle to a JavaScript value held in the JS-side object table.
-  JsRef values are created by JS calls and must be passed back to JS for
-  further operations; they cannot be inspected from March code.
-
-  JsRef 0 is the null/undefined sentinel.
-  """
+  -- An opaque handle to a JavaScript value held in the JS-side object table.
+  -- JsRef values are created by JS calls and must be passed back to JS for
+  -- further operations; they cannot be inspected from March code.
+  -- JsRef 0 is the null/undefined sentinel.
   type JsRef = JsRef(Int)
 
-  doc "A typed variant of JsRef representing a DOM element."
+  -- A typed variant of JsRef representing a DOM element.
   type JsElement = JsElement(JsRef)
 
-  doc "A typed variant of JsRef representing a browser Event object."
+  -- A typed variant of JsRef representing a browser Event object.
   type JsEvent = JsEvent(JsRef)
 
   -- ── Value constructors ────────────────────────────────────────────────────
@@ -98,7 +95,7 @@ mod Bastion.JS do
   is null, or is undefined.
   """
   fn to_string(ref : JsRef) : Option(String) do
-    let JsRef(handle) = ref
+    let (JsRef(handle)) = ref
     if handle == 0 do None
     else _js_ref_to_string(ref)
     end
@@ -106,7 +103,7 @@ mod Bastion.JS do
 
   doc "Extract a number from a JsRef as an Int.  Returns None if not a number."
   fn to_int(ref : JsRef) : Option(Int) do
-    let JsRef(handle) = ref
+    let (JsRef(handle)) = ref
     if handle == 0 do None
     else _js_ref_to_int(ref)
     end
@@ -114,7 +111,7 @@ mod Bastion.JS do
 
   doc "Return true if the JsRef is null or undefined."
   fn is_null(ref : JsRef) : Bool do
-    let JsRef(handle) = ref
+    let (JsRef(handle)) = ref
     handle == 0
   end
 
@@ -167,7 +164,7 @@ mod Bastion.JS do
   """
   fn query_selector(selector : String) : Option(JsElement) do
     let ref = _js_query_selector(selector)
-    let JsRef(handle) = ref
+    let (JsRef(handle)) = ref
     if handle == 0 do None
     else Some(JsElement(ref))
     end
@@ -181,9 +178,9 @@ mod Bastion.JS do
       let cls = JS.get_attribute(el, "class")
   """
   fn get_attribute(el : JsElement, attr : String) : Option(String) do
-    let JsElement(ref) = el
-    let result = _js_get_attribute(ref, attr)
-    let JsRef(handle) = result
+    let (JsElement(el_ref)) = el
+    let result = _js_get_attribute(el_ref, attr)
+    let (JsRef(handle)) = result
     if handle == 0 do None
     else JS.to_string(result)
     end
@@ -196,8 +193,8 @@ mod Bastion.JS do
       JS.set_attribute(el, "disabled", "")
   """
   fn set_attribute(el : JsElement, attr : String, value : String) do
-    let JsElement(ref) = el
-    let _ = _js_set_attribute(ref, attr, value)
+    let (JsElement(el_ref)) = el
+    let _ = _js_set_attribute(el_ref, attr, value)
     ()
   end
 
@@ -207,8 +204,8 @@ mod Bastion.JS do
       JS.remove_attribute(el, "disabled")
   """
   fn remove_attribute(el : JsElement, attr : String) do
-    let JsElement(ref) = el
-    let _ = _js_remove_attribute(ref, attr)
+    let (JsElement(el_ref)) = el
+    let _ = _js_remove_attribute(el_ref, attr)
     ()
   end
 
@@ -224,8 +221,8 @@ mod Bastion.JS do
       end)
   """
   fn add_event_listener(el : JsElement, event_name : String, handler : JsEvent -> a) do
-    let JsElement(ref) = el
-    let _ = _js_add_event_listener(ref, event_name, handler)
+    let (JsElement(el_ref)) = el
+    let _ = _js_add_event_listener(el_ref, event_name, handler)
     ()
   end
 
@@ -235,8 +232,8 @@ mod Bastion.JS do
       let detail_str = JS.event_detail(ev) |> JS.to_string()
   """
   fn event_detail(ev : JsEvent) : JsRef do
-    let JsEvent(ref) = ev
-    _js_get_attribute(ref, "detail")
+    let (JsEvent(ev_ref)) = ev
+    _js_get_attribute(ev_ref, "detail")
   end
 
   -- ── Private FFI stubs ─────────────────────────────────────────────────────
@@ -244,60 +241,21 @@ mod Bastion.JS do
   -- These are wired to the WASM import table by wasm-bridge.js.
   -- They are not part of the public API — use the typed wrappers above.
 
-  pfn _js_call(func_path : String, args : List(JsRef)) : JsRef do
-    extern "bastion" "js_call"
-  end
-
-  pfn _js_global(prop_path : String) : JsRef do
-    extern "bastion" "js_global"
-  end
-
-  pfn _js_eval(js_code : String) : JsRef do
-    extern "bastion" "js_eval"
-  end
-
-  pfn _js_query_selector(selector : String) : JsRef do
-    extern "bastion" "js_query_selector"
-  end
-
-  pfn _js_get_attribute(ref : JsRef, attr : String) : JsRef do
-    extern "bastion" "js_get_attribute"
-  end
-
-  pfn _js_set_attribute(ref : JsRef, attr : String, value : String) : JsRef do
-    extern "bastion" "js_set_attribute"
-  end
-
-  pfn _js_remove_attribute(ref : JsRef, attr : String) : JsRef do
-    extern "bastion" "js_remove_attribute"
-  end
-
-  pfn _js_add_event_listener(ref : JsRef, event_name : String, handler) : JsRef do
-    extern "bastion" "js_add_event_listener"
-  end
-
-  pfn _js_string_to_ref(s : String) : JsRef do
-    extern "bastion" "js_string_to_ref"
-  end
-
-  pfn _js_int_to_ref(n : Int) : JsRef do
-    extern "bastion" "js_int_to_ref"
-  end
-
-  pfn _js_bool_to_ref(b : Bool) : JsRef do
-    extern "bastion" "js_bool_to_ref"
-  end
-
-  pfn _js_json_to_ref(json_str : String) : JsRef do
-    extern "bastion" "js_json_to_ref"
-  end
-
-  pfn _js_ref_to_string(ref : JsRef) : Option(String) do
-    extern "bastion" "js_ref_to_string"
-  end
-
-  pfn _js_ref_to_int(ref : JsRef) : Option(Int) do
-    extern "bastion" "js_ref_to_int"
+  extern "bastion": () do
+    fn _js_call(func_path : String, args : List(JsRef)) : JsRef
+    fn _js_global(prop_path : String) : JsRef
+    fn _js_eval(js_code : String) : JsRef
+    fn _js_query_selector(selector : String) : JsRef
+    fn _js_get_attribute(ref : JsRef, attr : String) : JsRef
+    fn _js_set_attribute(ref : JsRef, attr : String, value : String) : JsRef
+    fn _js_remove_attribute(ref : JsRef, attr : String) : JsRef
+    fn _js_add_event_listener(ref : JsRef, event_name : String, handler : JsEvent -> a) : JsRef
+    fn _js_string_to_ref(s : String) : JsRef
+    fn _js_int_to_ref(n : Int) : JsRef
+    fn _js_bool_to_ref(b : Bool) : JsRef
+    fn _js_json_to_ref(json_str : String) : JsRef
+    fn _js_ref_to_string(ref : JsRef) : Option(String)
+    fn _js_ref_to_int(ref : JsRef) : Option(Int)
   end
 
 end

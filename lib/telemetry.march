@@ -110,7 +110,7 @@ mod Bastion.Telemetry do
       let subscribed = List.any(subscriptions, fn sub_event ->
         events_match(sub_event, event_name)
       )
-      if subscribed do handler_fn(event_name, measurements, metadata) end
+      if subscribed do handler_fn(event_name, measurements, metadata) else () end
     )
   end
 

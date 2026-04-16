@@ -81,8 +81,7 @@ mod TypedMiddleware do
   end
 
   pfn parse_body_raw(conn) do
-    let body = HttpServer.req_body(conn)
-    HttpServer.assign(conn, "_body", body)
+    HttpServer.assign(conn, "_body", HttpServer.req_body(conn))
   end
 
   doc "Returns the request body string stored by parse_body."
@@ -113,9 +112,8 @@ mod TypedMiddleware do
   end
 
   pfn load_session_raw(conn, secret_key_base) do
-    let raw    = extract_session_cookie(conn)
-    let payload = verify_and_decode(raw, secret_key_base)
-    HttpServer.assign(conn, "_session", payload)
+    HttpServer.assign(conn, "_session",
+      verify_and_decode(extract_session_cookie(conn), secret_key_base))
   end
 
   doc """
@@ -171,7 +169,7 @@ mod TypedMiddleware do
       None     -> None
       Some(id) -> match loader(conn, id) do
         Ok(u)  -> Some(u)
-        Error(_) -> None
+        Err(_) -> None
         end
     end
     TypedConn(HttpServer.assign(conn, "current_user", user))
@@ -196,14 +194,14 @@ mod TypedMiddleware do
     end
   """
   fn require_auth(tc : TypedConn(WithSession)) : Result(TypedConn(Authenticated), Conn) do
-    match HttpServer.get_assign(unwrap(tc), "current_user") do
-    Some(_) -> Ok(TypedConn(unwrap(tc)))
+    let raw = unwrap(tc)
+    match HttpServer.get_assign(raw, "current_user_id") do
+    Some(_) -> Ok(TypedConn(raw))
     None    ->
-      let conn = unwrap(tc)
-                 |> HttpServer.put_resp_header("location", "/login")
-                 |> HttpServer.send_resp(302, "")
-                 |> HttpServer.halt()
-      Error(conn)
+      match HttpServer.get_assign(raw, "current_user") do
+      Some(_) -> Ok(TypedConn(raw))
+      None    -> Err(raw |> HttpServer.send_resp(401, "Unauthorized") |> HttpServer.halt())
+      end
     end
   end
 
@@ -217,7 +215,7 @@ mod TypedMiddleware do
   fn authenticated(tc : TypedConn(WithSession), handler) : Conn do
     match require_auth(tc) do
     Ok(authed)     -> handler(authed)
-    Error(halted)  -> halted
+    Err(halted)  -> halted
     end
   end
 

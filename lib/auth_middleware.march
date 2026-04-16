@@ -86,7 +86,7 @@ mod Auth do
         Some(id) ->
           match loader(conn, id) do
           Ok(u)    -> Some(u)
-          Error(_) -> None   -- user deleted or invalid
+          Err(_) -> None   -- user deleted or invalid
           end
         end
       end
@@ -114,7 +114,7 @@ mod Auth do
       Some(_) -> true
       None    -> false
       end
-    if has_session_user then
+    if has_session_user do
       load_current_user(conn, loader)
     else
       -- Try the remember-me cookie
@@ -122,7 +122,7 @@ mod Auth do
       None -> HttpServer.assign(conn, current_user_assign, None)
       Some(token) ->
         match remember_verifier(conn, token) do
-        Error(_) ->
+        Err(_) ->
           -- Expired or invalid token — clear the stale cookie
           let conn2 = HttpServer.assign(conn, current_user_assign, None)
           Conn.delete_resp_cookie(conn2, remember_me_cookie)
@@ -179,7 +179,7 @@ mod Auth do
         |> HttpServer.put_resp_header("location", "/login")
         |> HttpServer.send_resp(302, "")
         |> HttpServer.halt()
-      Error(halted)
+      Err(halted)
     end
   end
 
@@ -196,7 +196,7 @@ mod Auth do
   fn authenticated(conn, handler) do
     match require_auth(conn) do
     Ok(authed)   -> handler(authed)
-    Error(halted) -> halted
+    Err(halted) -> halted
     end
   end
 
