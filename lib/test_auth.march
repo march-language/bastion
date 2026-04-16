@@ -1,0 +1,100 @@
+-- lib/test_auth.march — Bastion.Test.Auth
+--
+-- Test helpers for authentication. Provides `log_in_user/2` to inject a
+-- session into a test conn without going through the full HTTP auth flow.
+--
+-- Usage in a test:
+--
+--   let conn = Test.build_conn(:get, "/dashboard")
+--   let conn2 = Bastion.Test.Auth.log_in_user(conn, user)
+--   -- conn2 has the session set as if the user logged in via the login form
+--   let conn3 = MyApp.Router.route(conn2)
+--   Test.assert_eq_int(Conn.status(conn3), 200, "dashboard requires auth")
+--
+-- This mirrors Phoenix's conn |> log_in_user(user) pattern.
+--
+-- Note: `log_in_user` calls `Auth.log_in/2` which clears the session and
+-- writes `current_user_id`.  Pass a secret_key_base so that Session.load/2
+-- can later verify the cookie — use the same value as your test app config.
+
+mod Bastion.Test.Auth do
+
+  import Auth
+  import Session
+  import Conn
+
+  -- Default test secret (not used in production — for test conn signing only)
+  let test_secret = "test_secret_key_base_for_development_testing_only_do_not_use_in_prod"
+
+  doc """
+  Log a user into a test conn.
+
+  Calls Auth.log_in/2 with the user's id, then loads the session cookie into
+  the conn assigns so that downstream middleware (Auth.load_current_user) can
+  read the session without a round-trip through the cookie jar.
+
+  Pass the same secret_key_base you pass to Session.load/2 in your router.
+  If you don't pass one, a default test secret is used.
+
+      let conn2 = Bastion.Test.Auth.log_in_user(conn, user)
+      -- or with a custom secret:
+      let conn2 = Bastion.Test.Auth.log_in_user_with_secret(conn, user, app_secret)
+  """
+  fn log_in_user(conn, user) do
+    log_in_user_with_secret(conn, user, test_secret)
+  end
+
+  doc """
+  Log a user into a test conn using the given secret key base.
+
+  Use this if your application uses a custom secret_key_base so that the
+  session signing matches what Session.load/2 will verify.
+
+      let conn2 = Bastion.Test.Auth.log_in_user_with_secret(conn, user, app_secret)
+  """
+  fn log_in_user_with_secret(conn, user, secret) do
+    -- Load the session first (initialises the session state on the conn)
+    let conn2 = Session.load(conn, secret)
+    -- Use Auth.log_in to write the user_id (clears session, sets current_user_id)
+    let conn3 = Auth.log_in(conn2, user.id)
+    -- Commit the session so the cookie is written to assigns immediately
+    Session.commit_from_conn(conn3)
+  end
+
+  doc """
+  Return true if the given conn has a logged-in user session.
+
+      if Bastion.Test.Auth.logged_in?(conn) do ... end
+  """
+  fn logged_in?(conn) do
+    match Session.get(conn, "current_user_id") do
+    Some(_) -> true
+    None    -> false
+    end
+  end
+
+  doc """
+  Assert that the conn is a redirect to the login page.
+  Panics with msg if not.
+
+      Bastion.Test.Auth.assert_redirects_to_login(conn, "unauthenticated access should redirect")
+  """
+  fn assert_redirects_to_login(conn, msg) do
+    let status = Conn.status(conn)
+    let location = Conn.get_resp_header(conn, "location")
+    if status != 302 do
+      panic("Assertion failed: " ++ msg ++ " (expected 302 redirect, got " ++ int_to_string(status) ++ ")")
+    else ()
+    end
+    match location do
+    None ->
+      panic("Assertion failed: " ++ msg ++ " (302 but no location header)")
+    Some(loc) ->
+      if loc != "/login" && loc != "/users/log_in" do
+        panic("Assertion failed: " ++ msg ++ " (redirected to " ++ loc ++ ", expected /login or /users/log_in)")
+      else ()
+      end
+    end
+  end
+
+end
