@@ -89,7 +89,7 @@ Specced and queued. Roughly priority order within each group.
 - [x] `forge dev` live reload — `lib/dev.march`: `Bastion.Dev.live_reload` plug serves `/_bastion/reload` WebSocket (drop on restart triggers browser reload) + `/_bastion/live-reload.js` client; `live_reload_tag()` returns script tag for layouts; `dev_env?()` detects MARCH_ENV
 - [ ] Dev error overlay in-browser ([dev-experience.md](dev-experience.md), [error-handling.md](error-handling.md)) — needs March try/catch or framework-level panic handler
 - [x] Hot deploy / connection draining — `lib/health.march`: `Bastion.Health.plug` serves `GET /health`; `start_drain()`/`draining?()` Vault-backed drain flag; `plug_with_checks/2` runs custom probes; 503 on drain
-- [ ] `forge dev` dashboard ([dev-experience.md](dev-experience.md))
+- [x] `forge dev` dashboard — `lib/metrics.march` (`Bastion.Metrics`): `instrument/1` timing wrapper + `record/1` plug, `summary()`, Vault ring buffer; `lib/dev.march` extended with `dashboard` plug serving `/_bastion` HTML page with request stats and recent request log
 - [ ] Embedded asset size limits — determine threshold for `--embed-assets` ([open-questions.md](open-questions.md) §8)
 
 ### Generators

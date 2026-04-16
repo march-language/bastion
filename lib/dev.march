@@ -27,6 +27,7 @@
 mod Bastion.Dev do
 
   import HttpServer
+  import Bastion.Metrics
 
   -- ── Environment ───────────────────────────────────────────────────────────
 
@@ -183,6 +184,92 @@ mod Bastion.Dev do
       println("  " ++ k ++ ": " ++ v)
     )
     conn
+  end
+
+  -- ── Dev Dashboard ─────────────────────────────────────────────────────────
+
+  doc """
+  Plug that serves a dev dashboard at /_bastion.
+
+  Shows live request metrics (from Bastion.Metrics), Vault table stats,
+  and recent request log.
+
+  Add this to your dev pipeline before the router:
+
+      let c = Bastion.Dev.dashboard(conn)
+  """
+  fn dashboard(conn) do
+    let path = HttpServer.path(conn)
+    if path == "/_bastion" || path == "/_bastion/" do
+      serve_dashboard(conn)
+    else
+      conn
+    end
+  end
+
+  pfn serve_dashboard(conn) do
+    let s       = Bastion.Metrics.summary()
+    let total   = String.from_int(s.total)
+    let errors  = String.from_int(s.errors)
+    let avg_ms  = String.from_int(s.avg_ms)
+    let rows    = render_recent(s.recent)
+    let html =
+      "<!DOCTYPE html><html lang='en'><head>" ++
+      "<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>" ++
+      "<title>Bastion Dev Dashboard</title>" ++
+      "<style>" ++
+      "body{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:1rem;color:#1a1a1a;}" ++
+      "h1{color:#7c3aed;margin:0 0 .5rem}" ++
+      ".stats{display:flex;gap:2rem;margin:1.5rem 0;}" ++
+      ".stat{background:#f5f3ff;border-radius:8px;padding:.75rem 1.25rem;}" ++
+      ".stat .label{font-size:.75rem;color:#6b7280;text-transform:uppercase;letter-spacing:.05em}" ++
+      ".stat .value{font-size:1.5rem;font-weight:700;color:#7c3aed}" ++
+      ".stat.error .value{color:#dc2626}" ++
+      "table{width:100%;border-collapse:collapse;font-size:.875rem;}" ++
+      "th{text-align:left;padding:.5rem .75rem;border-bottom:2px solid #e5e7eb;color:#6b7280;font-weight:600}" ++
+      "td{padding:.4rem .75rem;border-bottom:1px solid #f3f4f6;}" ++
+      ".method{font-weight:600;color:#059669}" ++
+      ".status-ok{color:#059669}.status-err{color:#dc2626}.status-red{color:#f97316}" ++
+      "footer{margin-top:2rem;color:#9ca3af;font-size:.8rem}" ++
+      "</style></head><body>" ++
+      "<h1>Bastion Dev Dashboard</h1>" ++
+      "<div class='stats'>" ++
+      "  <div class='stat'><div class='label'>Requests</div><div class='value'>" ++ total ++ "</div></div>" ++
+      "  <div class='stat error'><div class='label'>Errors (5xx)</div><div class='value'>" ++ errors ++ "</div></div>" ++
+      "  <div class='stat'><div class='label'>Avg Response</div><div class='value'>" ++ avg_ms ++ "ms</div></div>" ++
+      "</div>" ++
+      "<h2>Recent Requests</h2>" ++
+      "<table><thead><tr><th>Method</th><th>Path</th><th>Status</th><th>Duration</th></tr></thead>" ++
+      "<tbody>" ++ rows ++ "</tbody></table>" ++
+      "<footer>Bastion · MARCH_ENV=dev</footer>" ++
+      "</body></html>"
+    HttpServer.put_resp_header(conn, "content-type", "text/html; charset=utf-8")
+    |> HttpServer.put_resp_header("cache-control", "no-store")
+    |> HttpServer.send_resp(200, html)
+  end
+
+  pfn render_recent(entries : List(Bastion.Metrics.RequestEntry)) : String do
+    let reversed = List.reverse(entries)
+    let rows     = List.map(reversed, fn e ->
+      let status_class = if e.status >= 500 do "status-err"
+                         else if e.status >= 400 do "status-red"
+                         else "status-ok"
+                         end
+      let dur = if e.duration == 0 do "—" else String.from_int(e.duration) ++ "ms" end
+      "<tr>" ++
+      "<td class='method'>" ++ html_escape(e.method) ++ "</td>" ++
+      "<td>" ++ html_escape(e.path) ++ "</td>" ++
+      "<td class='" ++ status_class ++ "'>" ++ String.from_int(e.status) ++ "</td>" ++
+      "<td>" ++ dur ++ "</td>" ++
+      "</tr>"
+    )
+    String.join(rows, "")
+  end
+
+  pfn html_escape(s : String) : String do
+    let s1 = String.replace_all(s, "&", "&amp;")
+    let s2 = String.replace_all(s1, "<", "&lt;")
+    String.replace_all(s2, ">", "&gt;")
   end
 
 end
