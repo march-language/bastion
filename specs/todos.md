@@ -61,7 +61,7 @@ Specced and queued. Roughly priority order within each group.
 - [x] Security headers middleware — `lib/security_headers.march`; `SecurityHeaders.defaults/1` (x-frame-options, x-content-type-options, x-xss-protection, referrer-policy, permissions-policy, COOP, COEP); `hsts/2`; `csp_base/1`, `csp_with_ws/2`
 - [x] CORS middleware — `lib/cors.march`; `Cors.allow/2` with `CorsConfig` record; `config/1`, `config_open/0`, `config_credentialed/1`; handles preflight (OPTIONS) and credentialed requests
 - [ ] `forge gen.auth token / oauth / magic_link` — post-v1 auth strategies ([auth.md](auth.md))
-- [ ] Vault full API — bags, ordered sets, bulk ops; after core Vault (Step 7) ships ([vault.md](vault.md))
+- [x] Vault full API — added `get_and_delete/2` (atomic read+remove), `select/2` (filter all entries by predicate), `clear/1` (empty table); core `put/get/delete/put_new/update/has/size/keys/all/ns_*` already complete
 - [ ] Vault/Depot session backends — alternative to cookie sessions ([auth-session-database.md](auth-session-database.md))
 - [x] HTTP ETag + response caching — `lib/cache.march`; `Cache.etag_from/2` (SHA-256 + 304 short-circuit), `Cache.etag/2` (explicit tag), `Cache.cache_control/2`, `Cache.cached/4` (Vault-backed full response cache), `Cache.invalidate/1`, `Cache.invalidate_prefix/1`
 - [x] Fragment caching — `lib/cache.march`; `Cache.fragment/3` (Vault-backed string fragment cache), `Cache.invalidate_fragment/1`
