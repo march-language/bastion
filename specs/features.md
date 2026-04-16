@@ -51,20 +51,27 @@ Full specs exist. Implementation is queued but not yet started.
 - Reversible routing / route helpers — typed path helpers, compile-time dead-link detection ([route-verification.md](route-verification.md))
 
 ### Middleware & Security
-- CSRF protection — double-submit cookie pattern ([security.md](security.md))
+- CSRF protection — token lifecycle, `protect`, `tag_string`, `skip` ([auth-session-database.md](auth-session-database.md) Layer 5, [security.md](security.md))
 - Security headers middleware — HSTS, X-Frame-Options, etc. ([security.md](security.md))
 - CORS middleware ([security.md](security.md))
-- Rate limiting ([security.md](security.md))
+- Rate limiting — sliding window, `x-ratelimit-*` headers, Vault-backed ([auth-session-database.md](auth-session-database.md) Layer 5b, [security.md](security.md))
 - CSP auto-generation from resource usage ([csp.md](csp.md), [open-questions.md](open-questions.md))
 
 ### Auth & Sessions
-- Session middleware (cookie-based and Depot-backed) ([auth.md](auth.md))
-- Auth generators — `forge gen.auth` for session/token/OAuth/magic_link ([auth.md](auth.md), [generators.md](generators.md))
-- Auth middleware (plug-in authentication pipeline) ([auth.md](auth.md))
+- Cookie helpers (`get_req_cookie`, `put_resp_cookie`, `after_send`) ([auth-session-database.md](auth-session-database.md) Layer 0)
+- Crypto module — AES-256-GCM, HMAC-SHA256, HKDF, Argon2id, SHA-256, CSPRNG ([auth-session-database.md](auth-session-database.md) Layer 1)
+- Session middleware — cookie-backed with real crypto, auto-commit, `_session_dirty` tracking ([auth-session-database.md](auth-session-database.md) Layer 3, [auth.md](auth.md))
+- Flash messages — one-time session values for UI feedback ([auth-session-database.md](auth-session-database.md) Layer 3)
+- Auth middleware — `load_current_user`, `require_auth` (Result gate), `authenticated` sugar, `log_in`, `log_out` ([auth-session-database.md](auth-session-database.md) Layer 6, [auth.md](auth.md))
+- Remember-me tokens — hashed, DB-backed, 60-day persistent login ([auth-session-database.md](auth-session-database.md) Layer 6)
+- Password reset — single-use tokens, 1-hour expiry, session invalidation on change ([auth-session-database.md](auth-session-database.md) Layer 6)
+- `forge gen.auth session` — full auth scaffold (users + user_tokens migrations, Accounts, AuthController, templates, router patch, rate limiting) ([auth-session-database.md](auth-session-database.md) Layer 7)
+- Depot session / Vault session backends — post-v1 ([auth-session-database.md](auth-session-database.md))
+- `forge gen.auth token / oauth / magic_link` — post-v1 ([auth.md](auth.md), [generators.md](generators.md))
 
 ### Storage
-- Vault — in-memory ETS-style key-value store with TTL ([vault.md](vault.md))
-- Depot integration — pool middleware, context modules, migrations ([depot-integration.md](depot-integration.md))
+- Vault — in-memory KV actor, TTL sweeper (core: `put/get/delete/put_new`) ([auth-session-database.md](auth-session-database.md) Layer 3b, [vault.md](vault.md))
+- Depot integration — pool middleware, `after_send` checkin, context modules, migrations ([auth-session-database.md](auth-session-database.md) Layer 2, [depot-integration.md](depot-integration.md))
 - Caching — ETags, response caching, fragment caching ([caching.md](caching.md))
 
 ### Templates & Styling

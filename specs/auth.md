@@ -2,6 +2,8 @@
 
 **Status**: Draft | **Version**: 0.1 | **Part of**: [Bastion Design Spec](README.md)
 
+> **See [auth-session-database.md](auth-session-database.md)** for the full implementation plan — this file is a high-level overview. auth-session-database.md has the build sequence, pinned API decisions, detailed March code, flash messages, remember-me tokens, password reset, rate limiting, error handling, security checklist, and end-to-end example.
+
 ---
 
 ## Session System
