@@ -79,12 +79,12 @@ Specced and designed but not yet fully implemented. These are the active build a
 
 | Feature | Spec | Status | Blocker |
 |---------|------|--------|---------|
-| `~H` templates | [templates.md](templates.md) | Design complete, not implemented | Needs `Html`/`IOList` runtime modules (triple-quoted sigil parsing already works) |
-| `.march.html` template files | [template-file-format.md](template-file-format.md) | All layers implemented | Triple-quoted `~H` sigils work; `[preprocessors]` in forge; `.march.spans` sidecar in compiler; lowering pass + runtime in Bastion |
-| WASM island compilation | [wasm-islands.md](wasm-islands.md) | Near-complete | Compiler target done; JS runtime ~95% done. Remaining: deferred hydration strategies (lazy/idle/on-visible/on-interaction) + `march_island_msg_from_name` wiring |
-| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete | Depends on `~H` templates; WASM compiler blocker resolved |
-| Channels / WebSocket | [channels.md](channels.md) | Server + PubSub implemented | Client-side island integration depends on `~H` templates |
-| CSP nonce injection | [csp.md](csp.md) | Draft spec | Depends on `~H` for automatic nonce injection |
+| `~H` templates | [templates.md](templates.md) | Runtime modules done (`html.march`, `io_list.march`, `css.march`); template lowering pass + `bastion lower` CLI done; sigil parsing works | Needs compiler `~H` pass to lower templates at compile time; `.march.spans` sidecar for error reporting not yet in compiler |
+| `.march.html` template files | [template-file-format.md](template-file-format.md) | All Bastion layers implemented | `.march.spans` sidecar support needs March compiler change (span map for error line reporting); otherwise all done |
+| WASM island compilation | [wasm-islands.md](wasm-islands.md) | **JS runtime complete** | All JS-side work done (hydration strategies, `march_island_msg_from_name`, Cmd executor, FFI layer, public API); pending: end-to-end integration test |
+| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete; server-side (ChannelServer, PubSub, Channel) and JS client runtime done | Bastion.Cmd + islands-data-flow runtime path needs `~H` templates for server-driven rendering |
+| Channels / WebSocket | [channels.md](channels.md) | Server + PubSub + test helpers fully implemented | Client-side channel hook in islands depends on `~H` templates for Server-mode island rendering |
+| CSP nonce injection | [csp.md](csp.md) | Draft spec | Depends on `~H` compiler pass for automatic nonce injection |
 | Route verification | [route-verification.md](route-verification.md) | Draft spec | Needs compiler integration for route helper generation |
 
 ---
