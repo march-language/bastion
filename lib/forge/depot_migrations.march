@@ -1,0 +1,25 @@
+-- lib/forge/depot_migrations.march — forge bastion.depot.migrations
+--
+-- Displays the status of all known Depot migrations: which have been
+-- applied (up) and which are pending (down).
+--
+-- Usage:
+--   forge bastion.depot.migrations
+--
+-- Delegates to CmdDepot.migrations() from the Depot library.
+
+mod Forge.DepotMigrations do
+
+  import CmdDepot
+
+  fn main() do
+    match CmdDepot.migrations() do
+    Ok(_)    -> ()
+    Err(msg) -> do
+      println("Error: " ++ msg)
+      Process.exit(1)
+    end
+    end
+  end
+
+end

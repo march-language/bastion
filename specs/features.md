@@ -41,6 +41,7 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Rate limiting | `rate_limit.march` | Sliding window via Vault; `check/5` → `Ok|Error`; `limit/5` pipeline helper; `ip_key`; `x-ratelimit-*` + `retry-after` headers; 429 on exceed |
 | Depot integration | `depot_middleware.march`, `forge.toml` | Depot declared as dep; `with_pool` checks out conn + registers "pool_checkin" hook; `get_conn`/`get_pool`; auto-checkin after send |
 | Depot SQL queries | Depot repo `depot_query.march` | `where_eq/ne/gt/lt/gte/lte/like/ilike/is_null/is_not_null`; `to_sql`/`to_params`; `exec_sql` (exec_prepared + row→assoc-list); `count_sql` |
+| Depot migration CLI | `forge/depot_migrate.march`, `depot_rollback.march`, `depot_migrations.march`, `depot_reset.march` | `forge bastion.depot.migrate/rollback/migrations/reset` — thin wrappers over `CmdDepot.*` from Depot lib; migration files in `priv/depot/migrations/`, log in `.march/depot/migrations.log` |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---

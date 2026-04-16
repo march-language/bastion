@@ -1,0 +1,38 @@
+-- lib/forge/depot_rollback.march — forge bastion.depot.rollback
+--
+-- Rolls back the last N Depot migrations (default: 1).
+--
+-- Usage:
+--   forge bastion.depot.rollback           # roll back last 1 migration
+--   forge bastion.depot.rollback 3         # roll back last 3 migrations
+--
+-- Delegates to CmdDepot.rollback(n) from the Depot library.
+
+mod Forge.DepotRollback do
+
+  import CmdDepot
+
+  fn main() do
+    let raw  = Env.get("FORGE_TASK_ARGS", "")
+    let step = match raw do
+      "" -> 1
+      s  ->
+        match string_to_int(String.trim(s)) do
+        Some(n) -> n
+        None    -> do
+          println("Usage: forge bastion.depot.rollback [N]")
+          println("  N  number of migrations to roll back (default 1)")
+          Process.exit(1)
+        end
+        end
+    end
+    match CmdDepot.rollback(step) do
+    Ok(_)    -> ()
+    Err(msg) -> do
+      println("Error: " ++ msg)
+      Process.exit(1)
+    end
+    end
+  end
+
+end
