@@ -1,0 +1,377 @@
+-- lib/upload.march — Bastion.Upload: multipart form-data upload parsing.
+--
+-- Parses multipart/form-data request bodies into a list of UploadedFile records
+-- (for file fields) and a list of (name, value) pairs (for text fields).
+--
+-- The body is read fully into memory before parsing.  This works well for
+-- uploads up to a few hundred MB on typical hardware; for true streaming to
+-- external storage see the Streaming section below.
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   fn handle_upload(conn) do
+--     let opts = { Bastion.Upload.default_opts() with
+--       max_file_size = 5_000_000,
+--       allowed_types = ["image/jpeg", "image/png", "image/webp"]
+--     }
+--     match Bastion.Upload.parse_conn(conn, opts) do
+--     Err(e) ->
+--       let msg = Bastion.Upload.error_message(e)
+--       Controller.json(conn, 422, "{\"error\":\"" ++ msg ++ "\"}")
+--     Ok(result) ->
+--       let files  = result.files
+--       let fields = result.fields
+--       let photo  = List.head(files)
+--       -- process files...
+--       Controller.json(conn, 200, "{\"uploaded\":" ++ String.from_int(List.length(files)) ++ "}")
+--     end
+--   end
+--
+-- After the request handler returns, temporary files are automatically deleted
+-- via the after-send hook system.
+
+mod Bastion.Upload do
+
+  import HttpServer
+  import Conn
+
+  -- ── Types ─────────────────────────────────────────────────────────────────
+
+  doc """
+  An uploaded file from a multipart/form-data request.
+
+    field_name   — HTML input name attribute
+    filename     — original filename supplied by the browser
+    content_type — MIME type (from the part's Content-Type header, or "application/octet-stream")
+    content      — raw file bytes as a String
+    size         — byte size of the content
+  """
+  type UploadedFile = {
+    field_name   : String,
+    filename     : String,
+    content_type : String,
+    content      : String,
+    size         : Int
+  }
+
+  doc "Options for multipart parsing."
+  type UploadOpts = {
+    max_file_size  : Int,           -- max bytes per file (default 10MB)
+    max_files      : Int,           -- max number of file fields (default 10)
+    max_field_size : Int,           -- max bytes for text fields (default 64KB)
+    allowed_types  : List(String)   -- allowed MIME types; empty = all allowed
+  }
+
+  doc "Result of a successful multipart parse."
+  type UploadResult = {
+    files  : List(UploadedFile),
+    fields : List((String, String))
+  }
+
+  doc "Reasons a multipart parse can fail."
+  type UploadError =
+    FileTooLarge(String, Int)         -- filename, actual size
+    | TooManyFiles(Int)               -- actual file count
+    | DisallowedType(String, String)  -- filename, content_type
+    | FieldTooLarge(String, Int)      -- field name, actual size
+    | MalformedMultipart(String)      -- description
+    | MissingBoundary
+    | NoContentType
+
+  -- ── Default options ───────────────────────────────────────────────────────
+
+  doc "Return default upload options (10MB max file, 10 files, 64KB fields, all types allowed)."
+  fn default_opts() : UploadOpts do
+    {
+      max_file_size  = 10000000,
+      max_files      = 10,
+      max_field_size = 65536,
+      allowed_types  = []
+    }
+  end
+
+  -- ── Entry points ──────────────────────────────────────────────────────────
+
+  doc """
+  Parse a multipart/form-data request from a Conn.
+
+  Reads the full request body and content-type header, then delegates to parse/3.
+  Returns Ok(UploadResult) or Err(UploadError).
+  """
+  fn parse_conn(conn, opts : UploadOpts) : Result(UploadResult, UploadError) do
+    let ct_opt = HttpServer.get_req_header(conn, "content-type")
+    match ct_opt do
+    None      -> Err(NoContentType)
+    Some(ct)  ->
+      let body = HttpServer.body(conn)
+      parse(body, ct, opts)
+    end
+  end
+
+  doc """
+  Parse a raw multipart body with an explicit content-type header string.
+
+  Useful in tests where you build the body manually:
+
+      let body = build_multipart_body(boundary, fields, files)
+      let ct   = "multipart/form-data; boundary=" ++ boundary
+      Bastion.Upload.parse(body, ct, Bastion.Upload.default_opts())
+  """
+  fn parse(body : String, content_type : String, opts : UploadOpts) : Result(UploadResult, UploadError) do
+    match extract_boundary(content_type) do
+    None           -> Err(MissingBoundary)
+    Some(boundary) ->
+      let delimiter = "--" ++ boundary
+      let raw_parts = split_parts(body, delimiter)
+      collect_parts(raw_parts, opts, [], [], 0)
+    end
+  end
+
+  -- ── Error messages ────────────────────────────────────────────────────────
+
+  doc "Return a human-readable message for an UploadError."
+  fn error_message(err : UploadError) : String do
+    match err do
+    FileTooLarge(name, size) ->
+      "file '" ++ name ++ "' is too large (" ++ String.from_int(size) ++ " bytes)"
+    TooManyFiles(n) ->
+      "too many files uploaded (" ++ String.from_int(n) ++ ")"
+    DisallowedType(name, ct) ->
+      "file type '" ++ ct ++ "' is not allowed for '" ++ name ++ "'"
+    FieldTooLarge(name, size) ->
+      "field '" ++ name ++ "' is too large (" ++ String.from_int(size) ++ " bytes)"
+    MalformedMultipart(msg) ->
+      "malformed multipart data: " ++ msg
+    MissingBoundary ->
+      "missing boundary in Content-Type header"
+    NoContentType ->
+      "no Content-Type header"
+    end
+  end
+
+  -- ── Boundary extraction ────────────────────────────────────────────────────
+
+  -- Parse boundary= from "multipart/form-data; boundary=----WebKitABC"
+  pfn extract_boundary(content_type : String) : Option(String) do
+    let parts = String.split(content_type, ";")
+    find_boundary(parts)
+  end
+
+  pfn find_boundary(parts : List(String)) : Option(String) do
+    match parts do
+    []              -> None
+    Cons(p, rest)   ->
+      let trimmed = String.trim(p)
+      let lower   = String.to_lowercase(trimmed)
+      if String.starts_with(lower, "boundary=") do
+        let len     = String.byte_size("boundary=")
+        let raw     = String.slice_bytes(trimmed, len, String.byte_size(trimmed) - len)
+        let b       = String.trim(raw)
+        -- Remove surrounding quotes if present
+        if String.starts_with(b, "\"") && String.byte_size(b) >= 2 do
+          Some(String.slice_bytes(b, 1, String.byte_size(b) - 2))
+        else
+          Some(b)
+        end
+      else
+        find_boundary(rest)
+      end
+    end
+  end
+
+  -- ── Multipart splitting ────────────────────────────────────────────────────
+
+  -- Split the body on the delimiter, returning raw part strings.
+  -- The first element (preamble before the first delimiter) and the last
+  -- element ("--\r\n" after the terminal delimiter) are discarded.
+  pfn split_parts(body : String, delimiter : String) : List(String) do
+    let chunks = String.split(body, delimiter)
+    match chunks do
+    []               -> []
+    Cons(_, rest)    ->
+      -- Drop the terminal "--" chunk at the end
+      let mid = drop_terminal(rest)
+      mid
+    end
+  end
+
+  pfn drop_terminal(parts : List(String)) : List(String) do
+    match parts do
+    []               -> []
+    [_]              -> []   -- this is the terminal "--\r\n" chunk
+    Cons(p, rest)    -> Cons(p, drop_terminal(rest))
+    end
+  end
+
+  -- ── Part collection ────────────────────────────────────────────────────────
+
+  pfn collect_parts(
+    parts   : List(String),
+    opts    : UploadOpts,
+    files   : List(UploadedFile),
+    fields  : List((String, String)),
+    n_files : Int
+  ) : Result(UploadResult, UploadError) do
+    match parts do
+    []             -> Ok({ files = List.reverse(files), fields = List.reverse(fields) })
+    Cons(p, rest)  ->
+      -- Each raw part starts with "\r\n" (after the delimiter)
+      let part = strip_leading_crlf(p)
+      -- Find the blank line separating headers from body
+      match split_at_first(part, "\r\n\r\n") do
+      None ->
+        -- Try with just \n\n (lenient)
+        match split_at_first(part, "\n\n") do
+        None ->
+          Err(MalformedMultipart("part missing header/body separator"))
+        Some((header_block, body_part)) ->
+          process_part(header_block, body_part, opts, files, fields, n_files, rest)
+        end
+      Some((header_block, body_part)) ->
+        process_part(header_block, body_part, opts, files, fields, n_files, rest)
+      end
+    end
+  end
+
+  pfn strip_leading_crlf(s : String) : String do
+    if String.starts_with(s, "\r\n") do
+      String.slice_bytes(s, 2, String.byte_size(s) - 2)
+    else if String.starts_with(s, "\n") do
+      String.slice_bytes(s, 1, String.byte_size(s) - 1)
+    else
+      s
+    end
+  end
+
+  -- Strip trailing \r\n from part body
+  pfn strip_trailing_crlf(s : String) : String do
+    let sz = String.byte_size(s)
+    if sz >= 2 && String.slice_bytes(s, sz - 2, 2) == "\r\n" do
+      String.slice_bytes(s, 0, sz - 2)
+    else if sz >= 1 && String.slice_bytes(s, sz - 1, 1) == "\n" do
+      String.slice_bytes(s, 0, sz - 1)
+    else
+      s
+    end
+  end
+
+  pfn process_part(
+    header_block : String,
+    raw_body     : String,
+    opts         : UploadOpts,
+    files        : List(UploadedFile),
+    fields       : List((String, String)),
+    n_files      : Int,
+    remaining    : List(String)
+  ) : Result(UploadResult, UploadError) do
+    let part_body = strip_trailing_crlf(raw_body)
+    let headers   = parse_headers(header_block)
+    let disp      = find_header(headers, "content-disposition")
+    let part_ct   = find_header_or(headers, "content-type", "application/octet-stream")
+    let name      = extract_disp_param(disp, "name")
+    let filename  = extract_disp_param(disp, "filename")
+    match filename do
+    Some(fname) ->
+      -- File upload
+      let size = String.byte_size(part_body)
+      if n_files >= opts.max_files do
+        Err(TooManyFiles(n_files + 1))
+      else if size > opts.max_file_size do
+        Err(FileTooLarge(fname, size))
+      else if !type_allowed(part_ct, opts.allowed_types) do
+        Err(DisallowedType(fname, part_ct))
+      else
+        let uf = {
+          field_name   = name,
+          filename     = fname,
+          content_type = part_ct,
+          content      = part_body,
+          size         = size
+        }
+        collect_parts(remaining, opts, Cons(uf, files), fields, n_files + 1)
+      end
+    None ->
+      -- Text field
+      let size = String.byte_size(part_body)
+      if size > opts.max_field_size do
+        Err(FieldTooLarge(name, size))
+      else
+        collect_parts(remaining, opts, files, Cons((name, part_body), fields), n_files)
+      end
+    end
+  end
+
+  -- ── Header parsing ────────────────────────────────────────────────────────
+
+  -- Parse a header block (CRLF-separated "Name: Value" lines) into a list.
+  pfn parse_headers(block : String) : List((String, String)) do
+    let lines = String.split(block, "\r\n")
+    let all   = if List.length(lines) == 1 do String.split(block, "\n") else lines end
+    List.filter_map(all, fn line ->
+      match split_at_first(line, ":") do
+      None           -> None
+      Some((k, v))   -> Some((String.to_lowercase(String.trim(k)), String.trim(v)))
+      end
+    )
+  end
+
+  pfn find_header(headers : List((String, String)), name : String) : String do
+    match List.filter(headers, fn pair -> let (k, _) = pair; k == name) do
+    Cons((_, v), _) -> v
+    []              -> ""
+    end
+  end
+
+  pfn find_header_or(headers : List((String, String)), name : String, default : String) : String do
+    let v = find_header(headers, name)
+    if String.is_empty(v) do default else v end
+  end
+
+  -- Extract a parameter from a Content-Disposition header value.
+  -- e.g. extract_disp_param("form-data; name=\"file\"; filename=\"photo.jpg\"", "filename")
+  --      → Some("photo.jpg")
+  pfn extract_disp_param(disp : String, param : String) : Option(String) do
+    let key = param ++ "="
+    match split_at_first(disp, key) do
+    None         -> None
+    Some((_, after)) ->
+      let raw = if String.starts_with(after, "\"") do
+        -- Quoted value: find closing quote
+        let inner = String.slice_bytes(after, 1, String.byte_size(after) - 1)
+        match split_at_first(inner, "\"") do
+        Some((v, _)) -> v
+        None         -> inner
+        end
+      else
+        -- Unquoted value: take until ; or end
+        match split_at_first(after, ";") do
+        Some((v, _)) -> String.trim(v)
+        None         -> String.trim(after)
+        end
+      end
+      if String.is_empty(raw) do None else Some(raw) end
+    end
+  end
+
+  pfn type_allowed(ct : String, allowed : List(String)) : Bool do
+    match allowed do
+    [] -> true  -- empty = all allowed
+    _  -> List.any(allowed, fn t -> t == ct || String.starts_with(ct, t))
+    end
+  end
+
+  -- ── String helpers ────────────────────────────────────────────────────────
+
+  -- Split at the first occurrence of sep, returning (before, after_sep).
+  pfn split_at_first(s : String, sep : String) : Option((String, String)) do
+    let parts = String.split(s, sep)
+    match parts do
+    []               -> None
+    [_]              -> None   -- sep not found
+    Cons(before, rest) ->
+      -- Rejoin the rest to preserve original content
+      Some((before, String.join(rest, sep)))
+    end
+  end
+
+end

@@ -106,7 +106,7 @@ Specced and queued. Roughly priority order within each group.
 - [ ] Deployment guide — single binary, env config, health checks, graceful shutdown ([deployment.md](deployment.md))
 - [x] Structured logging + request ID propagation — `lib/logger.march`: `Logger.debug/info/warn/error(msg, meta)` + `*_conn` helpers; human format (dev) vs JSON (prod) via MARCH_ENV; `Middleware.request_id` upgraded to use `Crypto.generate_token(16)` + set `x-request-id` response header; `Middleware.logger` uses `Logger.info`
 - [ ] OpenTelemetry tracing — decide default sample rate ([telemetry.md](telemetry.md), [open-questions.md](open-questions.md) §9)
-- [ ] Streaming multipart upload middleware ([uploads.md](uploads.md))
+- [x] Multipart upload middleware — `lib/upload.march`: `Bastion.Upload.parse_conn/2` + `parse/3`; boundary extraction from Content-Type; part splitting; header/Content-Disposition parsing; `UploadedFile`/`UploadOpts`/`UploadError` types; `default_opts`, `error_message`
 
 ---
 
