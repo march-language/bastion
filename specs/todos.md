@@ -52,7 +52,7 @@ Specced and queued. Roughly priority order within each group.
 
 ### WASM / Islands
 - [x] Deferred hydration strategies in `march-islands.js` — `data-march-hydrate="lazy|idle|interaction|on-visible"`; `_hydrateOne(el)` extracted from discoverIslands; `_scheduleHydration(el, strategy)` dispatches to: `lazy` (window load event or setTimeout), `idle` (requestIdleCallback + Safari fallback), `interaction` (once/capture on click/focus/keypress/touch/pointer), `on-visible` (shared IntersectionObserver with 10% threshold)
-- [ ] Wire `march_island_msg_from_name` in `wasm-bridge.js` — currently the runtime passes JSON message strings directly; should use the exported name-based variant constructor for zero-field enum messages
+- [x] Wire `march_island_msg_from_name` in `wasm-bridge.js` — `_buildMsgPtr()` uses `march_island_msg_from_name(ptr, len)` for zero-field enum messages (plain string or `{tag: "Name"}`); falls back to JSON string for payloaded messages or when export is absent
 - [ ] End-to-end island integration test — compile a simple island to WASM, serve it, verify hydration and state update round-trip in a browser
 - [ ] `forge gen.island` generator
 - [ ] WASM actor runtime — green threads / mailboxes in WASM target. Decide: per-island instance or shared cooperative scheduling ([open-questions.md](open-questions.md) §5) — post-v1
