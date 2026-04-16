@@ -9,6 +9,8 @@
 mod Middleware do
 
   import HttpServer
+  import Logger
+  import Crypto
 
   doc """
   Execute a list of plugs in order, stopping when the conn is halted.
@@ -40,29 +42,45 @@ mod Middleware do
   doc """
   Logging middleware.
 
-  Logs the request method and path on every request using Logger.info.
+  Logs the request method, path, and request_id on every request using
+  Logger.info. Call this after request_id/1 in your pipeline so the
+  request_id is available.
+
+  Note: response status and timing are not logged here because they are
+  not yet known when this middleware runs. For full request/response logging
+  use the Logger.info_conn helper in your handler or after-send hook.
   """
   fn logger(conn : Conn) : Conn do
     let method_str = HttpServer.method_to_string(HttpServer.method(conn))
     let path_str   = HttpServer.path(conn)
-    println("${method_str} ${path_str}")
+    let rid        = match HttpServer.get_assign(conn, "request_id") do
+      Some(id) -> id
+      None     -> ""
+      end
+    let meta = if rid == "" then [("path", path_str)]
+               else [("path", path_str), ("request_id", rid)]
+               end
+    Logger.info(method_str ++ " " ++ path_str, meta)
     conn
   end
 
   doc """
   Request ID middleware.
 
-  Assigns a unique request ID to the conn under the "request_id" key.
-  If the incoming request has an "x-request-id" header its value is used;
-  otherwise a fresh ID is generated.
+  Reads the incoming x-request-id header if present; otherwise generates a
+  fresh cryptographically random 16-byte hex ID.  Assigns the ID under the
+  "request_id" key and echoes it back as an x-request-id response header so
+  clients and proxies can correlate log entries.
   """
   fn request_id(conn : Conn) : Conn do
     let existing = HttpServer.get_req_header(conn, "x-request-id")
     let id = match existing do
       Some(v) -> v
-      None    -> generate_id(conn)
+      None    -> Crypto.generate_token(16)
       end
-    HttpServer.assign(conn, "request_id", id)
+    conn
+    |> HttpServer.assign("request_id", id)
+    |> HttpServer.put_resp_header("x-request-id", id)
   end
 
   doc "Sets a default content-type response header of text/html if none has been set."
@@ -163,11 +181,5 @@ mod Middleware do
   end
 
   -- ── Internal helpers ──────────────────────────────────────────────
-
-  -- IDs are unique per request: fd is unique per open connection, ts gives ordering.
-  pfn generate_id(conn : Conn) : String do
-    let fd = HttpServer.fd(conn)
-    "req-" ++ int_to_string(fd)
-  end
 
 end

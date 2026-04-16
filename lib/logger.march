@@ -1,0 +1,234 @@
+-- lib/logger.march — Logger
+--
+-- Structured logging for Bastion applications.
+--
+-- Output format is determined by the MARCH_ENV environment variable:
+--   dev / development / test → human-readable  HH:MM:SS.mmm [level] message  key=value ...
+--   prod / production        → JSON one-liner  {"ts":"…","level":"…","msg":"…", …}
+--
+-- Metadata is a flat list of (key, value) string pairs. Include the
+-- request_id from the conn assigns to tie log entries to requests:
+--
+--   let rid = match HttpServer.get_assign(conn, "request_id") do
+--     Some(id) -> id | None -> "" end
+--   Logger.info("user registered", [("request_id", rid), ("email", email)])
+--
+-- In request handlers, prefer the convenience helpers that accept a conn
+-- and read the request_id automatically:
+--
+--   Logger.info_conn(conn, "user registered", [("email", email)])
+
+mod Logger do
+
+  -- ── Level type ───────────────────────────────────────────────────────────────
+
+  type Level = Debug | Info | Warn | Error
+
+  pfn level_to_string(level) do
+    match level do
+    Debug -> "debug"
+    Info  -> "info"
+    Warn  -> "warn"
+    Error -> "error"
+    end
+  end
+
+  pfn level_to_ansi(level) do
+    match level do
+    Debug -> "\027[36m"   -- cyan
+    Info  -> "\027[32m"   -- green
+    Warn  -> "\027[33m"   -- yellow
+    Error -> "\027[31m"   -- red
+    end
+  end
+
+  let ansi_reset = "\027[0m"
+
+  -- ── Format detection ─────────────────────────────────────────────────────────
+
+  pfn is_json_env() do
+    match Process.env("MARCH_ENV") do
+    None       -> false
+    Some(env)  ->
+      let e = String.to_lowercase(env)
+      e == "prod" || e == "production"
+    end
+  end
+
+  -- ── Timestamp ────────────────────────────────────────────────────────────────
+
+  -- Format unix_time_ms as HH:MM:SS.mmm (UTC approximation without stdlib date)
+  pfn format_time_human(ms) do
+    let total_secs = ms / 1000
+    let millis     = ms - (total_secs * 1000)
+    let secs       = total_secs mod 60
+    let mins       = (total_secs / 60) mod 60
+    let hours      = (total_secs / 3600) mod 24
+    pad2(hours) ++ ":" ++ pad2(mins) ++ ":" ++ pad2(secs) ++ "." ++ pad3(millis)
+  end
+
+  pfn pad2(n) do
+    if n < 10 then "0" ++ int_to_string(n) else int_to_string(n) end
+  end
+
+  pfn pad3(n) do
+    if n < 10 then "00" ++ int_to_string(n)
+    else if n < 100 then "0" ++ int_to_string(n)
+    else int_to_string(n)
+    end
+  end
+
+  -- ── Human format ─────────────────────────────────────────────────────────────
+  --
+  --   12:34:56.789 [info]  message  key=value  key2=value2
+
+  pfn format_human(level, msg, meta) do
+    let ts    = format_time_human(unix_time_ms(()))
+    let color = level_to_ansi(level)
+    let lvl   = "[" ++ level_to_string(level) ++ "]"
+    let base  = ts ++ " " ++ color ++ lvl ++ ansi_reset ++ " " ++ msg
+    match meta do
+    Nil -> base
+    _   ->
+      let kv = build_kv_pairs(meta, "")
+      base ++ "  " ++ kv
+    end
+  end
+
+  pfn build_kv_pairs(meta, acc) do
+    match meta do
+    Nil -> acc
+    Cons((k, v), rest) ->
+      let pair = k ++ "=" ++ v
+      let next = if acc == "" then pair else acc ++ "  " ++ pair end
+      build_kv_pairs(rest, next)
+    end
+  end
+
+  -- ── JSON format ──────────────────────────────────────────────────────────────
+  --
+  --   {"ts":"12:34:56.789","level":"info","msg":"message","key":"value"}
+
+  pfn format_json(level, msg, meta) do
+    let ts  = format_time_human(unix_time_ms(()))
+    let lvl = level_to_string(level)
+    let base_fields =
+      "\"ts\":\"" ++ ts ++ "\","
+      ++ "\"level\":\"" ++ lvl ++ "\","
+      ++ "\"msg\":" ++ json_string(msg)
+    let extra = build_json_fields(meta, "")
+    "{" ++ base_fields ++ extra ++ "}"
+  end
+
+  pfn build_json_fields(meta, acc) do
+    match meta do
+    Nil -> acc
+    Cons((k, v), rest) ->
+      let field = ",\"" ++ json_escape(k) ++ "\":" ++ json_string(v)
+      build_json_fields(rest, acc ++ field)
+    end
+  end
+
+  pfn json_string(s) do
+    "\"" ++ json_escape(s) ++ "\""
+  end
+
+  pfn json_escape(s) do
+    -- Escape backslash, double-quote, and common control chars
+    String.replace(
+      String.replace(
+        String.replace(
+          String.replace(s, "\\", "\\\\"),
+          "\"", "\\\""),
+        "\n", "\\n"),
+      "\t", "\\t")
+  end
+
+  -- ── Core log function ────────────────────────────────────────────────────────
+
+  pfn log(level, msg, meta) do
+    let line =
+      if is_json_env() then format_json(level, msg, meta)
+      else format_human(level, msg, meta)
+    println(line)
+  end
+
+  -- ── Public API ───────────────────────────────────────────────────────────────
+
+  doc """
+  Log at DEBUG level. Typically suppressed in production.
+
+      Logger.debug("cache miss", [("key", key)])
+  """
+  fn debug(msg, meta) do
+    log(Debug, msg, meta)
+  end
+
+  doc """
+  Log at INFO level. Normal operational events.
+
+      Logger.info("request complete", [("status", "200"), ("path", "/users")])
+  """
+  fn info(msg, meta) do
+    log(Info, msg, meta)
+  end
+
+  doc """
+  Log at WARN level. Unexpected but recoverable situations.
+
+      Logger.warn("slow query", [("duration_ms", "1200")])
+  """
+  fn warn(msg, meta) do
+    log(Warn, msg, meta)
+  end
+
+  doc """
+  Log at ERROR level. Errors that should be investigated.
+
+      Logger.error("db checkout failed", [("pool", "main")])
+  """
+  fn error(msg, meta) do
+    log(Error, msg, meta)
+  end
+
+  -- ── Conn convenience helpers ─────────────────────────────────────────────────
+  --
+  -- These pull request_id from the conn assigns automatically.
+
+  pfn request_id_from_conn(conn) do
+    match HttpServer.get_assign(conn, "request_id") do
+    Some(id) -> id
+    None     -> ""
+    end
+  end
+
+  doc """
+  Log INFO with the request_id from conn prepended to meta.
+
+      Logger.info_conn(conn, "user created", [("email", email)])
+  """
+  fn info_conn(conn, msg, meta) do
+    let rid = request_id_from_conn(conn)
+    let full_meta = if rid == "" then meta else Cons(("request_id", rid), meta) end
+    log(Info, msg, full_meta)
+  end
+
+  doc """
+  Log WARN with the request_id from conn prepended to meta.
+  """
+  fn warn_conn(conn, msg, meta) do
+    let rid = request_id_from_conn(conn)
+    let full_meta = if rid == "" then meta else Cons(("request_id", rid), meta) end
+    log(Warn, msg, full_meta)
+  end
+
+  doc """
+  Log ERROR with the request_id from conn prepended to meta.
+  """
+  fn error_conn(conn, msg, meta) do
+    let rid = request_id_from_conn(conn)
+    let full_meta = if rid == "" then meta else Cons(("request_id", rid), meta) end
+    log(Error, msg, full_meta)
+  end
+
+end

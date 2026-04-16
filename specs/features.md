@@ -49,6 +49,8 @@ These features have corresponding code in `lib/` and are usable today (within th
 | CORS middleware | `cors.march` | `Cors.allow/2` + `CorsConfig` record; `config/1`, `config_open/0`, `config_credentialed/1`; handles preflight (OPTIONS), origin matching, vary header, credentials |
 | Deferred island hydration | `priv/js/march-islands.js` | `data-march-hydrate` strategies: `lazy` (window load), `idle` (requestIdleCallback), `interaction` (first click/focus/key), `on-visible` (IntersectionObserver 10%); `_hydrateOne` + `_scheduleHydration` refactor |
 | WASM msg fast path | `priv/js/wasm-bridge.js` | `_buildMsgPtr()` uses `march_island_msg_from_name` for zero-field enum messages (plain string / `{tag:…}`); JSON fallback for payloaded variants or missing export |
+| Structured logging | `logger.march` | `Logger.debug/info/warn/error(msg, meta)` + `*_conn/3` helpers; human format `HH:MM:SS.mmm [level] msg  k=v` (dev) or JSON one-liner (prod) via MARCH_ENV |
+| Request ID middleware | `middleware.march` | `Middleware.request_id` upgraded: `Crypto.generate_token(16)` for new IDs, echoes `x-request-id` response header; `Middleware.logger` uses `Logger.info` with request_id in meta |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---
