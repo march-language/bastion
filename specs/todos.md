@@ -100,6 +100,7 @@ Specced and queued. Roughly priority order within each group.
 
 ### Testing
 - [x] Channel testing helpers — `lib/test_channel.march`: `join/3`, `push/4`, `intercept/1`, `assert_broadcast/3`, `refute_broadcast/3`, `captured_broadcasts/1`, `assert_assign/3`
+- [x] HTTP test conn builder — `lib/test_conn.march`: `build_conn/2,3`; `put_req_header/body/cookie`, `put_query_params`; `authenticate_as`, `with_api_token`; `assert_status`, `assert_header`, `assert_html_contains`, `assert_redirected_to`, `assert_json`; requires `HttpServer.test_conn/2` stdlib primitive
 - [ ] Island integration tests (SSR + update, no WASM) ([testing.md](testing.md))
 
 ### Operations

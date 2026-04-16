@@ -1,0 +1,311 @@
+-- lib/test_conn.march — Bastion.Test.Conn: HTTP request simulation helpers.
+--
+-- Builds fake HttpServer.Conn values for in-process request testing.
+-- No HTTP server is started; the pipeline runs synchronously in the test process.
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   import Bastion.Test.Conn
+--
+--   fn test "GET / returns the home page"() do
+--     let conn =
+--       build_conn("GET", "/")
+--       |> MyApp.Router.call()
+--     assert_status(conn, 200)
+--     assert_html_contains(conn, "Welcome")
+--   end
+--
+--   fn test "POST /login checks credentials"() do
+--     let conn =
+--       build_conn("POST", "/login")
+--       |> put_req_header("content-type", "application/json")
+--       |> put_req_body("{\"email\":\"a@b.com\",\"password\":\"secret\"}")
+--       |> MyApp.Router.call()
+--     assert_status(conn, 200)
+--   end
+--
+-- ── Dependencies ───────────────────────────────────────────────────────────────
+--
+--   Requires HttpServer.test_conn/2 from the March stdlib for constructing
+--   a fake Conn without a live TCP socket.
+
+mod Bastion.Test.Conn do
+
+  import HttpServer
+
+  -- ── Conn construction ─────────────────────────────────────────────────────
+
+  doc """
+  Build a simulated request conn with the given method and path.
+
+  method — uppercase HTTP method string: "GET", "POST", "PUT", "DELETE", etc.
+  path   — URL path, e.g. "/users/42" or "/api/data?page=1"
+
+      let conn = build_conn("GET", "/users")
+      let conn = build_conn("POST", "/api/items")
+  """
+  fn build_conn(method : String, path : String) do
+    HttpServer.test_conn(String.upcase(method), path)
+  end
+
+  doc """
+  Build a simulated request conn with method, path, and an initial body.
+  Sets Content-Length automatically.
+
+      let conn = build_conn("POST", "/submit", "name=Alice&email=a@b.com")
+  """
+  fn build_conn(method : String, path : String, body : String) do
+    build_conn(method, path)
+    |> put_req_body(body)
+  end
+
+  -- ── Request mutators ──────────────────────────────────────────────────────
+
+  doc """
+  Set a request header on the conn.  key is normalised to lower-case.
+
+      conn |> put_req_header("accept", "application/json")
+      conn |> put_req_header("Authorization", "Bearer abc123")
+  """
+  fn put_req_header(conn, key : String, value : String) do
+    HttpServer.put_req_header(conn, String.downcase(key), value)
+  end
+
+  doc """
+  Set the raw request body.  Also sets Content-Length to the byte length.
+
+      conn |> put_req_body("{\"name\":\"Alice\"}")
+  """
+  fn put_req_body(conn, body : String) do
+    let len = String.length(body)
+    conn
+    |> HttpServer.put_req_body(body)
+    |> HttpServer.put_req_header("content-length", String.from_int(len))
+  end
+
+  doc """
+  Add a cookie to the Cookie request header.
+  Appends to any existing Cookie header value with `; ` separator.
+
+      conn |> put_req_cookie("session_id", "abc123")
+      conn |> put_req_cookie("remember_me", "1")
+  """
+  fn put_req_cookie(conn, name : String, value : String) do
+    let cookie_pair = name ++ "=" ++ value
+    let existing = HttpServer.get_req_header(conn, "cookie")
+    let cookie_value = match existing do
+      None         -> cookie_pair
+      Some(prev)   -> prev ++ "; " ++ cookie_pair
+    end
+    HttpServer.put_req_header(conn, "cookie", cookie_value)
+  end
+
+  doc """
+  Append query parameters to the conn's query string.
+
+  params — list of (key, value) string pairs
+
+      conn |> put_query_params([("page", "2"), ("limit", "20")])
+  """
+  fn put_query_params(conn, params : List((String, String))) do
+    let qs = encode_query_params(params)
+    HttpServer.put_query_string(conn, qs)
+  end
+
+  -- ── Response assertions ───────────────────────────────────────────────────
+
+  doc """
+  Assert the response status code equals `expected`.  Returns conn for chaining.
+
+      assert_status(conn, 200)
+      assert_status(conn, 404)
+  """
+  fn assert_status(conn, expected : Int) do
+    let actual = HttpServer.status(conn)
+    if actual != expected do
+      panic(
+        "assert_status failed: expected "
+        ++ String.from_int(expected)
+        ++ " but got "
+        ++ String.from_int(actual)
+      )
+    else conn end
+  end
+
+  doc """
+  Assert a response header is present and equals `value`.  Returns conn for chaining.
+  Header name comparison is case-insensitive.
+
+      assert_header(conn, "content-type", "application/json")
+      assert_header(conn, "location", "/users/1")
+  """
+  fn assert_header(conn, key : String, value : String) do
+    let lower_key = String.downcase(key)
+    let headers   = HttpServer.resp_headers(conn)
+    let found = List.any(headers, fn pair ->
+      let (hk, hv) = pair
+      String.downcase(hk) == lower_key && hv == value
+    end)
+    if not(found) do
+      panic(
+        "assert_header failed: expected header \""
+        ++ key ++ ": " ++ value ++ "\" not found in response"
+      )
+    else conn end
+  end
+
+  doc """
+  Assert the response body contains the given substring.  Returns conn for chaining.
+  Useful for checking HTML fragments without full-string comparisons.
+
+      assert_html_contains(conn, "Welcome")
+      assert_html_contains(conn, "<h1>Hello</h1>")
+  """
+  fn assert_html_contains(conn, text : String) do
+    let body = HttpServer.resp_body(conn)
+    if not(String.contains(body, text)) do
+      panic("assert_html_contains failed: response body does not contain \"" ++ text ++ "\"")
+    else conn end
+  end
+
+  doc """
+  Assert the response is a redirect to `path`.  Accepts 301, 302, 303, 307, 308.
+  Checks both the status code and the Location header.  Returns conn for chaining.
+
+      assert_redirected_to(conn, "/login")
+      assert_redirected_to(conn, "/users/1")
+  """
+  fn assert_redirected_to(conn, path : String) do
+    let status = HttpServer.status(conn)
+    let is_redirect =
+      status == 301 || status == 302 || status == 303
+      || status == 307 || status == 308
+    if not(is_redirect) do
+      panic(
+        "assert_redirected_to failed: expected redirect status (3xx) but got "
+        ++ String.from_int(status)
+      )
+    else
+      let location = get_resp_header(conn, "location")
+      match location do
+      None ->
+        panic("assert_redirected_to failed: no Location header in response")
+      Some(loc) ->
+        if loc != path do
+          panic(
+            "assert_redirected_to failed: expected Location \""
+            ++ path ++ "\" but got \"" ++ loc ++ "\""
+          )
+        else conn end
+      end
+    end
+  end
+
+  doc """
+  Assert the response has Content-Type: application/json and the body equals
+  the given JSON string.  Returns conn for chaining.
+
+  For partial matching, use assert_html_contains instead (it works on any body).
+
+      assert_json(conn, "{\"status\":\"ok\"}")
+  """
+  fn assert_json(conn, expected_json : String) do
+    let ct = get_resp_header(conn, "content-type")
+    let _ = match ct do
+      None ->
+        panic("assert_json failed: no content-type header in response")
+      Some(v) ->
+        if not(String.contains(v, "application/json")) do
+          panic("assert_json failed: content-type is \"" ++ v ++ "\", not application/json")
+        else () end
+    end
+    let body = HttpServer.resp_body(conn)
+    if body != expected_json do
+      panic(
+        "assert_json failed: expected body \""
+        ++ expected_json ++ "\" but got \"" ++ body ++ "\""
+      )
+    else conn end
+  end
+
+  -- ── Response introspection ────────────────────────────────────────────────
+
+  doc "Return the value of a response header, or None if absent."
+  fn get_resp_header(conn, key : String) : Option(String) do
+    let lower_key = String.downcase(key)
+    let headers   = HttpServer.resp_headers(conn)
+    List.find_map(headers, fn pair ->
+      let (hk, hv) = pair
+      if String.downcase(hk) == lower_key do Some(hv) else None end
+    end)
+  end
+
+  doc "Return the response status code."
+  fn resp_status(conn) : Int do
+    HttpServer.status(conn)
+  end
+
+  doc "Return the response body string."
+  fn resp_body(conn) : String do
+    HttpServer.resp_body(conn)
+  end
+
+  doc "Return true if the response has been sent (status is non-zero)."
+  fn responded?(conn) : Bool do
+    HttpServer.status(conn) != 0
+  end
+
+  -- ── Auth helpers ──────────────────────────────────────────────────────────
+
+  doc """
+  Inject a session cookie identifying `user_id` — simulates a logged-in user.
+  Works with Bastion.Session; the session is written into the Cookie header.
+
+      conn |> authenticate_as(user.id)
+  """
+  fn authenticate_as(conn, user_id : String) do
+    -- Write the user_id into the session via Session module
+    let conn_with_session = Bastion.Session.put(conn, "current_user_id", user_id)
+    -- Commit session to set the cookie header
+    Bastion.Session.commit(conn_with_session)
+  end
+
+  doc """
+  Set a Bearer token in the Authorization request header.
+
+      conn |> with_api_token("my-api-token-abc")
+  """
+  fn with_api_token(conn, token : String) do
+    put_req_header(conn, "authorization", "Bearer " ++ token)
+  end
+
+  -- ── Private helpers ───────────────────────────────────────────────────────
+
+  -- Encode a list of (key, value) pairs as a URL query string.
+  -- e.g. [("page", "2"), ("limit", "10")] → "page=2&limit=10"
+  pfn encode_query_params(params : List((String, String))) : String do
+    let parts = List.map(params, fn pair ->
+      let (k, v) = pair
+      url_encode(k) ++ "=" ++ url_encode(v)
+    end)
+    String.join(parts, "&")
+  end
+
+  -- Percent-encode characters that are not safe in query strings.
+  -- Encodes spaces as %20 and common special chars.
+  pfn url_encode(s : String) : String do
+    String.chars(s)
+    |> List.map(fn c ->
+      if c == " " do "%20"
+      else if c == "&" do "%26"
+      else if c == "=" do "%3D"
+      else if c == "+" do "%2B"
+      else if c == "#" do "%23"
+      else if c == "?" do "%3F"
+      else if c == "%" do "%25"
+      else c end end end end end end end
+    end)
+    |> String.concat()
+  end
+
+end
