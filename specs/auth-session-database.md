@@ -420,14 +420,39 @@ end
 
 The `loader` function is injected by the application — Bastion does not know the shape of `User`. `forge gen.auth session` wires this up automatically.
 
-### `require_auth` and typed conn state transitions
+### `require_auth` is a gate, not a pipeline step
 
-`require_auth` transitions `WithSession → Authenticated`. If the user is not authenticated, it halts and redirects — the `Authenticated` branch is unreachable. The type system needs to be satisfied even in the halted branch. Two options:
+The typed pipeline models *linear* state transitions. Auth is a *branch* — either proceed authenticated or short-circuit. Forcing a branch into a linear state machine requires lying to the type checker, which the original stub did.
 
-1. `TypedMiddleware.coerce_authenticated(conn)` — an explicit unsafe cast that only compiles if `halted(conn) == true`. The type checker cannot enforce this currently; it's a documentation-level contract.
-2. Redesign: `require_auth` returns `Result(TypedConn(Authenticated), TypedConn(WithSession))` — callers match on it. More explicit but more verbose.
+**The correct design splits the two concerns:**
 
-**Recommendation: option 1 for now, option 2 post-v1.** Document the limitation. A halted conn never reaches downstream middleware regardless of phantom type, so the unsafety is contained.
+- **`load_current_user`** belongs in the pipeline. It is a soft check: reads the user ID from the session, loads the user from the database, assigns it to `conn`. Never halts. State stays `WithSession`.
+- **`require_auth`** is a gate called inside the route handler. It returns `Result(TypedConn(Authenticated), Conn)`. Callers use `with` to handle both branches.
+
+```march
+-- In the pipeline (soft, never halts):
+fn load_current_user(tc: TypedConn(WithSession), loader: (Conn, Int) -> Result(User, Any))
+    : TypedConn(WithSession)
+
+-- Gate called inside handlers (returns Result, never unsafe-casts):
+fn require_auth(tc: TypedConn(WithSession)) : Result(TypedConn(Authenticated), Conn)
+
+-- Sugar for the common case:
+fn authenticated(tc: TypedConn(WithSession), handler: (TypedConn(Authenticated)) -> Conn) : Conn
+```
+
+Call sites use `with` or the `authenticated` helper:
+
+```march
+fn handle_dashboard(conn: Conn) : Conn do
+  let tc = wrap(conn) |> parse_body() |> load_session(secret) |> load_current_user(db)
+  authenticated(tc, fn tc ->
+    Dashboard.render(tc, get_current_user(tc)) |> unwrap()
+  end)
+end
+```
+
+The continuation is only ever called with a genuinely `Authenticated` conn. No unsafe casts anywhere. The `Error` branch of `require_auth` carries a plain `Conn` (not a `TypedConn`) because it is a finished halted response that needs no further type tracking.
 
 ---
 
