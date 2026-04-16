@@ -104,7 +104,7 @@ Specced and queued. Roughly priority order within each group.
 
 ### Operations
 - [ ] Deployment guide — single binary, env config, health checks, graceful shutdown ([deployment.md](deployment.md))
-- [ ] Structured logging + request ID propagation ([logging-observability.md](logging-observability.md))
+- [x] Structured logging + request ID propagation — `lib/logger.march`: `Logger.debug/info/warn/error(msg, meta)` + `*_conn` helpers; human format (dev) vs JSON (prod) via MARCH_ENV; `Middleware.request_id` upgraded to use `Crypto.generate_token(16)` + set `x-request-id` response header; `Middleware.logger` uses `Logger.info`
 - [ ] OpenTelemetry tracing — decide default sample rate ([telemetry.md](telemetry.md), [open-questions.md](open-questions.md) §9)
 - [ ] Streaming multipart upload middleware ([uploads.md](uploads.md))
 
