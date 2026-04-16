@@ -58,8 +58,8 @@ Specced and queued. Roughly priority order within each group.
 - [ ] WASM actor runtime — green threads / mailboxes in WASM target. Decide: per-island instance or shared cooperative scheduling ([open-questions.md](open-questions.md) §5) — post-v1
 
 ### Auth, Security & Storage
-- [ ] Security headers middleware — HSTS, X-Frame-Options, X-Content-Type-Options ([security.md](security.md))
-- [ ] CORS middleware ([security.md](security.md))
+- [x] Security headers middleware — `lib/security_headers.march`; `SecurityHeaders.defaults/1` (x-frame-options, x-content-type-options, x-xss-protection, referrer-policy, permissions-policy, COOP, COEP); `hsts/2`; `csp_base/1`, `csp_with_ws/2`
+- [x] CORS middleware — `lib/cors.march`; `Cors.allow/2` with `CorsConfig` record; `config/1`, `config_open/0`, `config_credentialed/1`; handles preflight (OPTIONS) and credentialed requests
 - [ ] `forge gen.auth token / oauth / magic_link` — post-v1 auth strategies ([auth.md](auth.md))
 - [ ] Vault full API — bags, ordered sets, bulk ops; after core Vault (Step 7) ships ([vault.md](vault.md))
 - [ ] Vault/Depot session backends — alternative to cookie sessions ([auth-session-database.md](auth-session-database.md))

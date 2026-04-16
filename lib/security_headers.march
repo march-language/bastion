@@ -1,0 +1,175 @@
+-- lib/security_headers.march — SecurityHeaders
+--
+-- Middleware that sets protective HTTP response headers on every request.
+-- All headers default to safe values; override or remove per-route as needed.
+--
+-- Usage in the request pipeline:
+--
+--   conn
+--   |> SecurityHeaders.defaults()
+--   |> Session.load(secret)
+--   |> MyApp.Router.route()
+--
+-- Or for HTTPS-only deployments (adds HSTS):
+--
+--   conn
+--   |> SecurityHeaders.defaults()
+--   |> SecurityHeaders.hsts(conn, 63072000)   -- 2-year HSTS
+--   |> MyApp.Router.route()
+--
+-- Individual headers can be overridden after the fact:
+--
+--   -- Allow embedding as a widget (e.g. for an embeddable widget route)
+--   conn2
+--   |> HttpServer.delete_resp_header("x-frame-options")
+--   |> render_widget()
+
+mod SecurityHeaders do
+
+  import HttpServer
+
+  -- ── Default header suite ────────────────────────────────────────────────────
+
+  doc """
+  Set the full default security header suite on the response.
+
+  Headers applied:
+    x-frame-options: SAMEORIGIN
+    x-content-type-options: nosniff
+    x-xss-protection: 0   (disabled; rely on CSP instead)
+    referrer-policy: strict-origin-when-cross-origin
+    permissions-policy: camera=(), microphone=(), geolocation=()
+    cross-origin-opener-policy: same-origin
+    cross-origin-embedder-policy: require-corp
+
+  Call early in your endpoint pipeline, before routing.
+  """
+  fn defaults(conn) do
+    conn
+    |> HttpServer.put_resp_header("x-frame-options", "SAMEORIGIN")
+    |> HttpServer.put_resp_header("x-content-type-options", "nosniff")
+    |> HttpServer.put_resp_header("x-xss-protection", "0")
+    |> HttpServer.put_resp_header("referrer-policy", "strict-origin-when-cross-origin")
+    |> HttpServer.put_resp_header("permissions-policy", "camera=(), microphone=(), geolocation=()")
+    |> HttpServer.put_resp_header("cross-origin-opener-policy", "same-origin")
+    |> HttpServer.put_resp_header("cross-origin-embedder-policy", "require-corp")
+  end
+
+  -- ── HSTS ────────────────────────────────────────────────────────────────────
+
+  doc """
+  Add a Strict-Transport-Security header.
+
+  max_age_secs is the max-age value in seconds.
+    63072000 = 2 years (recommended for production)
+    31536000 = 1 year
+
+  Always pass `includeSubDomains`. Does NOT add `preload` — opt into that
+  explicitly by building the header yourself if you know your full subdomain
+  landscape.
+
+  Only call in production (when serving over HTTPS). In dev, this header is
+  harmless but will cause browsers to refuse plain HTTP for the origin.
+
+      conn |> SecurityHeaders.hsts(63072000)
+  """
+  fn hsts(conn, max_age_secs) do
+    let value = "max-age=" ++ int_to_string(max_age_secs) ++ "; includeSubDomains"
+    HttpServer.put_resp_header(conn, "strict-transport-security", value)
+  end
+
+  -- ── CSP (base) ─────────────────────────────────────────────────────────────
+
+  doc """
+  Set a base Content-Security-Policy suitable for Bastion apps with WASM islands.
+
+  Policy:
+    default-src 'self'
+    script-src  'self' 'wasm-unsafe-eval' (required for WASM islands)
+    style-src   'self'
+    img-src     'self' data: https:
+    font-src    'self'
+    connect-src 'self' (add wss://your-host for channels)
+    worker-src  'self' blob:
+    frame-ancestors 'self'
+    base-uri    'self'
+    form-action 'self'
+
+  For production, add nonce-based script injection once CSP nonce support
+  lands in the ~H compiler (tracked in specs/csp.md).
+
+      conn |> SecurityHeaders.csp_base()
+  """
+  fn csp_base(conn) do
+    let policy =
+      "default-src 'self'; " ++
+      "script-src 'self' 'wasm-unsafe-eval'; " ++
+      "style-src 'self'; " ++
+      "img-src 'self' data: https:; " ++
+      "font-src 'self'; " ++
+      "connect-src 'self'; " ++
+      "worker-src 'self' blob:; " ++
+      "frame-ancestors 'self'; " ++
+      "base-uri 'self'; " ++
+      "form-action 'self'"
+    HttpServer.put_resp_header(conn, "content-security-policy", policy)
+  end
+
+  doc """
+  Set a CSP that includes a WebSocket connect-src for the given host.
+  Use this when you have Channels enabled so the browser can open WebSocket
+  connections to your server.
+
+      conn |> SecurityHeaders.csp_with_ws("myapp.example.com")
+  """
+  fn csp_with_ws(conn, host) do
+    let policy =
+      "default-src 'self'; " ++
+      "script-src 'self' 'wasm-unsafe-eval'; " ++
+      "style-src 'self'; " ++
+      "img-src 'self' data: https:; " ++
+      "font-src 'self'; " ++
+      "connect-src 'self' wss://" ++ host ++ "; " ++
+      "worker-src 'self' blob:; " ++
+      "frame-ancestors 'self'; " ++
+      "base-uri 'self'; " ++
+      "form-action 'self'"
+    HttpServer.put_resp_header(conn, "content-security-policy", policy)
+  end
+
+  -- ── Individual header helpers ───────────────────────────────────────────────
+
+  doc """
+  Override the x-frame-options header.
+  Common values: "SAMEORIGIN" (default), "DENY", "ALLOW-FROM https://example.com".
+
+      conn |> SecurityHeaders.x_frame_options("DENY")
+  """
+  fn x_frame_options(conn, value) do
+    HttpServer.put_resp_header(conn, "x-frame-options", value)
+  end
+
+  doc """
+  Override the referrer-policy header.
+  Common values:
+    "strict-origin-when-cross-origin" (default)
+    "no-referrer"
+    "same-origin"
+
+      conn |> SecurityHeaders.referrer_policy("no-referrer")
+  """
+  fn referrer_policy(conn, value) do
+    HttpServer.put_resp_header(conn, "referrer-policy", value)
+  end
+
+  doc """
+  Override the permissions-policy header.
+  Pass a semicolon-separated list of feature directives.
+
+      conn |> SecurityHeaders.permissions_policy("camera=(), microphone=(self)")
+  """
+  fn permissions_policy(conn, value) do
+    HttpServer.put_resp_header(conn, "permissions-policy", value)
+  end
+
+end
