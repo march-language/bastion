@@ -416,11 +416,112 @@ end
 pfn generate_body_loop(tokens : List(Token), acc : String) : String do
   match tokens do
   Nil -> acc
+  Cons(ComponentOpen(name, attrs, _), rest) -> do
+    -- Components with inner content: collect until matching close, then emit.
+    let (code, remaining) = generate_component_with_content(name, attrs, rest)
+    generate_body_loop(remaining, acc ++ code)
+  end
   Cons(tok, rest) -> do
     let chunk = token_to_string(tok)
     generate_body_loop(rest, acc ++ chunk)
   end
   end
+end
+
+-- Collect tokens between <.ComponentName> and </.ComponentName>, separating
+-- the default slot from any named <:slot> blocks.
+-- Returns (default_slot_tokens, named_slots, remaining_tokens).
+pfn collect_component_content(
+    comp_name : String,
+    tokens    : List(Token),
+    def_acc   : List(Token),
+    slots     : List((String, List(Token)))
+  ) : (List(Token), List((String, List(Token))), List(Token)) do
+  match tokens do
+  Nil ->
+    -- Unclosed tag — return what we have
+    (List.reverse(def_acc), List.reverse(slots), Nil)
+  Cons(ComponentClose(n, _), rest) ->
+    if n == comp_name do
+      -- Found the matching close tag
+      (List.reverse(def_acc), List.reverse(slots), rest)
+    else
+      -- Non-matching close (from a nested component) — keep in default slot
+      -- so the inner content can be re-processed recursively.
+      collect_component_content(comp_name, rest,
+        Cons(ComponentClose(n, 0), def_acc), slots)
+    end
+  Cons(SlotOpen(slot_name, _), rest) ->
+    -- Named slot block: collect until </:slot_name>
+    let (slot_tokens, after_slot) = collect_slot_content(slot_name, rest, Nil)
+    collect_component_content(comp_name, after_slot, def_acc,
+      Cons((slot_name, slot_tokens), slots))
+  Cons(tok, rest) ->
+    collect_component_content(comp_name, rest, Cons(tok, def_acc), slots)
+  end
+end
+
+-- Collect tokens for a named slot until the matching </:slot_name>.
+pfn collect_slot_content(
+    slot_name : String,
+    tokens    : List(Token),
+    acc       : List(Token)
+  ) : (List(Token), List(Token)) do
+  match tokens do
+  Nil -> (List.reverse(acc), Nil)
+  Cons(SlotClose(n, _), rest) ->
+    if n == slot_name do (List.reverse(acc), rest)
+    else collect_slot_content(slot_name, rest, Cons(SlotClose(n, 0), acc)) end
+  Cons(tok, rest) ->
+    collect_slot_content(slot_name, rest, Cons(tok, acc))
+  end
+end
+
+-- Wrap a rendered content string as a zero-arg render function.
+-- Produces: fn -> ~H"""content""" end
+-- The inner ~H is processed independently by the March compiler's desugar
+-- pass, capturing ambient variables via closure — so interpolations like
+-- ${name} work exactly as they do in the outer template.
+pfn wrap_as_render_fn(content : String) : String do
+  -- Produces: fn -> ~H"""content"""
+  -- Lambdas in March are `fn x -> expr` with no trailing `end`.
+  -- The closing paren of the enclosing render() call terminates the lambda.
+  "fn -> ~H" ++ "\"\"\"" ++ content ++ "\"\"\""
+end
+
+-- Generate a component call for <.Name attrs>inner</.Name>.
+-- Named slots become render_<slot>: fn -> ~H"""...""" end args.
+-- The default slot (inner content) becomes render_inner: fn -> ~H"""...""" end.
+pfn generate_component_with_content(
+    name   : String,
+    attrs  : List(Attr),
+    tokens : List(Token)
+  ) : (String, List(Token)) do
+  let (default_tokens, named_slots, remaining) =
+    collect_component_content(name, tokens, Nil, Nil)
+
+  let base_args = List.map(attrs, fn attr -> attr_to_string(attr))
+
+  -- Named slot args: render_<name>: fn -> ~H"""...""" end
+  let slot_args = List.map(named_slots, fn pair ->
+    match pair do
+    (slot_name, slot_tokens) ->
+      let slot_content = generate_body(slot_tokens)
+      "render_" ++ slot_name ++ ": " ++ wrap_as_render_fn(slot_content)
+    end)
+
+  -- Default inner content arg (skipped if empty / whitespace-only)
+  let default_content = generate_body(default_tokens)
+  let has_default     = !String.is_empty(String.trim(default_content))
+
+  let content_args = if has_default do
+    Cons("render_inner: " ++ wrap_as_render_fn(default_content), slot_args)
+  else slot_args end
+
+  let all_args = List.concat(base_args, content_args)
+  let args_str = String.join(all_args, ", ")
+  let code = wrap_interp(name ++ ".render(" ++ args_str ++ ") |> IOList.to_string()")
+  (code, remaining)
 end
 
 pfn interp_open() : String do "$" ++ "{" end
@@ -432,7 +533,7 @@ end
 
 pfn token_to_string(tok : Token) : String do
   match tok do
-  Literal(s, _) -> s
+  Literal(s, _) -> inject_csp_nonces(s)
   Expr(e, _) -> wrap_interp(e)
   RawExpr(e, _) -> wrap_interp(e)
   IfOpen(cond, _) -> wrap_interp("if " ++ cond ++ " do \"\"") ++ "\n"
@@ -443,10 +544,13 @@ pfn token_to_string(tok : Token) : String do
   ForClose(_) -> wrap_interp("end |> IOList.from_strings() |> IOList.to_string()") ++ "\n"
   LetBind(name, expr, _) -> wrap_interp("let " ++ name ++ " = " ++ expr) ++ "\n" ++ wrap_interp("\"\"") ++ "\n"
   ComponentSelfClose(name, attrs, _) -> generate_component_call(name, attrs)
-  ComponentOpen(_, _, _) -> ""
-  ComponentClose(_, _) -> ""
-  SlotOpen(_, _) -> ""
-  SlotClose(_, _) -> ""
+  -- ComponentOpen is handled directly in generate_body_loop before reaching here.
+  -- ComponentClose / SlotOpen / SlotClose are consumed by collect_* functions.
+  -- These branches are unreachable in well-formed templates; emit nothing as fallback.
+  ComponentOpen(_, _, _)  -> ""
+  ComponentClose(_, _)    -> ""
+  SlotOpen(_, _)          -> ""
+  SlotClose(_, _)         -> ""
   end
 end
 
@@ -514,6 +618,134 @@ pfn count_token_newlines(tok : Token) : Int do
   Literal(s, _) -> count_newlines(s)
   _ -> 0
   end
+end
+
+-- ── CSP nonce injection ──────────────────────────────────────────────────────
+--
+-- During lowering, every <script> and <style> opening tag that does not
+-- already have a nonce= attribute gets one injected:
+--
+--   <script src="app.js">
+--   →  <script nonce="${BastionCSP.nonce(conn)}" src="app.js">
+--
+-- The ${…} interpolation is emitted as literal text into the ~H body, where
+-- the March compiler's desugar pass will evaluate it at render time.
+--
+-- This mirrors how CSRF token injection works in desugar.ml: `conn` is
+-- assumed to be in scope (the Bastion convention for request templates).
+
+-- Build the nonce= attribute injection string.
+-- Uses interp_open/close so the ${} is not interpreted here in lower.march.
+pfn nonce_attr_injection() : String do
+  " nonce=\"" ++ interp_open() ++ "BastionCSP.nonce(conn)" ++ interp_close() ++ "\""
+end
+
+-- Find needle string in haystack starting at offset.
+pfn find_str_in(s : String, needle : String, offset : Int) : Option(Int) do
+  let slen = String.byte_size(s)
+  let nlen = String.byte_size(needle)
+  if offset + nlen > slen do None
+  else
+    if String.slice_bytes(s, offset, nlen) == needle do Some(offset)
+    else find_str_in(s, needle, offset + 1) end
+  end
+end
+
+-- Find the closing > of an HTML opening tag starting the search at pos.
+-- Skips over double-quoted attribute values to avoid href="a>b" false positives.
+-- Returns the byte index of >, or -1 if not found.
+pfn find_open_tag_end(s : String, pos : Int) : Int do
+  let slen = String.byte_size(s)
+  if pos >= slen do -1
+  else
+    let ch = String.slice_bytes(s, pos, 1)
+    if ch == ">" do pos
+    else if ch == "\"" do
+      let q_end = find_close_dquote(s, pos + 1)
+      if q_end < 0 do -1
+      else find_open_tag_end(s, q_end + 1) end
+    else find_open_tag_end(s, pos + 1) end
+    end
+  end
+end
+
+pfn find_close_dquote(s : String, pos : Int) : Int do
+  if pos >= String.byte_size(s) do -1
+  else
+    if String.slice_bytes(s, pos, 1) == "\"" do pos
+    else find_close_dquote(s, pos + 1) end
+  end
+end
+
+-- Return true if the character at pos is a valid tag-name terminator.
+pfn is_tag_boundary(s : String, pos : Int) : Bool do
+  if pos >= String.byte_size(s) do true
+  else
+    let ch = String.slice_bytes(s, pos, 1)
+    ch == " " || ch == "\t" || ch == "\n" || ch == "\r" || ch == ">" || ch == "/"
+  end
+end
+
+-- If pos in s starts <script or <style (followed by a tag boundary), return
+-- the tag-name byte length (6 or 5).  Otherwise return 0.
+pfn script_or_style_at(s : String, pos : Int) : Int do
+  let slen = String.byte_size(s)
+  if pos + 7 <= slen && String.slice_bytes(s, pos, 7) == "<script" do
+    if is_tag_boundary(s, pos + 7) do 6 else 0 end
+  else if pos + 6 <= slen && String.slice_bytes(s, pos, 6) == "<style" do
+    if is_tag_boundary(s, pos + 6) do 5 else 0 end
+  else 0 end
+  end
+end
+
+-- Return true if s[start..end_idx) contains "nonce=".
+pfn range_has_nonce(s : String, start : Int, end_idx : Int) : Bool do
+  let chunk = String.slice_bytes(s, start, end_idx - start)
+  match find_str_in(chunk, "nonce=", 0) do
+  Some(_) -> true
+  None    -> false
+  end
+end
+
+-- Walk s from pos, injecting a nonce attribute into every <script>/<style>
+-- opening tag that does not already have one.
+pfn inject_nonces_loop(s : String, pos : Int, acc : String) : String do
+  let slen = String.byte_size(s)
+  if pos >= slen do acc
+  else
+    let ch = String.slice_bytes(s, pos, 1)
+    if ch == "<" do
+      let tag_name_len = script_or_style_at(s, pos)
+      if tag_name_len > 0 do
+        let tag_open_len = 1 + tag_name_len   -- 7 for "<script", 6 for "<style"
+        let gt_pos = find_open_tag_end(s, pos + tag_open_len)
+        if gt_pos < 0 do
+          -- Malformed / unclosed — copy the < and keep going.
+          inject_nonces_loop(s, pos + 1, acc ++ "<")
+        else
+          let tag_and_attrs = String.slice_bytes(s, pos, gt_pos - pos)
+          if range_has_nonce(s, pos + tag_open_len, gt_pos) do
+            -- Already has nonce= — preserve as-is.
+            inject_nonces_loop(s, gt_pos + 1, acc ++ tag_and_attrs ++ ">")
+          else
+            -- Inject nonce before the closing >.
+            inject_nonces_loop(s, gt_pos + 1,
+              acc ++ tag_and_attrs ++ nonce_attr_injection() ++ ">")
+          end
+        end
+      else
+        inject_nonces_loop(s, pos + 1, acc ++ ch)
+      end
+    else
+      inject_nonces_loop(s, pos + 1, acc ++ ch)
+    end
+  end
+end
+
+-- Inject CSP nonce attributes into all <script> and <style> opening tags
+-- in a literal HTML string from a .march.html template body.
+pfn inject_csp_nonces(s : String) : String do
+  inject_nonces_loop(s, 0, "")
 end
 
 -- ── Utility functions ────────────────────────────────────────────────────────

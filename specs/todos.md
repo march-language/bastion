@@ -46,7 +46,7 @@ Specced and queued. Roughly priority order within each group.
 
 ### Compiler Integration
 - [x] Route helpers — `forge bastion.routes --gen` writes `lib/<app>_routes.march` with typed path helpers (`root_path`, `users_path`, `user_path(id)`, etc.); singularizes last literal segment before a param; deduplicates by path. Compile-time verification of helper calls requires compiler integration (still pending).
-- [ ] CSP nonce auto-injection via `~H` compiler pass ([csp.md](csp.md))
+- [x] **CSP nonce auto-injection** — `inject_csp_nonces/1` in `lib/forge/lower.march`; every `<script>` and `<style>` opening tag in `.march.html` templates gets `nonce="${BastionCSP.nonce(conn)}"` injected before the closing `>` unless already present; follows same CSRF-injection convention (assumes `conn` in scope); inline `~H` in `.march` files would need a parallel `desugar.ml` change (deferred)
 - [ ] Island prop serialization — decide JSON vs binary fast-path for large datasets ([open-questions.md](open-questions.md) §3)
 - [ ] Island WASM hot-swap in dev without state loss ([open-questions.md](open-questions.md) §4)
 
@@ -76,7 +76,7 @@ Specced and queued. Roughly priority order within each group.
 - [ ] `<.Form>` wrapper component — requires slot/inner content support in lowering pass ([form-handling.md](form-handling.md))
 
 ### Templates & Styling
-- [ ] `~H` template component system — components as functions, XSS prevention ([templates.md](templates.md))
+- [x] **`~H` template component system** — `<.Component />` (self-closing) and `<.Component attr={x}>inner</.Component>` (with inner content) in `lib/forge/lower.march`; self-closing → `Component.render(attrs)`; with-content → `Component.render(attrs, render_inner: fn -> ~H"""...""" end)`; named slots `<:slot>...</:slot>` → `render_<slot>: fn -> ~H"""...""" end`; inner ~H captures ambient vars via closure; nested components handled
 - [ ] `~CSS` scoped island CSS ([css-styling.md](css-styling.md))
 - [ ] CSS variables / theming conventions ([css-styling.md](css-styling.md))
 
@@ -88,12 +88,13 @@ Specced and queued. Roughly priority order within each group.
 
 ### Developer Experience
 - [x] `forge dev` live reload — `lib/dev.march`: `Bastion.Dev.live_reload` plug serves `/_bastion/reload` WebSocket (drop on restart triggers browser reload) + `/_bastion/live-reload.js` client; `live_reload_tag()` returns script tag for layouts; `dev_env?()` detects MARCH_ENV
-- [ ] Dev error overlay in-browser ([dev-experience.md](dev-experience.md), [error-handling.md](error-handling.md)) — needs March try/catch or framework-level panic handler
+- [x] **Dev error overlay + crash REPL** — `lib/error_overlay.march` (`Bastion.ErrorOverlay`): `rescue_errors/1` plug wraps pipeline via `HttpServer.try_call/1`; on panic stores crash context (conn, params, assigns, error) in Vault with 1hr TTL; renders HTML error page with stack trace, request info, and in-browser crash REPL terminal; `/_bastion/debug/:session_id` WebSocket serves a `March.Repl` session with crash bindings injected; history navigation (↑/↓); `router_plug/1` mounts the WebSocket + info endpoint (dev only)
 - [x] Hot deploy / connection draining — `lib/health.march`: `Bastion.Health.plug` serves `GET /health`; `start_drain()`/`draining?()` Vault-backed drain flag; `plug_with_checks/2` runs custom probes; 503 on drain
 - [x] `forge dev` dashboard — `lib/metrics.march` (`Bastion.Metrics`): `instrument/1` timing wrapper + `record/1` plug, `summary()`, Vault ring buffer; `lib/dev.march` extended with `dashboard` plug serving `/_bastion` HTML page with request stats and recent request log
 - [ ] Embedded asset size limits — determine threshold for `--embed-assets` ([open-questions.md](open-questions.md) §8)
 
 ### Generators
+- [x] **`forge bastion.console`** — `lib/forge/console.march` (`Forge.Console`); starts March REPL with app supervision tree loaded (Vault tables + Depot pool); `--server` flag starts HTTP server alongside; auto-imports from `[console] imports` in `forge.toml`; prompt `iex(app_name)>` with history; pre-injects `conn` (test conn), Vault, PubSub, Metrics; blocks until `:quit` or Ctrl+C
 - [x] `forge gen.handler` — `lib/forge/gen_handler.march`; generates handler module with CRUD action stubs + route snippet
 - [x] `forge gen.context` — `lib/forge/gen_context.march`; generates schema + context CRUD API + migration from field spec (`name:string email:string`)
 - [x] `forge gen.channel` — `lib/forge/gen_channel.march`; generates channel handler stub
@@ -106,7 +107,7 @@ Specced and queued. Roughly priority order within each group.
 
 ### Operations
 - [x] `forge bastion.release` — `lib/forge/release.march`; builds binary (release mode), compiles WASM islands, copies static assets to `_build/release/<name>/`; `--embed-assets` embeds statics into binary; `--dockerfile` generates Dockerfile with health-check; `--clean` wipes release dir first; warns if `SECRET_KEY_BASE` unset
-- [ ] Deployment guide — single binary, env config, health checks, graceful shutdown ([deployment.md](deployment.md))
+- [x] **Deployment guide** — `specs/deployment-guide.md`; covers Fly.io (Dockerfile + fly.toml + `release_command` migration hook + fly secrets) and bare VPS (systemd + nginx + env file + `ExecStartPre` migration hook + zero-downtime deploy script); recommends `--embed-assets` single binary; multi-node distributed Vault/PubSub noted as TODO
 - [x] Structured logging + request ID propagation — `lib/logger.march`: `Logger.debug/info/warn/error(msg, meta)` + `*_conn` helpers; human format (dev) vs JSON (prod) via MARCH_ENV; `Middleware.request_id` upgraded to use `Crypto.generate_token(16)` + set `x-request-id` response header; `Middleware.logger` uses `Logger.info`
 - [x] Telemetry events — `lib/telemetry.march`: `Bastion.Telemetry.attach/3`, `detach/1`, `execute/3`; `span/3` (emits start/stop events around a fn, measures duration_ms); `request_start/1`, `request_stop/2`; Vault-backed handler registry; prefix-match subscriptions (["bastion","request"] matches all sub-events)
 - [x] Multipart upload middleware — `lib/upload.march`: `Bastion.Upload.parse_conn/2` + `parse/3`; boundary extraction from Content-Type; part splitting; header/Content-Disposition parsing; `UploadedFile`/`UploadOpts`/`UploadError` types; `default_opts`, `error_message`

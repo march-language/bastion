@@ -2,3 +2,10 @@
 *.ll
 march-phases/
 trace/
+
+# Claude Code / Claire session state (worktree metadata)
+/.claude/worktrees/
+/.claire/worktrees/
+
+# Generated API documentation
+/docs/bastion/

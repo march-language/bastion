@@ -64,7 +64,7 @@ mod Bastion.Test.Auth do
   doc """
   Return true if the given conn has a logged-in user session.
 
-      if Bastion.Test.Auth.logged_in?(conn) do ... end
+      if Bastion.Test.Auth.logged_in(conn) do ... end
   """
   fn logged_in(conn) do
     match Session.get(conn, "current_user_id") do

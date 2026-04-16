@@ -1,0 +1,197 @@
+-- Forge.Console — forge bastion.console
+--
+-- Starts an interactive March REPL with the application fully loaded.
+-- Analogous to `iex -S mix` (Elixir) or `rails console` (Rails).
+--
+-- Usage:
+--   forge bastion.console              # start REPL, no HTTP server
+--   forge bastion.console --server     # start REPL + HTTP server together
+--
+-- The REPL session has access to all compiled app modules, running Vault
+-- tables, and (with --server) live Depot connection pools.
+--
+-- Auto-imports defined in forge.toml [console] section:
+--
+--   [console]
+--   imports = [
+--     "MyApp.Accounts",
+--     "MyApp.Repo",
+--     "Bastion.Vault",
+--   ]
+--
+-- Example session:
+--
+--   iex(my_app)> MyApp.Accounts.list_users()
+--   [%{id: 1, email: "alice@example.com"}, ...]
+--
+--   iex(my_app)> Vault.all(:response_cache) |> List.length()
+--   42
+--
+--   iex(my_app)> :quit
+--   Goodbye.
+
+mod Forge.Console do
+
+-- ---------------------------------------------------------------------------
+-- Config
+-- ---------------------------------------------------------------------------
+
+type ConsoleConfig = {
+  app_name    : String,
+  with_server : Bool,
+  imports     : List(String),
+  banner      : String
+}
+
+pfn default_config(app_name : String) : ConsoleConfig do
+  {
+    app_name    = app_name,
+    with_server = false,
+    imports     = Nil,
+    banner      = default_banner(app_name)
+  }
+end
+
+pfn default_banner(app_name : String) : String do
+  "\n" ++
+  "  Bastion Console — " ++ app_name ++ "\n" ++
+  "  March " ++ March.version() ++ " | Type :quit or Ctrl+C to exit\n" ++
+  "  Variables in scope: conn (test conn), Vault, Depot\n" ++
+  "\n"
+end
+
+-- ---------------------------------------------------------------------------
+-- Entry point
+-- ---------------------------------------------------------------------------
+
+fn main() do
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  run(args)
+end
+
+fn run(args : List(String)) do
+  let with_server = List.any(args, fn a -> a == "--server")
+  let app_name    = read_app_name()
+  let imports     = read_console_imports()
+
+  let config = {
+    app_name    = app_name,
+    with_server = with_server,
+    imports     = imports,
+    banner      = default_banner(app_name)
+  }
+
+  println(config.banner)
+
+  -- Start the application supervision tree (Vault, Depot pool, etc.)
+  let _ = start_app(config)
+
+  -- Optionally start the HTTP server alongside
+  let _ = if with_server do
+    let _ = println("  HTTP server starting on http://localhost:" ++ server_port() ++ "\n")
+    Bastion.Server.start_async()
+  else () end
+
+  -- Build REPL options: inject useful default bindings
+  let repl_opts = build_repl_opts(app_name, imports)
+
+  -- Hand off to the March REPL (blocks until :quit or Ctrl+C)
+  March.Repl.start(repl_opts)
+end
+
+-- ---------------------------------------------------------------------------
+-- App startup
+-- ---------------------------------------------------------------------------
+
+pfn start_app(config : ConsoleConfig) do
+  -- Start Vault tables the app uses
+  let _ = Vault.open(:response_cache)
+  let _ = Vault.open(:session_store)
+  let _ = Vault.open(:rate_limit)
+  let _ = Vault.open(:pubsub_registry)
+
+  -- Start Depot pool if configured
+  let db_url = Env.get("DATABASE_URL", "")
+  if String.is_empty(db_url) do ()
+  else
+    let _ = println("  Connecting to database...")
+    Depot.start_pool("console_pool", db_url, 2)
+  end
+end
+
+pfn server_port() : String do
+  Env.get("PORT", "4000")
+end
+
+-- ---------------------------------------------------------------------------
+-- REPL configuration
+-- ---------------------------------------------------------------------------
+
+pfn build_repl_opts(app_name : String, extra_imports : List(String)) do
+  let prompt      = "iex(" ++ app_name ++ ")> "
+  let cont_prompt = "...(" ++ app_name ++ ")  "
+
+  -- Default bindings available in every console session
+  let bindings = Cons(
+    ("conn",  HttpServer.test_conn("GET", "/")),
+    Nil)
+
+  -- Modules to import automatically
+  let default_imports = Cons("Bastion.Vault",
+                        Cons("Bastion.PubSub",
+                        Cons("Bastion.Metrics",
+                        Nil)))
+  let all_imports = List.concat(default_imports, extra_imports)
+
+  -- Pre-evaluation prologue — runs before the REPL prompt appears
+  let prologue = build_prologue(all_imports)
+
+  {
+    prompt       = prompt,
+    cont_prompt  = cont_prompt,
+    bindings     = bindings,
+    prologue     = prologue,
+    history_file = Env.get("HOME", ".") ++ "/.march_history",
+    inspect_opts = {
+      limit  = 50,
+      pretty = true,
+      width  = 80
+    }
+  }
+end
+
+pfn build_prologue(imports : List(String)) : String do
+  let import_lines = List.map(imports, fn m ->
+    "import " ++ m
+  )
+  String.join(import_lines, "\n")
+end
+
+-- ---------------------------------------------------------------------------
+-- Config file reading
+-- ---------------------------------------------------------------------------
+
+pfn read_app_name() : String do
+  match Toml.read("forge.toml") do
+  Ok(cfg) ->
+    match Toml.get_string(cfg, "package.name") do
+    Some(name) -> name
+    None       -> "app"
+    end
+  Err(_) -> "app"
+  end
+end
+
+pfn read_console_imports() : List(String) do
+  match Toml.read("forge.toml") do
+  Ok(cfg) ->
+    match Toml.get_string_list(cfg, "console.imports") do
+    Some(imports) -> imports
+    None          -> Nil
+    end
+  Err(_) -> Nil
+  end
+end
+
+end -- mod Forge.Console

@@ -385,7 +385,7 @@ pfn snake_to_pascal(s) do
       String.to_uppercase(String.slice_bytes(p, 0, 1))
         ++ String.slice_bytes(p, 1, String.byte_size(p) - 1)
     end
-  end))
+  ))
 end
 
 -- Simple singularizer: remove trailing 's' unless word ends in 'ss'.
@@ -457,13 +457,13 @@ pfn helper_fn(path) do
   let name   = path_to_helper_name(path)
   let params = path_param_names(path)
   let body   = path_to_expr(path)
-  let sig = match params do
+  let fn_sig = match params do
     Nil -> "  fn " ++ name ++ "() : String do"
     _   ->
       let args = String.join(List.map(params, fn p -> p ++ " : String"), ", ")
       "  fn " ++ name ++ "(" ++ args ++ ") : String do"
     end
-  sig ++ "\n    " ++ body ++ "\n  end\n"
+  fn_sig ++ "\n    " ++ body ++ "\n  end\n"
 end
 
 -- Deduplicate routes by path (method is irrelevant for URL generators).

@@ -214,6 +214,138 @@ describe "Form.Error.render" do
   end
 end
 
+-- ── Form.Wrapper.render (component) ─────────────────────────────────────────
+
+describe "Form.Wrapper.render" do
+  test "renders form tag with action and method" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "<form"))
+    assert (string_contains(html, "action=\"/login\""))
+    assert (string_contains(html, "method=\"post\""))
+    assert (string_contains(html, "</form>"))
+  end
+
+  test "injects CSRF hidden input" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "name=\"_csrf_token\""))
+    assert (string_contains(html, "type=\"hidden\""))
+  end
+
+  test "CSRF token value matches conn assign" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let token       = CSRF.token(conn)
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "value=\"" ++ token ++ "\""))
+  end
+
+  test "renders inner content between CSRF tag and closing form" do
+    let conn          = HttpServer.test_conn("GET", "/")
+                        |> CSRF.ensure_token()
+    let content_inner = fn _ -> IOList.from_string("<input name=\"email\" />")
+    let iol           = Form.Wrapper.render(conn, "/users", "post", "", "", "", content_inner)
+    let html          = IOList.to_string(iol)
+    assert (string_contains(html, "<input name=\"email\" />"))
+    -- CSRF should come before inner content
+    let csrf_idx  = String.index_of(html, "_csrf_token")
+    let inner_idx = String.index_of(html, "email")
+    let csrf_before_inner = match csrf_idx do
+      Some(c) ->
+        match inner_idx do
+        Some(i) -> c < i
+        None    -> false
+        end
+      None -> false
+      end
+    assert csrf_before_inner
+  end
+
+  test "adds class attribute when provided" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "post", "login-form", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "class=\"login-form\""))
+  end
+
+  test "no class attribute when empty" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (!string_contains(html, "class="))
+  end
+
+  test "adds id attribute when provided" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "my-form", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "id=\"my-form\""))
+  end
+
+  test "adds enctype for file uploads" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/upload", "post", "", "", "multipart/form-data", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "enctype=\"multipart/form-data\""))
+  end
+
+  test "escapes action URL special characters" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/path?a=1&b=2", "post", "", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "action=\"/path?a=1&amp;b=2\""))
+  end
+
+  test "method defaults to post when empty" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "", "", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "method=\"post\""))
+  end
+
+  test "lowercases method" do
+    let conn        = HttpServer.test_conn("GET", "/")
+                      |> CSRF.ensure_token()
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "POST", "", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    assert (string_contains(html, "method=\"post\""))
+  end
+
+  test "CSRF not injected when token not in conn" do
+    -- A fresh test_conn without ensure_token has no CSRF token.
+    -- Wrapper should still render (token will be empty string).
+    let conn        = HttpServer.test_conn("GET", "/")
+    let empty_inner = fn _ -> IOList.from_string("")
+    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let html        = IOList.to_string(iol)
+    -- Should still have the hidden input, just with empty value
+    assert (string_contains(html, "name=\"_csrf_token\""))
+    assert (string_contains(html, "value=\"\""))
+  end
+end
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 pfn string_contains(haystack : String, needle : String) : Bool do
