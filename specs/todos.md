@@ -31,9 +31,9 @@ The most impactful unblocked work. These are preconditions for most other featur
   - [x] Step 3: `lib/session.march` — cookie session API complete; real HMAC-SHA256 signing via `Crypto.hmac_sha256` + derived key
   - [x] Step 4: `lib/flash.march` — `put`, `get`, `loaded_flashes`, `clear`, `delete`; `Form.FlashGroup` component
   - [x] Step 5: `lib/csrf.march` — token generation uses `Crypto.generate_token(32)`; validation uses `Crypto.secure_compare`
-  - [ ] Step 6: `lib/auth_middleware.march` — `load_current_user`, `require_auth`, `authenticated`, `log_in` (with remember-me), `log_out`
-  - [ ] Step 7: `lib/vault.march` — in-memory KV actor, TTL sweeper (core API only: `put/get/delete/put_new`)
-  - [ ] Step 8: `lib/rate_limit.march` — sliding window rate limiter backed by Vault; `x-ratelimit-*` headers; 429 response
+  - [x] Step 6: `lib/auth_middleware.march` — `load_current_user` (+ remember-me variant), `require_auth`, `authenticated`, `log_in` (with optional remember-me cookie), `log_out`, `current_user`, `redirect_after_login`; wraps `Session`+`Conn`+`Crypto`
+  - [x] Step 7: `lib/vault.march` — wraps stdlib `Vault`; Bastion naming (`put`/`delete`/`open`); adds `put_new` (atomic insert-if-absent), `put_ttl`, `ns_*` helpers
+  - [x] Step 8: `lib/rate_limit.march` — sliding window counter in Vault; `check/5` returns `Ok(conn)|Error(conn)`; `limit/5` pipeline helper; `ip_key` built-in; `x-ratelimit-*` + `retry-after` headers; 429 on exceed
   - [ ] Step 9: `forge depot.migrate` / `forge depot.rollback` wired in Bastion — `Depot.Migration` in depot repo generates SQL DDL strings; needs the forge commands brought over and wired to execute via `Connection.simple_query`
   - [ ] Step 10: `forge gen.auth session` generator — `users` + `user_tokens` migrations; Accounts context (`authenticate`, `create_remember_token`, `create_reset_token`, `reset_password`); AuthController (login, logout, register, password reset); templates; router patch; rate limiting wired to login/register/reset routes
   - [ ] Step 11: `Bastion.Test.Depot.checkout` test sandbox + `Bastion.Test.Auth.log_in_user` helper — `Depot.Test` sandbox exists in depot repo; needs wiring into Bastion test helpers
