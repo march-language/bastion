@@ -1,0 +1,229 @@
+-- lib/crypto.march — Cryptographic primitives for Bastion.
+--
+-- This module wraps the March stdlib `Crypto` module with a Bastion-centric
+-- API plus a few additional helpers.  All heavy lifting (hashing, HMAC,
+-- PBKDF2, CSPRNG, Base64) is delegated to runtime builtins; Bastion adds
+-- only pure-March glue code on top.
+--
+-- Public API summary:
+--
+--   Random
+--     random_bytes(n)              → Bytes   (CSPRNG, suitable for keys/nonces)
+--     random_hex(n)                → String  (2n-char lowercase hex)
+--     generate_token(n)            → String  (URL-safe base64, no padding)
+--
+--   Hashing
+--     sha256(data)                 → String  (lowercase hex, data: String | Bytes)
+--
+--   HMAC
+--     hmac_sha256(key, data)       → String  (lowercase hex, key/data: String | Bytes)
+--
+--   Key derivation
+--     derive_key(secret, context)  → String  (32-byte SHA-256-based derivation)
+--
+--   Password hashing (PBKDF2-SHA256, 600 000 iterations, 16-byte random salt)
+--     hash_password(plain)         → String  ("pbkdf2:sha256:…" storable format)
+--     verify_password(plain, hash) → Bool
+--
+--   Comparison
+--     secure_compare(a, b)         → Bool    (constant-time equality)
+--
+--   Base64
+--     base64_encode(data)          → String  (standard alphabet + padding)
+--     base64_decode(s)             → Result(Bytes, String)
+--     base64_url_encode(data)      → String  (URL-safe, no padding)
+--     base64_url_decode(s)         → Result(Bytes, String)
+--
+--   Utilities
+--     bytes_to_string(b)           → String  (UTF-8 / raw bytes → String)
+--
+-- NOTE — AES-256-GCM and HKDF are not yet available.  The March runtime
+-- does not yet expose `stdlib_aes_256_gcm_*` or `stdlib_hkdf` builtins.
+-- Session cookies are signed (HMAC-SHA256) but not encrypted; this is
+-- safe as long as the payload contains no secrets that must be hidden from
+-- the browser.  Encryption will be added once the builtins ship.
+
+mod Crypto do
+
+  import Crypto as StdCrypto
+
+  -- ── Random ────────────────────────────────────────────────────────────────
+
+  doc """
+  Generate `n` cryptographically secure random bytes from the OS CSPRNG
+  (`/dev/urandom` on Unix).
+
+      Crypto.random_bytes(16)  -- Bytes with 16 random bytes
+  """
+  fn random_bytes(n : Int) : Bytes do
+    StdCrypto.random_bytes(n)
+  end
+
+  doc """
+  Generate `n` random bytes and return them as a lowercase hex string (2n chars).
+
+      Crypto.random_hex(16)  -- 32-char lowercase hex string
+  """
+  fn random_hex(n : Int) : String do
+    StdCrypto.random_hex(n)
+  end
+
+  doc """
+  Generate a URL-safe, base64-encoded random token of `n` bytes entropy.
+
+  The result has no padding characters and uses `-`/`_` instead of `+`/`/`.
+  A 32-byte token produces a 43-character string.
+
+      Crypto.generate_token(32)  -- e.g. "dGhpcyBpcyBhIHRlc3Q"
+  """
+  fn generate_token(n : Int) : String do
+    StdCrypto.base64_url_encode(StdCrypto.random_bytes(n))
+  end
+
+  -- ── Hashing ───────────────────────────────────────────────────────────────
+
+  doc """
+  Compute the SHA-256 hash of `data`, returning a lowercase hex string.
+
+      Crypto.sha256("hello")
+      -- "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+  `data` may be a `String` or `Bytes`.
+  """
+  fn sha256(data : String) : String do
+    StdCrypto.sha256(data)
+  end
+
+  -- ── HMAC ─────────────────────────────────────────────────────────────────
+
+  doc """
+  Compute HMAC-SHA256 of `data` under `key`, returning a lowercase hex string.
+
+      Crypto.hmac_sha256("secret", "message")
+
+  Both `key` and `data` may be `String` or `Bytes`.
+  """
+  fn hmac_sha256(key : String, data : String) : String do
+    StdCrypto.hmac(:sha256, key, data)
+  end
+
+  -- ── Key derivation ────────────────────────────────────────────────────────
+
+  doc """
+  Derive a 32-byte key from `secret` and a `context` label.
+
+  Uses SHA-256 over `"<secret>:<context>"` as a simple deterministic KDF.
+  The same inputs always produce the same output, so this is suitable for
+  deriving stable sub-keys (e.g. "session_signing", "csrf_signing") from a
+  single `secret_key_base`.
+
+  NOTE: This is not HKDF.  HKDF will be substituted once the March runtime
+  exposes `stdlib_hkdf`; the cookie format remains stable across the upgrade
+  because the derived keys are not stored.
+
+      let k = Crypto.derive_key(secret_key_base, "session_signing")
+  """
+  fn derive_key(secret : String, context : String) : String do
+    StdCrypto.sha256(secret ++ ":" ++ context)
+  end
+
+  -- ── Password hashing ──────────────────────────────────────────────────────
+
+  doc """
+  Hash a plaintext password using PBKDF2-SHA256 with a random 16-byte salt
+  and 600 000 iterations (OWASP 2023 recommendation).
+
+      let h = Crypto.hash_password("my-secret-pass")
+      -- "pbkdf2:sha256:600000:<salt_hex>:<hash_hex>"
+
+  Safe to store in a database column.  Use `verify_password/2` to authenticate.
+  """
+  fn hash_password(plain : String) : String do
+    StdCrypto.hash_password(plain)
+  end
+
+  doc """
+  Verify `plain` against a stored hash produced by `hash_password/1`.
+
+      Crypto.verify_password("correct-horse-battery-staple", stored_hash)
+      -- true or false
+
+  Returns `false` for unrecognised hash formats.
+  """
+  fn verify_password(plain : String, stored : String) : Bool do
+    StdCrypto.verify_password(plain, stored)
+  end
+
+  -- ── Constant-time comparison ──────────────────────────────────────────────
+
+  doc """
+  Compare two strings for equality in time proportional to `max(|a|, |b|)`.
+
+  Never short-circuits on a byte difference or on a length mismatch, which
+  prevents timing side-channels when validating secrets (tokens, HMAC digests,
+  session cookies).
+
+      Crypto.secure_compare(request_token, stored_token)
+  """
+  fn secure_compare(a : String, b : String) : Bool do
+    StdCrypto.secure_compare(a, b)
+  end
+
+  -- ── Base64 ────────────────────────────────────────────────────────────────
+
+  doc """
+  Base64-encode `data` (standard alphabet, padded with `=`).
+
+  `data` may be a `String` or `Bytes`.
+  """
+  fn base64_encode(data : String) : String do
+    StdCrypto.base64_encode(data)
+  end
+
+  doc """
+  Decode a standard Base64 string to bytes.
+
+  Returns `Ok(Bytes)` on success or `Err(message)` on invalid input.
+  Use `bytes_to_string/1` to convert the result back to a `String`.
+  """
+  fn base64_decode(s : String) : Result(Bytes, String) do
+    StdCrypto.base64_decode(s)
+  end
+
+  doc """
+  Base64-encode `data` using the URL-safe alphabet (no padding, `-`/`_`).
+  """
+  fn base64_url_encode(data : String) : String do
+    StdCrypto.base64_url_encode(data)
+  end
+
+  doc """
+  Decode a URL-safe Base64 string to bytes.
+
+  Returns `Ok(Bytes)` or `Err(message)`.
+  """
+  fn base64_url_decode(s : String) : Result(Bytes, String) do
+    StdCrypto.base64_url_decode(s)
+  end
+
+  -- ── Utilities ─────────────────────────────────────────────────────────────
+
+  doc """
+  Convert a `Bytes` value to a `String` by treating each byte as a UTF-8
+  octet and joining them.
+
+  This is the inverse of passing a `String` to `base64_encode` or `sha256`;
+  it reconstructs the original `String` from a decoded `Bytes` result.
+
+      match Crypto.base64_decode(encoded) do
+      Ok(b)    -> Crypto.bytes_to_string(b)
+      Err(msg) -> ""
+      end
+  """
+  fn bytes_to_string(b : Bytes) : String do
+    match b do
+    Bytes(xs) -> string_join(List.map(xs, fn n -> char_from_int(n)), "")
+    end
+  end
+
+end

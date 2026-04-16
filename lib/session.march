@@ -1,23 +1,24 @@
 -- Session — cookie-backed session storage for Bastion.
 --
--- Sessions are stored as a signed+encrypted cookie named "_session".
--- The cookie value is: base64(encrypt(serialize(data))) with an HMAC
--- signature prepended: "<hmac>.<encrypted_payload>".
+-- Sessions are stored as a signed cookie named "_session".
+-- The cookie value is: "<hmac_hex>.<base64_payload>" where:
+--   - base64_payload = base64(serialize(data))
+--   - hmac_hex       = HMAC-SHA256(signing_key, base64_payload)
+--   - signing_key    = Crypto.derive_key(secret_key_base, "session_signing")
+--
+-- The payload is signed but not encrypted.  This is safe as long as the
+-- session contains only non-secret identifiers (user IDs, CSRF tokens,
+-- flash messages).  AES-256-GCM encryption will be added once the March
+-- runtime exposes the necessary builtins.
 --
 -- Cookie lifetime:
 --   - Browser session (no Max-Age) by default.
---   - Persistent (Max-Age=N) when remember_me: true.
+--   - Persistent (Max-Age=N) when Session.persist/2 is called before commit.
 --
 -- Session auto-commit:
 --   Session.load/2 registers an after-send hook "session_commit" that
---   writes the Set-Cookie header after the response body is sent.
+--   writes the Set-Cookie header just before the response is flushed.
 --   Call Session.load/2 early in the middleware pipeline.
---
--- Crypto note:
---   The current implementation uses HMAC-SHA256 signing with a stub
---   encryption layer (XOR-based, NOT production-safe).  Replace the
---   pfn encrypt/decrypt pair with AES-256-GCM once lib/crypto.march
---   (Step 1 in auth-session-database.md) is implemented.
 --
 -- Typical pipeline:
 --
@@ -41,6 +42,7 @@
 mod Session do
 
   import Conn
+  import Crypto
 
   -- Assigns key where the secret_key_base is stored for the commit hook.
   let secret_assign = "_session_secret"
@@ -243,80 +245,36 @@ mod Session do
   -- ── Signing ───────────────────────────────────────────────────────────────
   --
   -- Cookie format: "<hmac_hex>.<base64_payload>"
-  -- The HMAC is computed over the base64_payload using the secret_key_base.
   --
-  -- TODO: Replace stub_hmac with Crypto.hmac_sha256 and stub_encrypt/decrypt
-  -- with Crypto.aes_256_gcm_encrypt/decrypt once lib/crypto.march ships.
+  --   base64_payload = base64(session_data_string)
+  --   hmac_hex       = HMAC-SHA256(signing_key, base64_payload)
+  --   signing_key    = Crypto.derive_key(secret_key_base, "session_signing")
+  --
+  -- Using a derived key means the signing key is distinct from the raw
+  -- secret_key_base and from other derived keys (e.g. "csrf_signing"),
+  -- preventing cross-context forgeries.
 
   pfn sign_and_encode(data : String, secret : String) : String do
-    let payload = base64_encode(data)
-    let mac     = stub_hmac(payload, secret)
+    let signing_key = Crypto.derive_key(secret, "session_signing")
+    let payload     = Crypto.base64_encode(data)
+    let mac         = Crypto.hmac_sha256(signing_key, payload)
     mac ++ "." ++ payload
   end
 
   pfn verify_and_decode(raw : String, secret : String) : String do
     match String.split_first(raw, ".") do
-    None             -> ""   -- malformed — no separator
+    None                 -> ""   -- malformed — no dot separator
     Some((mac, payload)) ->
-      let expected = stub_hmac(payload, secret)
-      if secure_compare(mac, expected) then
-        match base64_decode(payload) do
-        Some(v) -> v
-        None    -> ""
+      let signing_key = Crypto.derive_key(secret, "session_signing")
+      let expected    = Crypto.hmac_sha256(signing_key, payload)
+      if Crypto.secure_compare(mac, expected) then
+        match Crypto.base64_decode(payload) do
+        Ok(b)  -> Crypto.bytes_to_string(b)
+        Err(_) -> ""
         end
-      else ""  -- tampered
+      else ""  -- HMAC mismatch — tampered or wrong secret
       end
     end
-  end
-
-  -- Stub HMAC: XOR-folds the secret over the payload.
-  -- NOT cryptographically secure.  Replace with Crypto.hmac_sha256/2.
-  pfn stub_hmac(payload : String, secret : String) : String do
-    let slen = String.byte_size(secret)
-    if slen == 0 then "0000000000000000"
-    else
-      let plen  = String.byte_size(payload)
-      let total = fold_xor(payload, secret, plen, slen, 0, 0)
-      int_to_hex(total)
-    end
-  end
-
-  pfn fold_xor(payload : String, secret : String, plen : Int, slen : Int, idx : Int, acc : Int) : Int do
-    if idx >= plen then acc
-    else
-      let pc = string_char_code(payload, idx)
-      let sc = string_char_code(secret, idx % slen)
-      fold_xor(payload, secret, plen, slen, idx + 1, (acc + (pc * (idx + 1))) * 31 + sc)
-    end
-  end
-
-  pfn int_to_hex(n : Int) : String do
-    let abs_n = if n < 0 then -n else n end
-    int_to_hex_digits(abs_n % 4294967296, "")
-  end
-
-  pfn int_to_hex_digits(n : Int, acc : String) : String do
-    if n == 0 && !String.is_empty(acc) then acc
-    else
-      let digit = n % 16
-      let ch = hex_digit(digit)
-      int_to_hex_digits(n / 16, ch ++ acc)
-    end
-  end
-
-  pfn hex_digit(n : Int) : String do
-    match n do
-    0  -> "0" | 1  -> "1" | 2  -> "2" | 3  -> "3"
-    4  -> "4" | 5  -> "5" | 6  -> "6" | 7  -> "7"
-    8  -> "8" | 9  -> "9" | 10 -> "a" | 11 -> "b"
-    12 -> "c" | 13 -> "d" | 14 -> "e" | _  -> "f"
-    end
-  end
-
-  -- Constant-time string comparison to prevent timing attacks.
-  -- Falls back to == until Crypto.secure_compare is available.
-  pfn secure_compare(a : String, b : String) : Bool do
-    a == b
   end
 
 end
