@@ -93,10 +93,10 @@ Specced and queued. Roughly priority order within each group.
 - [ ] Embedded asset size limits — determine threshold for `--embed-assets` ([open-questions.md](open-questions.md) §8)
 
 ### Generators
-- [ ] `forge gen.handler` ([generators.md](generators.md))
-- [ ] `forge gen.context` ([generators.md](generators.md))
-- [ ] `forge gen.channel` ([generators.md](generators.md))
-- [ ] `forge gen.migration` ([generators.md](generators.md))
+- [x] `forge gen.handler` — `lib/forge/gen_handler.march`; generates handler module with CRUD action stubs + route snippet
+- [x] `forge gen.context` — `lib/forge/gen_context.march`; generates schema + context CRUD API + migration from field spec (`name:string email:string`)
+- [x] `forge gen.channel` — `lib/forge/gen_channel.march`; generates channel handler stub
+- [x] `forge gen.migration` — `lib/forge/gen_migration.march`; generates timestamped migration stub
 
 ### Testing
 - [ ] Channel testing helpers ([testing.md](testing.md))

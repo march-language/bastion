@@ -41,6 +41,10 @@ module  = "lib/forge/build_islands.march"
 command = "bastion.gen.handler"
 module  = "lib/forge/gen_handler.march"
 
+[archive.task.bastion.gen.context]
+command = "bastion.gen.context"
+module  = "lib/forge/gen_context.march"
+
 [archive.task.bastion.gen.channel]
 command = "bastion.gen.channel"
 module  = "lib/forge/gen_channel.march"
