@@ -1,0 +1,270 @@
+-- lib/forge/release.march — forge bastion.release
+--
+-- Builds a self-contained production release in _build/release/<name>/.
+--
+-- Usage:
+--   forge bastion.release
+--   forge bastion.release --embed-assets   # embed static files into binary
+--   forge bastion.release --dockerfile     # also generate a Dockerfile
+--   forge bastion.release --clean          # wipe _build/release first
+--
+-- Output layout:
+--   _build/release/<name>/
+--   ├── bin/<name>              # compiled native binary (release mode)
+--   ├── priv/static/            # all static assets (JS, WASM bundles, CSS, images)
+--   │   └── islands/
+--   │       ├── manifest.json
+--   │       └── *.wasm
+--   └── Dockerfile              # (if --dockerfile)
+--
+-- When --embed-assets is given the binary embeds all static files; the
+-- priv/static/ directory is not included in the release archive.
+--
+-- Environment variables read from .env (if present) at runtime:
+--   PORT             — HTTP port (default 4000)
+--   SECRET_KEY_BASE  — HMAC signing key (required in production)
+--   DATABASE_URL     — Postgres connection string (if using Depot)
+--   MARCH_ENV        — "production" is set automatically
+
+mod Forge.Release do
+
+  -- ── Helpers ──────────────────────────────────────────────────────────────────
+
+  pfn app_name() do
+    match File.read("forge.toml") do
+    Ok(content) -> extract_toml_string(content, "name")
+    Err(_)      -> "app"
+    end
+  end
+
+  -- Extract a string value from a TOML file for a given key.
+  -- Handles   key = "value"   with optional surrounding whitespace.
+  pfn extract_toml_string(content, key) do
+    let lines = String.split(content, "\n")
+    let prefix = key ++ " = \""
+    let matching = List.filter_map(lines, fn line ->
+      let trimmed = String.trim(line)
+      if String.starts_with(trimmed, prefix) do
+        let after = String.slice_bytes(trimmed, String.byte_size(prefix), String.byte_size(trimmed))
+        match String.index_of(after, "\"") do
+        Some(end_idx) -> Some(String.slice_bytes(after, 0, end_idx))
+        None          -> None
+        end
+      else None end
+    )
+    match matching do
+    Cons(v, _) -> v
+    Nil        -> "app"
+    end
+  end
+
+  pfn release_dir(name) do "_build/release/" ++ name end
+
+  pfn bin_dir(name) do release_dir(name) ++ "/bin" end
+
+  pfn static_dir(name) do release_dir(name) ++ "/priv/static" end
+
+  pfn run_cmd(prog, args) do
+    match Process.run(prog, args) do
+    Ok(result) ->
+      if Process.ok(result) do Ok(Process.stdout(result))
+      else Err(Process.stderr(result))
+      end
+    Err(msg) -> Err("failed to run " ++ prog ++ ": " ++ msg)
+    end
+  end
+
+  pfn sh(cmd) do
+    run_cmd("sh", ["-c", cmd])
+  end
+
+  -- ── Clean ─────────────────────────────────────────────────────────────────────
+
+  pfn clean_release(name) do
+    let dir = release_dir(name)
+    println("  Cleaning " ++ dir ++ " ...")
+    let _ = sh("rm -rf " ++ dir)
+    ()
+  end
+
+  -- ── Build binary ─────────────────────────────────────────────────────────────
+
+  pfn build_binary(name, embed_assets) do
+    let out_path = bin_dir(name) ++ "/" ++ name
+    let _ = Dir.mkdir_p(bin_dir(name))
+    let base_args = ["--compile", "--release", "-o", out_path]
+    let args = if embed_assets do
+      List.append(base_args, ["--embed-assets", "priv/static"])
+    else base_args end
+    println("  Compiling " ++ name ++ " (release mode) ...")
+    match run_cmd("march", args) do
+    Ok(_) -> do
+      println("  Binary:  " ++ out_path)
+      Ok(out_path)
+    end
+    Err(msg) -> do
+      println("  Error:   " ++ msg)
+      Err(msg)
+    end
+    end
+  end
+
+  -- ── Build islands ─────────────────────────────────────────────────────────────
+
+  pfn build_islands() do
+    println("  Building WASM islands ...")
+    match run_cmd("forge", ["bastion.build.islands"]) do
+    Ok(_)    -> do
+      println("  Islands: OK")
+      Ok(())
+    end
+    Err(msg) -> do
+      println("  Warning: island build failed — " ++ msg)
+      Ok(())   -- non-fatal: app can still run without islands
+    end
+    end
+  end
+
+  -- ── Copy static assets ────────────────────────────────────────────────────────
+
+  pfn copy_static(name) do
+    let dst = static_dir(name)
+    println("  Copying  priv/static/ → " ++ dst ++ " ...")
+    match Dir.exists("priv/static") do
+    false -> do
+      println("  Skipped  (no priv/static/ directory)")
+      Ok(())
+    end
+    true -> do
+      let _ = Dir.mkdir_p(dst)
+      match sh("cp -r priv/static/. " ++ dst ++ "/") do
+      Ok(_) -> Ok(())
+      Err(msg) -> Err("failed to copy static assets: " ++ msg)
+      end
+    end
+    end
+  end
+
+  -- ── Dockerfile ───────────────────────────────────────────────────────────────
+
+  pfn write_dockerfile(name, embed_assets) do
+    let path = release_dir(name) ++ "/Dockerfile"
+    let priv_copy = if embed_assets do
+      "# Static assets are embedded in the binary — no COPY needed.\n"
+    else
+      "COPY priv/ /app/priv/\n"
+    end
+    let content =
+      "# Generated by forge bastion.release\n" ++
+      "# Build: forge bastion.release --dockerfile\n\n" ++
+      "FROM ubuntu:22.04\n\n" ++
+      "RUN apt-get update && apt-get install -y --no-install-recommends \\\n" ++
+      "    ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*\n\n" ++
+      "WORKDIR /app\n\n" ++
+      "COPY bin/" ++ name ++ " /app/" ++ name ++ "\n" ++
+      priv_copy ++
+      "\n" ++
+      "# Runtime environment\n" ++
+      "ENV PORT=4000 \\\n" ++
+      "    MARCH_ENV=production\n\n" ++
+      "EXPOSE 4000\n\n" ++
+      "# Requires SECRET_KEY_BASE (and DATABASE_URL if using Depot) at runtime:\n" ++
+      "#   docker run -e SECRET_KEY_BASE=... -e DATABASE_URL=... " ++ name ++ "\n" ++
+      "HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD \\\n" ++
+      "    wget -qO- http://localhost:4000/health || exit 1\n\n" ++
+      "CMD [\"/app/" ++ name ++ "\", \"start\"]\n"
+    match File.write(path, content) do
+    Ok(_) -> do
+      println("  Dockerfile: " ++ path)
+      Ok(())
+    end
+    Err(msg) -> Err("failed to write Dockerfile: " ++ msg)
+    end
+  end
+
+  -- ── Integrity check ──────────────────────────────────────────────────────────
+
+  -- Warn if SECRET_KEY_BASE is not set in environment (needed in production).
+  pfn warn_secrets() do
+    let skb = Env.get("SECRET_KEY_BASE", "")
+    if String.is_empty(skb) do
+      println("")
+      println("  ⚠  WARNING: SECRET_KEY_BASE is not set in your environment.")
+      println("     Set it before starting the release binary:")
+      println("     export SECRET_KEY_BASE=$(openssl rand -hex 64)")
+    else () end
+  end
+
+  -- ── Summary ──────────────────────────────────────────────────────────────────
+
+  pfn print_summary(name, embed_assets, want_dockerfile) do
+    let dir = release_dir(name)
+    println("")
+    println("Release built: " ++ dir ++ "/")
+    println("")
+    if embed_assets do
+      println("  Single binary with embedded assets:")
+      println("    " ++ dir ++ "/bin/" ++ name)
+    else
+      println("  Binary + static assets:")
+      println("    " ++ dir ++ "/bin/" ++ name)
+      println("    " ++ dir ++ "/priv/static/")
+    end
+    if want_dockerfile do
+      println("  Dockerfile:")
+      println("    " ++ dir ++ "/Dockerfile")
+      println("")
+      println("  To build Docker image:")
+      println("    cd " ++ dir ++ " && docker build -t " ++ name ++ " .")
+    else () end
+    println("")
+    println("  To start (local):")
+    println("    SECRET_KEY_BASE=<key> DATABASE_URL=<url> ./" ++ dir ++ "/bin/" ++ name ++ " start")
+    println("")
+  end
+
+  -- ── Entry point ───────────────────────────────────────────────────────────────
+
+  fn run(args) do
+    let want_embed     = List.any(args, fn a -> a == "--embed-assets")
+    let want_clean     = List.any(args, fn a -> a == "--clean")
+    let want_dockerfile = List.any(args, fn a -> a == "--dockerfile")
+
+    let name = app_name()
+    println("Building release for '" ++ name ++ "' ...")
+    println("")
+
+    if want_clean do clean_release(name) else () end
+
+    let result =
+      build_islands()
+      |> Result.and_then(fn _ -> build_binary(name, want_embed))
+      |> Result.and_then(fn _ ->
+        if want_embed do Ok(())
+        else copy_static(name)
+        end)
+      |> Result.and_then(fn _ ->
+        if want_dockerfile do write_dockerfile(name, want_embed)
+        else Ok(())
+        end)
+
+    match result do
+    Ok(_) -> do
+      warn_secrets()
+      print_summary(name, want_embed, want_dockerfile)
+    end
+    Err(msg) -> do
+      println("")
+      println("Release failed: " ++ msg)
+      Process.exit(1)
+    end
+    end
+  end
+
+  fn main() do
+    let raw  = Env.get("FORGE_TASK_ARGS", "")
+    let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+    run(args)
+  end
+
+end

@@ -105,6 +105,7 @@ Specced and queued. Roughly priority order within each group.
 - [ ] Island integration tests (SSR + update, no WASM) ([testing.md](testing.md))
 
 ### Operations
+- [x] `forge bastion.release` — `lib/forge/release.march`; builds binary (release mode), compiles WASM islands, copies static assets to `_build/release/<name>/`; `--embed-assets` embeds statics into binary; `--dockerfile` generates Dockerfile with health-check; `--clean` wipes release dir first; warns if `SECRET_KEY_BASE` unset
 - [ ] Deployment guide — single binary, env config, health checks, graceful shutdown ([deployment.md](deployment.md))
 - [x] Structured logging + request ID propagation — `lib/logger.march`: `Logger.debug/info/warn/error(msg, meta)` + `*_conn` helpers; human format (dev) vs JSON (prod) via MARCH_ENV; `Middleware.request_id` upgraded to use `Crypto.generate_token(16)` + set `x-request-id` response header; `Middleware.logger` uses `Logger.info`
 - [x] Telemetry events — `lib/telemetry.march`: `Bastion.Telemetry.attach/3`, `detach/1`, `execute/3`; `span/3` (emits start/stop events around a fn, measures duration_ms); `request_start/1`, `request_stop/2`; Vault-backed handler registry; prefix-match subscriptions (["bastion","request"] matches all sub-events)

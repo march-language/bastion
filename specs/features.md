@@ -69,6 +69,7 @@ These features have corresponding code in `lib/` and are usable today (within th
 | JS → island public API | `priv/js/march-islands.js` | `window.Bastion.getIsland(name)` → `IslandHandle` with `.send(msg)`, `.getState()`, `.all()`, `.count`; `Bastion.onDispatch(name, cb)` dispatch observer; allows host-page JS to communicate with islands |
 | Cmd abstraction (WASM → JS) | `lib/cmd.march`, `priv/js/march-islands.js`, `priv/js/wasm-bridge.js` | `Bastion.Cmd` type + constructors; `executeCmd` runtime for `HttpGet/Post`, `After/Every`, `Focus/Blur`, `PushUrl/ReplaceUrl`, `StoreLocal/LoadLocal/RemoveLocal`, `ChannelPush`, `Batch`; `WasmIslandModule.updateWithCmd()` reads cmd via `march_island_last_cmd` sidecar export |
 | JS FFI layer (WASM → browser) | `lib/js.march`, `priv/js/wasm-bridge.js` | `Bastion.JS`: `call`, `global`, `eval`, `query_selector`, `get/set/remove_attribute`, `add_event_listener`, `string_val/int_val/bool_val/json_val`, `to_string/to_int`; JS handle table in wasm-bridge.js; `extern "bastion" "js_*"` imports; late-bound memory reference |
+| Release builder | `forge/release.march`, `forge.toml` | `forge bastion.release`; compiles binary (release mode) + WASM islands + static assets → `_build/release/<name>/`; `--embed-assets` bakes statics into binary; `--dockerfile` generates Dockerfile with HEALTHCHECK; `--clean` wipes release dir |
 
 ---
 
