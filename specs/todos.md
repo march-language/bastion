@@ -51,7 +51,7 @@ Specced and queued. Roughly priority order within each group.
 - [ ] Island WASM hot-swap in dev without state loss ([open-questions.md](open-questions.md) §4)
 
 ### WASM / Islands
-- [ ] Deferred hydration strategies in `march-islands.js` — `data-march-hydrate="lazy|idle|interaction|on-visible"` attributes are set server-side but the JS runtime loads all islands eagerly. Implement: `lazy` (load after page load), `idle` (requestIdleCallback), `interaction` (first click/focus), `on-visible` (IntersectionObserver)
+- [x] Deferred hydration strategies in `march-islands.js` — `data-march-hydrate="lazy|idle|interaction|on-visible"`; `_hydrateOne(el)` extracted from discoverIslands; `_scheduleHydration(el, strategy)` dispatches to: `lazy` (window load event or setTimeout), `idle` (requestIdleCallback + Safari fallback), `interaction` (once/capture on click/focus/keypress/touch/pointer), `on-visible` (shared IntersectionObserver with 10% threshold)
 - [ ] Wire `march_island_msg_from_name` in `wasm-bridge.js` — currently the runtime passes JSON message strings directly; should use the exported name-based variant constructor for zero-field enum messages
 - [ ] End-to-end island integration test — compile a simple island to WASM, serve it, verify hydration and state update round-trip in a browser
 - [ ] `forge gen.island` generator
