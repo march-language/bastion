@@ -122,4 +122,143 @@ mod Conn do
     HttpServer.halt(conn)
   end
 
+  -- ── Cookie accessors ──────────────────────────────────────────────────
+
+  doc """
+  Look up a cookie value from the request Cookie header by name.
+
+  Returns None if the cookie is not present.
+
+      Conn.get_req_cookie(conn, "_session")  -- Some("...") or None
+  """
+  fn get_req_cookie(conn : Conn, name : String) : Option(String) do
+    match HttpServer.get_req_header(conn, "cookie") do
+    None    -> None
+    Some(v) -> find_cookie(String.split(v, "; "), name)
+    end
+  end
+
+  doc """
+  Add a Set-Cookie response header.
+
+  `name` and `value` are the cookie name/value.  `opts` is a list of
+  (attribute, value) pairs — e.g. [("Path", "/"), ("HttpOnly", ""), ("SameSite", "Lax")].
+  A value of "" renders the attribute as a flag with no `=`.
+
+  Example:
+    Conn.put_resp_cookie(conn, "_session", signed_value,
+      [("Path", "/"), ("HttpOnly", ""), ("SameSite", "Lax"), ("Max-Age", "604800")])
+  """
+  fn put_resp_cookie(conn : Conn, name : String, value : String, opts : List((String, String))) : Conn do
+    let cookie = build_cookie(name, value, opts)
+    HttpServer.put_resp_header(conn, "set-cookie", cookie)
+  end
+
+  doc """
+  Delete a cookie by setting it with an expired Max-Age.
+
+      Conn.delete_resp_cookie(conn, "_session")
+  """
+  fn delete_resp_cookie(conn : Conn, name : String) : Conn do
+    put_resp_cookie(conn, name, "", [("Path", "/"), ("Max-Age", "0"), ("HttpOnly", ""), ("SameSite", "Lax")])
+  end
+
+  -- ── After-send hooks ──────────────────────────────────────────────────
+  --
+  -- After-send callbacks are identified by string keys stored in assigns
+  -- under "_after_send_hooks".  The server calls Conn.run_after_send/1
+  -- after the response is sent.  Hooks are dispatched by key — the caller
+  -- registers a well-known key and the server resolves it.
+  --
+  -- Built-in hook keys understood by BastionServer:
+  --   "session_commit"  — writes the session cookie (registered by Session.load)
+
+  doc """
+  Register a named after-send hook.  The hook is identified by a string key
+  that the server resolves to a function.
+
+  Multiple hooks can be registered; they are stored as a comma-separated list.
+
+      Conn.register_after_send(conn, "session_commit")
+  """
+  fn register_after_send(conn : Conn, hook_key : String) : Conn do
+    let current = match HttpServer.get_assign(conn, "_after_send_hooks") do
+      Some(v) -> v
+      None    -> ""
+      end
+    let updated = if String.is_empty(current) then hook_key
+                  else current ++ "," ++ hook_key
+    HttpServer.assign(conn, "_after_send_hooks", updated)
+  end
+
+  doc """
+  Return the list of registered after-send hook keys.
+
+  Called by BastionServer after send_resp to dispatch the hooks.
+  """
+  fn after_send_hooks(conn : Conn) : List(String) do
+    match HttpServer.get_assign(conn, "_after_send_hooks") do
+    None    -> []
+    Some(v) ->
+      if String.is_empty(v) then []
+      else String.split(v, ",")
+      end
+    end
+  end
+
+  -- ── Form param helper ─────────────────────────────────────────────────
+
+  doc """
+  Look up a single URL-encoded form body parameter by name.
+
+  Parses the request body as application/x-www-form-urlencoded.
+  Returns None if the param is not present.
+
+      Conn.get_form_param(conn, "email")  -- Some("me@example.com") or None
+  """
+  fn get_form_param(conn : Conn, key : String) : Option(String) do
+    let body = HttpServer.req_body(conn)
+    find_param(String.split(body, "&"), key)
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────────
+
+  pfn find_cookie(pairs : List(String), name : String) : Option(String) do
+    match pairs do
+    Nil -> None
+    Cons(pair, rest) ->
+      match String.split_first(pair, "=") do
+      Some((k, v)) ->
+        if String.trim(k) == name then Some(v)
+        else find_cookie(rest, name)
+        end
+      None -> find_cookie(rest, name)
+      end
+    end
+  end
+
+  pfn build_cookie(name : String, value : String, opts : List((String, String))) : String do
+    let base = name ++ "=" ++ value
+    let attrs = String.join(List.map(opts, fn (k, v) ->
+      if String.is_empty(v) then "; " ++ k
+      else "; " ++ k ++ "=" ++ v
+      end
+    ), "")
+    base ++ attrs
+  end
+
+  pfn find_param(pairs : List(String), key : String) : Option(String) do
+    match pairs do
+    Nil -> None
+    Cons(pair, rest) ->
+      match String.split_first(pair, "=") do
+      Some((k, v)) ->
+        if k == key then Some(v)
+        else find_param(rest, key)
+        end
+      None -> find_param(rest, key)
+      end
+    end
+  end
+
 end

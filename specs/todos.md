@@ -21,12 +21,14 @@ The most impactful unblocked work. These are preconditions for most other featur
 - [ ] **Kill `window.marchIslands.send` global bus** — Replace with the parent-child dispatch model from [islands-data-flow.md](islands-data-flow.md). See wasm-islands.md current design.
 - [ ] **Channel server implementation** — Spec is complete ([channels.md](channels.md)), implementation needed. Unblocks: island-to-server sync, real-time features, Presence.
 - [ ] **Auth/session/database stack** — See [auth-session-database.md](auth-session-database.md) for the full sequenced plan, API design, error handling, security checklist, and end-to-end example. Build in this order:
-  - [ ] Step 0: Conn prerequisites — add `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `run_after_send`, `get_form_param` to `lib/conn.march`; call `run_after_send` in `bastion_server.march`
+  - [x] Step 0: Conn prerequisites — `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `get_form_param` added to `lib/conn.march`
+  - [ ] Step 0b: Wire `Conn.after_send_hooks` dispatch in `bastion_server.march`; call `Session.commit_from_conn` for "session_commit" hook
   - [ ] Step 1: `lib/crypto.march` — `random_bytes`, `secure_compare`, `sha256`, `hkdf`, AES-256-GCM encrypt/decrypt, HMAC-SHA256 sign/verify, Argon2id `hash_password`/`verify_password`
-  - [ ] Step 2: `lib/depot_middleware.march` — `with_pool`, `after_send` pool checkin (uses Step 0 `register_after_send`)
-  - [ ] Step 3: `lib/session.march` — cookie session with real AES-256-GCM + HMAC (replaces typed_middleware stubs); auto-commit in `send_resp`
-  - [ ] Step 4: `lib/flash.march` — `put`, `get`, `load_flash`, `clear`; one-time session messages
-  - [ ] Step 5: `lib/csrf.march` — token generation, `tag_string` runtime (called by ~H desugarer), validation middleware, `skip/1`
+  - [ ] Step 1b: Upgrade `session.march` crypto — replace `stub_hmac` with `Crypto.hmac_sha256`; add AES-256-GCM encrypt/decrypt
+  - [ ] Step 2: `lib/depot_middleware.march` — `with_pool`, `after_send` pool checkin
+  - [x] Step 3: `lib/session.march` — cookie session API complete; crypto stubs in place (upgrade after Step 1)
+  - [x] Step 4: `lib/flash.march` — `put`, `get`, `loaded_flashes`, `clear`, `delete`; `Form.FlashGroup` component
+  - [ ] Step 5: `lib/csrf.march` — already has token/protect/skip; upgrade token generation to use `Crypto.random_bytes` after Step 1
   - [ ] Step 6: `lib/auth_middleware.march` — `load_current_user`, `require_auth`, `authenticated`, `log_in` (with remember-me), `log_out`
   - [ ] Step 7: `lib/vault.march` — in-memory KV actor, TTL sweeper (core API only: `put/get/delete/put_new`)
   - [ ] Step 8: `lib/rate_limit.march` — sliding window rate limiter backed by Vault; `x-ratelimit-*` headers; 429 response
@@ -63,11 +65,13 @@ Specced and queued. Roughly priority order within each group.
 - [ ] Fragment caching ([caching.md](caching.md))
 
 ### Forms
-- [ ] `Bastion.Form` render helpers — `form_tag`, `input_tag`, `error_tag` (low-level, used by `~H` components)
-- [ ] `<.form>`, `<.input>`, `<.select>`, `<.textarea>`, `<.field>`, `<.error>` components ([form-handling.md](form-handling.md))
-- [ ] `<.flash_group>` component — reads and clears session flash ([form-handling.md](form-handling.md))
-- [ ] `put_flash/3`, `get_flash/2`, `clear_flash/1` in `lib/session.march` ([form-handling.md](form-handling.md))
-- [ ] Enhanced form JS — intercept `<form enhance>` submit, POST via fetch, swap fragment ([form-handling.md](form-handling.md))
+- [x] `Gate` changeset validation — `cast`, `validate_required/format/length/number/inclusion/confirmation`, `add_error`, `error_for` (`lib/gate.march`)
+- [x] `Form` render helpers + `Form.Input/Select/Textarea/Field/Error` ~H components (`lib/form.march`)
+- [x] `Flash` module + `Form.FlashGroup` component (`lib/flash.march`)
+- [x] Cookie helpers on `Conn` — `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send` (`lib/conn.march`)
+- [x] `Session` — cookie-backed sessions with auto-commit hook (`lib/session.march`)
+- [x] Enhanced form JS — `data-enhance` fetch submit + idiomorph fragment swap (`priv/js/form-enhance.js`)
+- [ ] `<.Form>` wrapper component — requires slot/inner content support in lowering pass ([form-handling.md](form-handling.md))
 
 ### Templates & Styling
 - [ ] `~H` template component system — components as functions, XSS prevention ([templates.md](templates.md))

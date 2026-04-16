@@ -1,0 +1,226 @@
+-- test/test_form.march
+-- Tests for Form rendering helpers (input_tag, select_tag, error_tag, field_tag).
+
+mod TestForm do
+
+-- ── Form.input_tag ────────────────────────────────────────────────────────────
+
+describe "Form.input_tag" do
+  test "renders input element with correct type and name" do
+    let html = Form.input_tag("email", "email", "", [])
+    assert (string_contains(html, "type=\"email\""))
+    assert (string_contains(html, "name=\"email\""))
+  end
+
+  test "sets id to match name" do
+    let html = Form.input_tag("username", "text", "", [])
+    assert (string_contains(html, "id=\"username\""))
+  end
+
+  test "escapes value" do
+    let html = Form.input_tag("q", "text", "<script>", [])
+    assert (string_contains(html, "&lt;script&gt;"))
+    assert (!string_contains(html, "<script>"))
+  end
+
+  test "renders empty value when blank" do
+    let html = Form.input_tag("name", "text", "", [])
+    assert (string_contains(html, "value=\"\""))
+  end
+
+  test "renders extra attrs" do
+    let html = Form.input_tag("name", "text", "", [("class", "form-input")])
+    assert (string_contains(html, "class=\"form-input\""))
+  end
+end
+
+-- ── Form.textarea_tag ────────────────────────────────────────────────────────
+
+describe "Form.textarea_tag" do
+  test "renders textarea with name" do
+    let html = Form.textarea_tag("body", "hello", [])
+    assert (string_contains(html, "name=\"body\""))
+    assert (string_contains(html, "<textarea"))
+    assert (string_contains(html, "</textarea>"))
+  end
+
+  test "escapes content" do
+    let html = Form.textarea_tag("body", "<b>bold</b>", [])
+    assert (string_contains(html, "&lt;b&gt;"))
+  end
+end
+
+-- ── Form.select_tag ──────────────────────────────────────────────────────────
+
+describe "Form.select_tag" do
+  test "renders select with options" do
+    let opts = [("Admin", "admin"), ("Member", "member")]
+    let html  = Form.select_tag("role", opts, "", [])
+    assert (string_contains(html, "<select"))
+    assert (string_contains(html, "value=\"admin\""))
+    assert (string_contains(html, "value=\"member\""))
+    assert (string_contains(html, "Admin"))
+    assert (string_contains(html, "Member"))
+  end
+
+  test "marks selected option" do
+    let opts = [("Admin", "admin"), ("Member", "member")]
+    let html  = Form.select_tag("role", opts, "admin", [])
+    assert (string_contains(html, "value=\"admin\" selected"))
+  end
+
+  test "no selected attribute on unselected options" do
+    let opts = [("Admin", "admin"), ("Member", "member")]
+    let html  = Form.select_tag("role", opts, "admin", [])
+    -- "member" option should not have "selected"
+    -- crude check: count occurrences of "selected"
+    let idx1 = String.index_of(html, "selected")
+    let idx2 = match idx1 do
+      None    -> None
+      Some(i) -> String.index_of(String.slice_bytes(html, i + 1, String.byte_size(html) - i - 1), "selected")
+      end
+    assert (idx2 == None)
+  end
+
+  test "escapes option labels and values" do
+    let opts = [("<danger>", "<val>")]
+    let html  = Form.select_tag("x", opts, "", [])
+    assert (string_contains(html, "&lt;danger&gt;"))
+    assert (!string_contains(html, "<danger>"))
+  end
+end
+
+-- ── Form.error_tag ───────────────────────────────────────────────────────────
+
+describe "Form.error_tag" do
+  test "renders error span when Some" do
+    let html = Form.error_tag(Some("can't be blank"))
+    assert (string_contains(html, "form-error"))
+    assert (string_contains(html, "can&#39;t be blank"))
+  end
+
+  test "renders empty string when None" do
+    let html = Form.error_tag(None)
+    assert (html == "")
+  end
+end
+
+-- ── Form.field_tag ───────────────────────────────────────────────────────────
+
+describe "Form.field_tag" do
+  test "renders wrapper div with label and input" do
+    let input = Form.input_tag("email", "email", "", [])
+    let html  = Form.field_tag("email", "Email", input, None)
+    assert (string_contains(html, "class=\"form-field\""))
+    assert (string_contains(html, "<label for=\"email\">Email</label>"))
+    assert (string_contains(html, "type=\"email\""))
+  end
+
+  test "renders error span when error present" do
+    let input = Form.input_tag("email", "email", "", [])
+    let html  = Form.field_tag("email", "Email", input, Some("is invalid"))
+    assert (string_contains(html, "form-error"))
+    assert (string_contains(html, "is invalid"))
+  end
+
+  test "injects aria-invalid on input when error present" do
+    let input = Form.input_tag("email", "email", "", [])
+    let html  = Form.field_tag("email", "Email", input, Some("is invalid"))
+    assert (string_contains(html, "aria-invalid=\"true\""))
+  end
+
+  test "no label element when label is empty" do
+    let input = Form.input_tag("email", "email", "", [])
+    let html  = Form.field_tag("email", "", input, None)
+    assert (!string_contains(html, "<label"))
+  end
+end
+
+-- ── Form.Input.render (component) ────────────────────────────────────────────
+
+describe "Form.Input.render" do
+  test "renders field with value from gate" do
+    let gate = Gate.cast([("email", "me@example.com")], ["email"])
+    let iol  = Form.Input.render("email", "email", "Email", Some(gate))
+    let html = IOList.to_string(iol)
+    assert (string_contains(html, "value=\"me@example.com\""))
+    assert (string_contains(html, "Email"))
+  end
+
+  test "shows error from gate" do
+    let gate = Gate.cast([("email", "bad")], ["email"])
+               |> Gate.validate_format("email", ".+@.+")
+    let iol  = Form.Input.render("email", "email", "Email", Some(gate))
+    let html = IOList.to_string(iol)
+    assert (string_contains(html, "form-error"))
+  end
+
+  test "explicit value overrides empty gate field" do
+    let gate = Gate.cast([], ["email"])
+    let iol  = Form.Input.render("email", "email", "Email", Some(gate), "fallback@example.com")
+    let html = IOList.to_string(iol)
+    assert (string_contains(html, "value=\"fallback@example.com\""))
+  end
+
+  test "required marker appended to label" do
+    let iol  = Form.Input.render("name", "text", "Full Name", None, "", true)
+    let html = IOList.to_string(iol)
+    assert (string_contains(html, "Full Name *"))
+  end
+
+  test "None gate uses explicit value" do
+    let iol  = Form.Input.render("q", "text", "Query", None, "hello")
+    let html = IOList.to_string(iol)
+    assert (string_contains(html, "value=\"hello\""))
+    assert (!string_contains(html, "form-error"))
+  end
+end
+
+-- ── Form.Select.render (component) ───────────────────────────────────────────
+
+describe "Form.Select.render" do
+  test "renders select with options from gate field" do
+    let gate = Gate.cast([("role", "admin")], ["role"])
+    let opts = [("Admin", "admin"), ("Member", "member")]
+    let iol  = Form.Select.render("role", "Role", opts, Some(gate))
+    let html = IOList.to_string(iol)
+    assert (string_contains(html, "<select"))
+    assert (string_contains(html, "value=\"admin\" selected"))
+  end
+end
+
+-- ── Form.Error.render (component) ────────────────────────────────────────────
+
+describe "Form.Error.render" do
+  test "renders error for named field from gate" do
+    let gate = Gate.cast([], ["email"])
+               |> Gate.add_error("email", "is required")
+    let iol  = Form.Error.render(Some(gate), "email")
+    let html = IOList.to_string(iol)
+    assert (string_contains(html, "is required"))
+  end
+
+  test "renders empty string when gate has no error for field" do
+    let gate = Gate.cast([("email", "ok@example.com")], ["email"])
+    let iol  = Form.Error.render(Some(gate), "email")
+    let html = IOList.to_string(iol)
+    assert (html == "")
+  end
+
+  test "renders empty string when gate is None" do
+    let iol  = Form.Error.render(None, "email")
+    let html = IOList.to_string(iol)
+    assert (html == "")
+  end
+end
+
+-- ── Helpers ───────────────────────────────────────────────────────────────────
+
+pfn string_contains(haystack : String, needle : String) : Bool do
+  match String.index_of(haystack, needle) do
+  Some(_) -> true
+  None    -> false
+  end
+end
+
+end

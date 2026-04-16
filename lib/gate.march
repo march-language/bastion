@@ -1,0 +1,382 @@
+-- Gate — changeset-style form validation for Bastion.
+--
+-- A Gate is an immutable value that tracks:
+--   - The proposed changes (permitted fields extracted from raw params)
+--   - Validation errors accumulated along the pipeline
+--   - The original record data (for cast_record / update flows)
+--
+-- Gates flow through a validation pipeline using the pipe operator:
+--
+--   fn registration_gate(params) do
+--     Gate.cast(params, ["email", "password"])
+--       |> Gate.validate_required(["email", "password"])
+--       |> Gate.validate_format("email", ".+@.+\\..+")
+--       |> Gate.validate_length("password", [LenMin(12), LenMax(72)])
+--   end
+--
+-- Check validity and read errors:
+--
+--   if Gate.valid?(gate) do
+--     -- apply to DB
+--   else
+--     render_form(conn, gate)  -- errors show in template
+--   end
+--
+-- The gate is valid when it has no errors.  A gate with errors is still a
+-- complete value — you pass it back to the template to display inline errors.
+--
+-- unique_constraint/3 is a marker only: the DB layer checks uniqueness on
+-- insert and merges errors back into the gate via Gate.add_error/3.
+
+mod Gate do
+
+  -- ── Types ─────────────────────────────────────────────────────────────────
+
+  -- Gate(changes, errors, original_data)
+  --   changes      : permitted field changes, (field, value) pairs
+  --   errors       : validation errors, (field, message) pairs
+  --   original_data: original record, (field, value) pairs (empty for new records)
+  opaque type Gate = Gate(List((String, String)), List((String, String)), List((String, String)))
+
+  -- Length constraint for validate_length.
+  type LenConstraint = LenMin(Int) | LenMax(Int)
+
+  -- Number constraint for validate_number.
+  type NumConstraint = NumMin(Int) | NumMax(Int)
+
+  -- Options for unique_constraint (passed to DB layer for error message mapping).
+  type ConstraintOpt = ConstraintName(String) | ConstraintMessage(String)
+
+  -- ── Construction ─────────────────────────────────────────────────────────
+
+  doc """
+  Build a gate from raw params, keeping only the permitted fields.
+
+  `params` is a list of (key, value) string pairs — e.g., from
+  `Request.body_params/1`.  Only fields named in `permitted` are
+  kept as changes; all others are dropped.
+
+      Gate.cast([("email", "me@example.com"), ("role", "admin")], ["email"])
+      -- Gate with changes = [("email", "me@example.com")]
+      -- "role" dropped — not in permitted list
+  """
+  fn cast(params : List((String, String)), permitted : List(String)) : Gate do
+    let changes = filter_permitted(params, permitted)
+    Gate(changes, Nil, Nil)
+  end
+
+  doc """
+  Update an existing record's fields from params, keeping only permitted fields.
+
+  Same as cast/2 but stores the original record data so error messages and
+  the template can show existing values for unchanged fields.
+
+      let gate = Gate.cast_record(user, params, ["email"])
+      -- changes = only the permitted fields that were in params
+      -- original_data = user's existing fields
+  """
+  fn cast_record(record : List((String, String)), params : List((String, String)), permitted : List(String)) : Gate do
+    let changes = filter_permitted(params, permitted)
+    Gate(changes, Nil, record)
+  end
+
+  -- ── Validation pipeline ──────────────────────────────────────────────────
+
+  doc """
+  Require that all listed fields are present and non-empty.
+
+      Gate.validate_required(gate, ["email", "password"])
+  """
+  fn validate_required(gate : Gate, fields : List(String)) : Gate do
+    List.fold_left(fields, gate, fn (g, field) ->
+      match get_change(g, field) do
+      None    -> add_error(g, field, "can't be blank")
+      Some(v) ->
+        if String.is_empty(String.trim(v))
+        then add_error(g, field, "can't be blank")
+        else g
+      end
+    )
+  end
+
+  doc """
+  Validate that a field value matches a regex pattern string.
+
+      Gate.validate_format(gate, "email", ".+@.+\\..+")
+  """
+  fn validate_format(gate : Gate, field : String, pattern : String) : Gate do
+    match get_change(gate, field) do
+    None    -> gate
+    Some(v) ->
+      if Regex.match(pattern, v) then gate
+      else add_error(gate, field, "has invalid format")
+      end
+    end
+  end
+
+  doc """
+  Validate the byte length of a field value.
+
+  Accepts a list of LenMin(n) and/or LenMax(n) constraints.
+
+      Gate.validate_length(gate, "password", [LenMin(12), LenMax(72)])
+      Gate.validate_length(gate, "username", [LenMin(3), LenMax(20)])
+  """
+  fn validate_length(gate : Gate, field : String, constraints : List(LenConstraint)) : Gate do
+    match get_change(gate, field) do
+    None    -> gate
+    Some(v) -> do
+      let len = String.byte_size(v)
+      List.fold_left(constraints, gate, fn (g, c) ->
+        match c do
+        LenMin(n) ->
+          if len >= n then g
+          else add_error(g, field, "is too short (minimum is " ++ int_to_string(n) ++ " characters)")
+          end
+        LenMax(n) ->
+          if len <= n then g
+          else add_error(g, field, "is too long (maximum is " ++ int_to_string(n) ++ " characters)")
+          end
+        end
+      )
+    end
+    end
+  end
+
+  doc """
+  Validate that a numeric string field falls within bounds.
+
+  Parses the field value as an integer before comparing.
+
+      Gate.validate_number(gate, "age", [NumMin(18), NumMax(120)])
+  """
+  fn validate_number(gate : Gate, field : String, constraints : List(NumConstraint)) : Gate do
+    match get_change(gate, field) do
+    None    -> gate
+    Some(v) ->
+      match string_to_int(v) do
+      None    -> add_error(gate, field, "is not a valid number")
+      Some(n) ->
+        List.fold_left(constraints, gate, fn (g, c) ->
+          match c do
+          NumMin(min) ->
+            if n >= min then g
+            else add_error(g, field, "must be greater than or equal to " ++ int_to_string(min))
+            end
+          NumMax(max) ->
+            if n <= max then g
+            else add_error(g, field, "must be less than or equal to " ++ int_to_string(max))
+            end
+          end
+        )
+      end
+    end
+  end
+
+  doc """
+  Validate that a field value is one of the allowed values.
+
+      Gate.validate_inclusion(gate, "role", ["admin", "member", "viewer"])
+  """
+  fn validate_inclusion(gate : Gate, field : String, values : List(String)) : Gate do
+    match get_change(gate, field) do
+    None    -> gate
+    Some(v) ->
+      if List.member(v, values) then gate
+      else add_error(gate, field, "is not included in the list")
+      end
+    end
+  end
+
+  doc """
+  Validate that `field` matches `field_confirmation`.
+
+  Looks for a parallel change key `field ++ "_confirmation"`.  If the
+  confirmation key is not present, no error is added (treat as not filled).
+
+      Gate.validate_confirmation(gate, "password")
+      -- checks "password" == "password_confirmation"
+  """
+  fn validate_confirmation(gate : Gate, field : String) : Gate do
+    let conf_field = field ++ "_confirmation"
+    match (get_change(gate, field), get_change(gate, conf_field)) do
+    (Some(v), Some(c)) ->
+      if v == c then gate
+      else add_error(gate, conf_field, "does not match " ++ field)
+      end
+    _ -> gate
+    end
+  end
+
+  doc """
+  Mark a field with a unique constraint that will be checked by the DB layer.
+
+  This is a no-op in the gate itself — it records the constraint metadata
+  in the errors list as a special sentinel so that the DB layer (Depot) can
+  map a uniqueness violation back to a field-level error message.
+
+  `opts` may include ConstraintName(str) and ConstraintMessage(str).
+
+      Gate.unique_constraint(gate, "email",
+        [ConstraintName("users_email_index"),
+         ConstraintMessage("has already been taken")])
+  """
+  fn unique_constraint(gate : Gate, field : String, opts : List(ConstraintOpt)) : Gate do
+    -- No-op in the gate layer.  The DB layer calls Gate.add_error/3 on
+    -- constraint violations.  Stored as metadata for Depot to consume.
+    let msg = find_constraint_message(opts, "has already been taken")
+    let name = find_constraint_name(opts, field ++ "_unique")
+    Gate(changes_of(gate), errors_of(gate),
+         Cons(("__constraint__" ++ field, name ++ "|" ++ msg), original_of(gate)))
+  end
+
+  -- ── Reading gate state ─────────────────────────────────────────────────
+
+  doc """
+  Returns true if the gate has no validation errors.
+
+      if Gate.valid?(gate) do Depot.insert(db, schema, gate) end
+  """
+  fn valid?(gate : Gate) : Bool do
+    match gate do
+    Gate(_, errors, _) -> List.is_empty(errors)
+    end
+  end
+
+  doc """
+  Returns the proposed change value for a field, if present.
+
+  None if the field was not in the permitted list or not in the params.
+
+      Gate.get_change(gate, "email")  -- Some("me@example.com") or None
+  """
+  fn get_change(gate : Gate, field : String) : Option(String) do
+    lookup_pair(changes_of(gate), field)
+  end
+
+  doc """
+  Returns the value for a field: the change if present, else the original data.
+
+  Use this in templates to populate form fields — shows the user's input
+  on re-render, falling back to the original record value.
+
+      Gate.get_field(gate, "email")
+  """
+  fn get_field(gate : Gate, field : String) : Option(String) do
+    match get_change(gate, field) do
+    Some(v) -> Some(v)
+    None    -> lookup_pair(original_of(gate), field)
+    end
+  end
+
+  doc """
+  Returns all validation errors as a list of (field, message) pairs.
+
+      Gate.errors(gate)
+      -- [("email", "has invalid format"), ("password", "is too short ...")]
+  """
+  fn errors(gate : Gate) : List((String, String)) do
+    errors_of(gate)
+  end
+
+  doc """
+  Returns the first error message for a field, or None.
+
+      Gate.error_for(gate, "email")  -- Some("has invalid format") or None
+  """
+  fn error_for(gate : Gate, field : String) : Option(String) do
+    lookup_pair(errors_of(gate), field)
+  end
+
+  -- ── Mutating gate state ─────────────────────────────────────────────────
+
+  doc """
+  Add or replace a change for a field.
+
+  Used in validation pipeline helpers (e.g., hash_password replaces
+  the raw "password" change with "hashed_password").
+
+      Gate.put_change(gate, "hashed_password", hashed)
+  """
+  fn put_change(gate : Gate, field : String, value : String) : Gate do
+    Gate(upsert_pair(changes_of(gate), field, value), errors_of(gate), original_of(gate))
+  end
+
+  doc """
+  Remove a change from the gate.
+
+      Gate.delete_change(gate, "password")
+  """
+  fn delete_change(gate : Gate, field : String) : Gate do
+    Gate(remove_pair(changes_of(gate), field), errors_of(gate), original_of(gate))
+  end
+
+  doc """
+  Add a validation error for a field.  Accumulated — calling multiple times
+  for the same field adds multiple errors, but error_for/2 returns the first.
+
+      Gate.add_error(gate, "email", "has already been taken")
+  """
+  fn add_error(gate : Gate, field : String, message : String) : Gate do
+    Gate(changes_of(gate), Cons((field, message), errors_of(gate)), original_of(gate))
+  end
+
+  -- ── Internal helpers ────────────────────────────────────────────────────
+
+  pfn changes_of(gate : Gate) : List((String, String)) do
+    match gate do Gate(c, _, _) -> c end
+  end
+
+  pfn errors_of(gate : Gate) : List((String, String)) do
+    match gate do Gate(_, e, _) -> e end
+  end
+
+  pfn original_of(gate : Gate) : List((String, String)) do
+    match gate do Gate(_, _, o) -> o end
+  end
+
+  pfn filter_permitted(params : List((String, String)), permitted : List(String)) : List((String, String)) do
+    List.filter(params, fn (k, _) -> List.member(k, permitted))
+  end
+
+  pfn lookup_pair(pairs : List((String, String)), key : String) : Option(String) do
+    match pairs do
+    Nil -> None
+    Cons((k, v), rest) ->
+      if k == key then Some(v)
+      else lookup_pair(rest, key)
+      end
+    end
+  end
+
+  pfn upsert_pair(pairs : List((String, String)), key : String, value : String) : List((String, String)) do
+    match pairs do
+    Nil -> [(key, value)]
+    Cons((k, v), rest) ->
+      if k == key then Cons((key, value), rest)
+      else Cons((k, v), upsert_pair(rest, key, value))
+      end
+    end
+  end
+
+  pfn remove_pair(pairs : List((String, String)), key : String) : List((String, String)) do
+    List.filter(pairs, fn (k, _) -> k != key)
+  end
+
+  pfn find_constraint_message(opts : List(ConstraintOpt), default : String) : String do
+    match opts do
+    Nil -> default
+    Cons(ConstraintMessage(m), _) -> m
+    Cons(_, rest) -> find_constraint_message(rest, default)
+    end
+  end
+
+  pfn find_constraint_name(opts : List(ConstraintOpt), default : String) : String do
+    match opts do
+    Nil -> default
+    Cons(ConstraintName(n), _) -> n
+    Cons(_, rest) -> find_constraint_name(rest, default)
+    end
+  end
+
+end

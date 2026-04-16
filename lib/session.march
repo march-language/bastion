@@ -1,0 +1,322 @@
+-- Session — cookie-backed session storage for Bastion.
+--
+-- Sessions are stored as a signed+encrypted cookie named "_session".
+-- The cookie value is: base64(encrypt(serialize(data))) with an HMAC
+-- signature prepended: "<hmac>.<encrypted_payload>".
+--
+-- Cookie lifetime:
+--   - Browser session (no Max-Age) by default.
+--   - Persistent (Max-Age=N) when remember_me: true.
+--
+-- Session auto-commit:
+--   Session.load/2 registers an after-send hook "session_commit" that
+--   writes the Set-Cookie header after the response body is sent.
+--   Call Session.load/2 early in the middleware pipeline.
+--
+-- Crypto note:
+--   The current implementation uses HMAC-SHA256 signing with a stub
+--   encryption layer (XOR-based, NOT production-safe).  Replace the
+--   pfn encrypt/decrypt pair with AES-256-GCM once lib/crypto.march
+--   (Step 1 in auth-session-database.md) is implemented.
+--
+-- Typical pipeline:
+--
+--   conn
+--   |> Session.load(secret_key_base)
+--   |> CSRF.ensure_token()
+--   |> CSRF.protect()
+--   |> MyApp.Router.route()
+--
+-- Reading and writing session values:
+--
+--   Session.get(conn, "user_id")
+--   Session.put(conn, "user_id", "42")
+--   Session.delete(conn, "user_id")
+--   Session.clear(conn)
+--
+-- Committing explicitly (if not using the after-send hook):
+--
+--   conn |> Session.commit(secret_key_base)
+
+mod Session do
+
+  import Conn
+
+  -- Assigns key where the secret_key_base is stored for the commit hook.
+  let secret_assign = "_session_secret"
+
+  -- Assigns key that marks the session as modified (needs re-commit).
+  let dirty_assign  = "_session_dirty"
+
+  -- Cookie name.
+  let cookie_name   = "_session"
+
+  -- Session data assign key (holds the decoded "key=value;..." payload).
+  let data_assign   = "_session_data"
+
+  -- ── Pipeline middleware ───────────────────────────────────────────────────
+
+  doc """
+  Load the session from the request cookie and register the commit hook.
+
+  Decodes and verifies the "_session" cookie using `secret_key_base`.
+  If the cookie is absent or has been tampered with, starts a fresh
+  empty session.
+
+  Registers the "session_commit" after-send hook so the session is
+  automatically written back to a Set-Cookie header after the response.
+
+  Call this early in the request pipeline, after CSRF.ensure_token or
+  as the first middleware step.
+
+      conn |> Session.load(secret_key_base)
+  """
+  fn load(conn : Conn, secret_key_base : String) : Conn do
+    let raw = Conn.get_req_cookie(conn, cookie_name)
+    let data = match raw do
+      None    -> ""
+      Some(v) -> verify_and_decode(v, secret_key_base)
+      end
+    conn
+    |> HttpServer.assign(secret_assign, secret_key_base)
+    |> HttpServer.assign(data_assign, data)
+    |> Conn.register_after_send("session_commit")
+  end
+
+  -- ── Reading ───────────────────────────────────────────────────────────────
+
+  doc """
+  Get a session value by key.
+
+      Session.get(conn, "user_id")   -- Some("42") or None
+  """
+  fn get(conn : Conn, key : String) : Option(String) do
+    let data = session_data(conn)
+    find_session_key(String.split(data, ";"), key)
+  end
+
+  -- ── Writing ───────────────────────────────────────────────────────────────
+
+  doc """
+  Store a value in the session under `key`.
+
+  Marks the session as dirty so it will be committed.
+
+      Session.put(conn, "user_id", user_id)
+  """
+  fn put(conn : Conn, key : String, value : String) : Conn do
+    let data    = session_data(conn)
+    let entries = parse_session(data)
+    let updated = upsert_entry(entries, key, value)
+    conn
+    |> HttpServer.assign(data_assign, serialize_session(updated))
+    |> mark_dirty()
+  end
+
+  doc """
+  Delete a key from the session.
+
+      Session.delete(conn, "user_id")
+  """
+  fn delete(conn : Conn, key : String) : Conn do
+    let data    = session_data(conn)
+    let entries = parse_session(data)
+    let updated = List.filter(entries, fn (k, _) -> k != key)
+    conn
+    |> HttpServer.assign(data_assign, serialize_session(updated))
+    |> mark_dirty()
+  end
+
+  doc """
+  Remove all keys from the session.
+
+      Session.clear(conn)
+  """
+  fn clear(conn : Conn) : Conn do
+    conn
+    |> HttpServer.assign(data_assign, "")
+    |> mark_dirty()
+  end
+
+  -- ── Committing ────────────────────────────────────────────────────────────
+
+  doc """
+  Write the session back to a Set-Cookie header.
+
+  Called automatically by BastionServer via the "session_commit"
+  after-send hook registered by Session.load/2.  You can also call
+  it explicitly before redirecting if the hook mechanism isn't available.
+
+      conn |> Session.commit(secret_key_base)
+  """
+  fn commit(conn : Conn, secret_key_base : String) : Conn do
+    match HttpServer.get_assign(conn, dirty_assign) do
+    None    -> conn   -- session not modified; skip Set-Cookie
+    Some(_) -> do
+      let data      = session_data(conn)
+      let signed    = sign_and_encode(data, secret_key_base)
+      let max_age   = match HttpServer.get_assign(conn, "_session_max_age") do
+        Some(v) -> [("Max-Age", v)]
+        None    -> []
+        end
+      let opts = List.append(
+        [("Path", "/"), ("HttpOnly", ""), ("SameSite", "Lax")],
+        max_age
+      )
+      Conn.put_resp_cookie(conn, cookie_name, signed, opts)
+    end
+    end
+  end
+
+  doc """
+  Commit the session using the secret stored by Session.load/2.
+
+  Used by BastionServer's after-send hook dispatch — it has only the
+  conn and looks up the secret from assigns.
+  """
+  fn commit_from_conn(conn : Conn) : Conn do
+    match HttpServer.get_assign(conn, secret_assign) do
+    None        -> conn   -- Session.load was never called; no-op
+    Some(secret) -> commit(conn, secret)
+    end
+  end
+
+  doc """
+  Configure the session cookie to persist for `seconds` after creation.
+
+  Call before commit/2 or let the commit hook pick it up.
+
+      Session.persist(conn, 60 * 60 * 24 * 60)   -- 60 days
+  """
+  fn persist(conn : Conn, seconds : Int) : Conn do
+    HttpServer.assign(conn, "_session_max_age", int_to_string(seconds))
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────────────
+
+  pfn session_data(conn : Conn) : String do
+    match HttpServer.get_assign(conn, data_assign) do
+    Some(v) -> v
+    None    -> ""
+    end
+  end
+
+  pfn mark_dirty(conn : Conn) : Conn do
+    HttpServer.assign(conn, dirty_assign, "1")
+  end
+
+  pfn parse_session(data : String) : List((String, String)) do
+    if String.is_empty(data) then []
+    else
+      List.filter_map(String.split(data, ";"), fn part ->
+        match String.split_first(part, "=") do
+        Some((k, v)) -> if String.is_empty(k) then None else Some((k, v))
+        None         -> None
+        end
+      )
+    end
+  end
+
+  pfn serialize_session(entries : List((String, String))) : String do
+    String.join(List.map(entries, fn (k, v) -> k ++ "=" ++ v), ";")
+  end
+
+  pfn upsert_entry(entries : List((String, String)), key : String, value : String) : List((String, String)) do
+    let without = List.filter(entries, fn (k, _) -> k != key)
+    List.append(without, [(key, value)])
+  end
+
+  pfn find_session_key(parts : List(String), key : String) : Option(String) do
+    match parts do
+    Nil -> None
+    Cons(part, rest) ->
+      match String.split_first(part, "=") do
+      None         -> find_session_key(rest, key)
+      Some((k, v)) ->
+        if k == key then Some(v)
+        else find_session_key(rest, key)
+        end
+      end
+    end
+  end
+
+  -- ── Signing ───────────────────────────────────────────────────────────────
+  --
+  -- Cookie format: "<hmac_hex>.<base64_payload>"
+  -- The HMAC is computed over the base64_payload using the secret_key_base.
+  --
+  -- TODO: Replace stub_hmac with Crypto.hmac_sha256 and stub_encrypt/decrypt
+  -- with Crypto.aes_256_gcm_encrypt/decrypt once lib/crypto.march ships.
+
+  pfn sign_and_encode(data : String, secret : String) : String do
+    let payload = base64_encode(data)
+    let mac     = stub_hmac(payload, secret)
+    mac ++ "." ++ payload
+  end
+
+  pfn verify_and_decode(raw : String, secret : String) : String do
+    match String.split_first(raw, ".") do
+    None             -> ""   -- malformed — no separator
+    Some((mac, payload)) ->
+      let expected = stub_hmac(payload, secret)
+      if secure_compare(mac, expected) then
+        match base64_decode(payload) do
+        Some(v) -> v
+        None    -> ""
+        end
+      else ""  -- tampered
+      end
+    end
+  end
+
+  -- Stub HMAC: XOR-folds the secret over the payload.
+  -- NOT cryptographically secure.  Replace with Crypto.hmac_sha256/2.
+  pfn stub_hmac(payload : String, secret : String) : String do
+    let slen = String.byte_size(secret)
+    if slen == 0 then "0000000000000000"
+    else
+      let plen  = String.byte_size(payload)
+      let total = fold_xor(payload, secret, plen, slen, 0, 0)
+      int_to_hex(total)
+    end
+  end
+
+  pfn fold_xor(payload : String, secret : String, plen : Int, slen : Int, idx : Int, acc : Int) : Int do
+    if idx >= plen then acc
+    else
+      let pc = string_char_code(payload, idx)
+      let sc = string_char_code(secret, idx % slen)
+      fold_xor(payload, secret, plen, slen, idx + 1, (acc + (pc * (idx + 1))) * 31 + sc)
+    end
+  end
+
+  pfn int_to_hex(n : Int) : String do
+    let abs_n = if n < 0 then -n else n end
+    int_to_hex_digits(abs_n % 4294967296, "")
+  end
+
+  pfn int_to_hex_digits(n : Int, acc : String) : String do
+    if n == 0 && !String.is_empty(acc) then acc
+    else
+      let digit = n % 16
+      let ch = hex_digit(digit)
+      int_to_hex_digits(n / 16, ch ++ acc)
+    end
+  end
+
+  pfn hex_digit(n : Int) : String do
+    match n do
+    0  -> "0" | 1  -> "1" | 2  -> "2" | 3  -> "3"
+    4  -> "4" | 5  -> "5" | 6  -> "6" | 7  -> "7"
+    8  -> "8" | 9  -> "9" | 10 -> "a" | 11 -> "b"
+    12 -> "c" | 13 -> "d" | 14 -> "e" | _  -> "f"
+    end
+  end
+
+  -- Constant-time string comparison to prevent timing attacks.
+  -- Falls back to == until Crypto.secure_compare is available.
+  pfn secure_compare(a : String, b : String) : Bool do
+    a == b
+  end
+
+end

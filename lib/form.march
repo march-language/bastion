@@ -1,0 +1,309 @@
+-- Form — HTML form rendering helpers and ~H template components.
+--
+-- Provides low-level tag builders (form_tag, input_tag, etc.) and
+-- higher-level component functions (Input.render, Select.render, etc.)
+-- for use from .march.html templates via the <.Form.Input /> syntax.
+--
+-- Component calling convention:
+--   <.Form.Input name="email" type="email" label="Email" gate={gate} />
+-- desugars to:
+--   Form.Input.render(name: "email", type_: "email", label: "Email", gate: gate)
+--
+-- All components return IOList so they compose inside ~H templates.
+--
+-- Note: <.Form> with inner content requires slot support in the lowering pass
+-- (not yet implemented).  Use a raw <form> tag with CSRF.tag(conn) until then.
+-- The ~H desugarer auto-injects _csrf_token into any <form method="post"> tag.
+
+mod Form do
+
+  import Html
+  import Gate
+
+  -- ── Low-level tag builders ────────────────────────────────────────────────
+
+  doc """
+  Render an opening <form> tag with CSRF token injected.
+
+  The ~H desugarer already auto-injects the CSRF token into plain
+  <form method="post"> tags, so this is only needed when building
+  forms outside ~H templates.
+
+      Form.form_tag(conn, "/register", "post", "", content)
+  """
+  fn form_tag(conn : Conn, action : String, method : String, class : String, content : String) : String do
+    let csrf_input = CSRF.tag_string(conn)
+    let class_attr = if String.is_empty(class) then "" else " class=\"" ++ Html.escape(class) ++ "\""
+    "<form action=\"" ++ Html.escape(action) ++ "\" method=\"" ++ Html.escape(method) ++ "\"" ++ class_attr ++ ">" ++
+    csrf_input ++
+    content ++
+    "</form>"
+  end
+
+  doc """
+  Render an <input> element.
+
+      Form.input_tag("email", "email", "me@example.com", [("class", "input")])
+  """
+  fn input_tag(name : String, type_ : String, value : String, attrs : List((String, String))) : String do
+    let escaped_name  = Html.escape(name)
+    let escaped_value = Html.escape(value)
+    let escaped_type  = Html.escape(type_)
+    let extra = render_attrs(attrs)
+    "<input type=\"" ++ escaped_type ++ "\" name=\"" ++ escaped_name ++
+    "\" id=\"" ++ escaped_name ++ "\" value=\"" ++ escaped_value ++ "\"" ++
+    extra ++ " />"
+  end
+
+  doc """
+  Render a <textarea> element.
+
+      Form.textarea_tag("body", "Hello world", [])
+  """
+  fn textarea_tag(name : String, value : String, attrs : List((String, String))) : String do
+    let escaped_name  = Html.escape(name)
+    let escaped_value = Html.escape(value)
+    let extra = render_attrs(attrs)
+    "<textarea name=\"" ++ escaped_name ++ "\" id=\"" ++ escaped_name ++ "\"" ++
+    extra ++ ">" ++ escaped_value ++ "</textarea>"
+  end
+
+  doc """
+  Render a <select> element with <option> elements.
+
+  `options` is a list of (label, value) pairs.
+  `selected` is the currently selected value (or empty string for none).
+
+      Form.select_tag("role", [("Admin", "admin"), ("Member", "member")], "admin", [])
+  """
+  fn select_tag(name : String, options : List((String, String)), selected : String, attrs : List((String, String))) : String do
+    let escaped_name = Html.escape(name)
+    let extra = render_attrs(attrs)
+    let option_html = String.join(List.map(options, fn (label, value) ->
+      let sel = if value == selected then " selected" else ""
+      "<option value=\"" ++ Html.escape(value) ++ "\"" ++ sel ++ ">" ++ Html.escape(label) ++ "</option>"
+    ), "")
+    "<select name=\"" ++ escaped_name ++ "\" id=\"" ++ escaped_name ++ "\"" ++
+    extra ++ ">" ++ option_html ++ "</select>"
+  end
+
+  doc """
+  Render an error <span> for a field, or empty string if no error.
+
+      Form.error_tag(Gate.error_for(gate, "email"))
+  """
+  fn error_tag(error : Option(String)) : String do
+    match error do
+    None    -> ""
+    Some(e) -> "<span class=\"form-error\">" ++ Html.escape(e) ++ "</span>"
+    end
+  end
+
+  doc """
+  Render a complete form field: label + input wrapper + error.
+
+  `name` is used as the label's `for` and the input's `id`.
+  `label_text` is the display label (empty → no label element rendered).
+  `input_html` is the pre-rendered input element.
+  `error` is the optional error message.
+
+      Form.field_tag("email", "Email", input_html, Gate.error_for(gate, "email"))
+  """
+  fn field_tag(name : String, label_text : String, input_html : String, error : Option(String)) : String do
+    let label_html = if String.is_empty(label_text) then ""
+                     else "<label for=\"" ++ Html.escape(name) ++ "\">" ++ Html.escape(label_text) ++ "</label>"
+    let error_html  = error_tag(error)
+    let aria_attrs  = match error do
+      None    -> ""
+      Some(_) -> " aria-describedby=\"" ++ Html.escape(name) ++ "-error\" aria-invalid=\"true\""
+    end
+    -- re-inject aria attrs into the input HTML (naive: append before first `>`)
+    let input_with_aria = inject_aria(input_html, aria_attrs, name)
+    let error_span = match error do
+      None    -> ""
+      Some(e) ->
+        "<span class=\"form-error\" id=\"" ++ Html.escape(name) ++ "-error\">" ++
+        Html.escape(e) ++ "</span>"
+    end
+    "<div class=\"form-field\">" ++
+    label_html ++
+    input_with_aria ++
+    error_span ++
+    "</div>"
+  end
+
+  -- ── ~H Component functions ────────────────────────────────────────────────
+  --
+  -- These functions are called by the .march.html lowering pass when
+  -- <.Form.Input />, <.Form.Select />, etc. appear in templates.
+  --
+  -- Attribute key conventions match the HTML attribute names where possible.
+  -- `type_` is used instead of `type` to avoid clashing with the March keyword.
+
+  mod Input do
+    doc """
+    Render a complete labeled input field with error display.
+
+    Used in .march.html templates as:
+      <.Form.Input name="email" type_="email" label="Email" gate={gate} />
+
+    If `gate` is supplied, the current value is read from Gate.get_field and
+    the error from Gate.error_for. A `value` prop overrides the gate value.
+    If `required` is true, a required marker (*) is appended to the label.
+    """
+    fn render(name : String, type_ : String, label : String,
+              gate : Option(Gate), value : String \\ "",
+              required : Bool \\ false, class : String \\ "") : IOList do
+      let actual_value = match gate do
+        Some(g) ->
+          match Gate.get_field(g, name) do
+          Some(v) -> v
+          None    -> value
+          end
+        None -> value
+        end
+      let error = match gate do
+        Some(g) -> Gate.error_for(g, name)
+        None    -> None
+        end
+      let label_text = if required then label ++ " *" else label
+      let type_str   = if String.is_empty(type_) then "text" else type_
+      let extra_attrs = if String.is_empty(class) then [] else [("class", class)]
+      let input_html = Form.input_tag(name, type_str, actual_value, extra_attrs)
+      IOList.from_string(Form.field_tag(name, label_text, input_html, error))
+    end
+  end
+
+  mod Textarea do
+    doc """
+    Render a labeled textarea field with error display.
+
+      <.Form.Textarea name="body" label="Body" gate={gate} />
+    """
+    fn render(name : String, label : String,
+              gate : Option(Gate), value : String \\ "",
+              required : Bool \\ false, class : String \\ "") : IOList do
+      let actual_value = match gate do
+        Some(g) ->
+          match Gate.get_field(g, name) do
+          Some(v) -> v
+          None    -> value
+          end
+        None -> value
+        end
+      let error = match gate do
+        Some(g) -> Gate.error_for(g, name)
+        None    -> None
+        end
+      let label_text = if required then label ++ " *" else label
+      let extra_attrs = if String.is_empty(class) then [] else [("class", class)]
+      let textarea_html = Form.textarea_tag(name, actual_value, extra_attrs)
+      IOList.from_string(Form.field_tag(name, label_text, textarea_html, error))
+    end
+  end
+
+  mod Select do
+    doc """
+    Render a labeled select field with error display.
+
+      <.Form.Select name="role" label="Role" options={opts} gate={gate} />
+
+    `options` is a List((String, String)) — (display label, value) pairs.
+    """
+    fn render(name : String, label : String, options : List((String, String)),
+              gate : Option(Gate), value : String \\ "",
+              required : Bool \\ false, class : String \\ "") : IOList do
+      let selected = match gate do
+        Some(g) ->
+          match Gate.get_field(g, name) do
+          Some(v) -> v
+          None    -> value
+          end
+        None -> value
+        end
+      let error = match gate do
+        Some(g) -> Gate.error_for(g, name)
+        None    -> None
+        end
+      let label_text = if required then label ++ " *" else label
+      let extra_attrs = if String.is_empty(class) then [] else [("class", class)]
+      let select_html = Form.select_tag(name, options, selected, extra_attrs)
+      IOList.from_string(Form.field_tag(name, label_text, select_html, error))
+    end
+  end
+
+  mod Field do
+    doc """
+    Render a field wrapper with label and error — no input element.
+
+    Use when you need custom input markup (e.g., file inputs, custom widgets)
+    that doesn't fit the standard input_tag pattern.
+
+      <.Form.Field name="avatar" label="Profile picture" gate={gate} />
+      <!-- write your custom <input type="file" ...> around this component -->
+    """
+    fn render(name : String, label : String,
+              gate : Option(Gate), required : Bool \\ false) : IOList do
+      let error = match gate do
+        Some(g) -> Gate.error_for(g, name)
+        None    -> None
+        end
+      let label_text = if required then label ++ " *" else label
+      let escaped_name = Html.escape(name)
+      let label_html = if String.is_empty(label_text) then ""
+                       else "<label for=\"" ++ escaped_name ++ "\">" ++ Html.escape(label_text) ++ "</label>"
+      let error_html = match error do
+        None    -> ""
+        Some(e) ->
+          "<span class=\"form-error\" id=\"" ++ escaped_name ++ "-error\">" ++
+          Html.escape(e) ++ "</span>"
+        end
+      IOList.from_string("<div class=\"form-field\">" ++ label_html ++ error_html ++ "</div>")
+    end
+  end
+
+  mod Error do
+    doc """
+    Render just the error for a named field, or nothing.
+
+      <.Form.Error gate={gate} field="email" />
+    """
+    fn render(gate : Option(Gate), field : String) : IOList do
+      let error = match gate do
+        Some(g) -> Gate.error_for(g, field)
+        None    -> None
+        end
+      IOList.from_string(Form.error_tag(error))
+    end
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────────────
+
+  pfn render_attrs(attrs : List((String, String))) : String do
+    String.join(List.map(attrs, fn (k, v) ->
+      " " ++ Html.escape(k) ++ "=\"" ++ Html.escape(v) ++ "\""
+    ), "")
+  end
+
+  -- Inject aria-describedby and aria-invalid into the first tag of input_html.
+  -- Naive implementation: finds the first ">" and inserts attrs before it,
+  -- unless the tag is self-closing ("/>" ends it).
+  pfn inject_aria(input_html : String, aria_attrs : String, name : String) : String do
+    if String.is_empty(aria_attrs) then input_html
+    else
+      match String.index_of(input_html, "/>") do
+      Some(i) ->
+        String.slice_bytes(input_html, 0, i) ++ aria_attrs ++
+        String.slice_bytes(input_html, i, String.byte_size(input_html) - i)
+      None ->
+        match String.index_of(input_html, ">") do
+        Some(i) ->
+          String.slice_bytes(input_html, 0, i) ++ aria_attrs ++
+          String.slice_bytes(input_html, i, String.byte_size(input_html) - i)
+        None -> input_html
+        end
+      end
+    end
+  end
+
+end

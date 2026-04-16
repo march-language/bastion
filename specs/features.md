@@ -28,6 +28,12 @@ These features have corresponding code in `lib/` and are usable today (within th
 | IOList extensions | `io_list.march` | `from_strings/1`, `append/2`, `concat/1` for template assembly |
 | CSS style builder | `css.march` | `Css.style/1` — conditional inline styles from property/value pairs |
 | Template lowering CLI | `forge/lower.march` | `bastion lower` — .march.html → .march + .march.spans |
+| Gate validation | `gate.march` | Changeset-style form validation: `cast`, `validate_required/format/length/number/inclusion/confirmation`, `unique_constraint`, `add_error`, `error_for` |
+| Form rendering | `form.march` | Low-level tag builders + `Form.Input/Select/Textarea/Field/Error` ~H components; reads value/error from Gate |
+| Flash messages | `flash.march` | `Flash.put/get/loaded_flashes/clear/delete`; `Form.FlashGroup` ~H component; session-backed across redirects |
+| Cookie helpers | `conn.march` | `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `get_form_param` |
+| Cookie sessions | `session.march` | Signed+encrypted cookie session: `load`, `get/put/delete/clear`, `commit`, `persist`; auto-commit via after-send hook |
+| Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---
 

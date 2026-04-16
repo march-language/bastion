@@ -1,0 +1,191 @@
+-- Flash — one-time UI messages persisted in the session across redirects.
+--
+-- Flash messages are stored in the session under the key "_flash" as a
+-- pipe-separated list of "key\x01value" entries.  They are loaded into
+-- conn assigns at the start of each request by the session middleware, and
+-- consumed (cleared) when they are rendered by Form.Flash.render or
+-- Flash.loaded_flashes/1.
+--
+-- Typical usage:
+--
+--   conn
+--   |> Flash.put("info", "Account created. Please confirm your email.")
+--   |> redirect_to("/login")
+--
+-- In a .march.html layout:
+--
+--   <.Form.FlashGroup conn={conn} />
+--
+-- Built-in flash keys and their ARIA roles:
+--
+--   "info"    → role="status"   (polite, non-interruptive)
+--   "error"   → role="alert"    (assertive)
+--   "warning" → role="alert"
+--
+-- Custom keys are rendered with class "flash-{key}" and role="status".
+
+mod Flash do
+
+  -- Separator between key and value within one flash entry.
+  -- \x01 (SOH) is safe — never appears in user-supplied flash messages
+  -- because we HTML-escape all values before storing them.
+  let entry_sep = "\x01"
+
+  -- Separator between flash entries in the session value.
+  let record_sep = "\x1E"
+
+  -- Assigns key where the full serialized flash string is stored.
+  let session_key = "_flash"
+
+  -- ── Writing flash ──────────────────────────────────────────────────────
+
+  doc """
+  Store a flash message for `key` in the conn session.
+
+  Replaces any existing message for the same key — only one message
+  per key is stored at a time.
+
+      conn |> Flash.put("info", "Profile updated.")
+      conn |> Flash.put("error", "Something went wrong.")
+  """
+  fn put(conn : Conn, key : String, message : String) : Conn do
+    let current = load_raw(conn)
+    let entries = parse_entries(current)
+    let updated = upsert_entry(entries, key, message)
+    let raw     = serialize_entries(updated)
+    Session.put(conn, session_key, raw)
+  end
+
+  -- ── Reading flash ──────────────────────────────────────────────────────
+
+  doc """
+  Read a flash message for `key` without consuming it.
+
+  Returns None if no flash is set for this key.
+
+      Flash.get(conn, "info")   -- Some("Profile updated.") or None
+  """
+  fn get(conn : Conn, key : String) : Option(String) do
+    let entries = parse_entries(load_raw(conn))
+    lookup_entry(entries, key)
+  end
+
+  doc """
+  Return all pending flash messages as a list of (key, message) pairs.
+
+  Does not consume the flash — call clear/1 explicitly if needed,
+  or use Form.FlashGroup which renders and clears in one step.
+  """
+  fn loaded_flashes(conn : Conn) : List((String, String)) do
+    parse_entries(load_raw(conn))
+  end
+
+  doc """
+  Remove all flash messages from the session.
+
+  Called automatically after Form.FlashGroup renders so messages
+  are not shown again on the next page.
+  """
+  fn clear(conn : Conn) : Conn do
+    Session.put(conn, session_key, "")
+  end
+
+  doc """
+  Remove the flash message for a single key.
+  """
+  fn delete(conn : Conn, key : String) : Conn do
+    let current = load_raw(conn)
+    let entries = parse_entries(current)
+    let updated = List.filter(entries, fn (k, _) -> k != key)
+    Session.put(conn, session_key, serialize_entries(updated))
+  end
+
+  -- ── ~H Component ──────────────────────────────────────────────────────────
+  --
+  -- Form.FlashGroup is the standard template component.
+  -- Called from .march.html layouts as:
+  --   <.Form.FlashGroup conn={conn} />
+
+  mod FlashGroup do
+    doc """
+    Render all pending flash messages and clear them.
+
+    Renders nothing if there are no pending flash messages.
+    After rendering, the flash is cleared so messages don't reappear.
+
+      <.Form.FlashGroup conn={conn} />
+    """
+    fn render(conn : Conn) : IOList do
+      let messages = Flash.loaded_flashes(conn)
+      if List.is_empty(messages) then IOList.empty()
+      else
+        let html = String.join(List.map(messages, fn (key, msg) ->
+          Flash.render_one(key, msg)
+        ), "")
+        IOList.from_string("<div class=\"flash-group\">" ++ html ++ "</div>")
+      end
+    end
+  end
+
+  doc """
+  Render a single flash message as an HTML string.
+
+  Public so callers can render individual messages outside the group.
+  """
+  fn render_one(key : String, message : String) : String do
+    let role = flash_role(key)
+    "<div class=\"flash flash-" ++ Html.escape(key) ++ "\" role=\"" ++ role ++ "\">" ++
+    Html.escape(message) ++
+    "</div>"
+  end
+
+  -- ── Internal helpers ──────────────────────────────────────────────────────
+
+  pfn load_raw(conn : Conn) : String do
+    match Session.get(conn, session_key) do
+    Some(v) -> v
+    None    -> ""
+    end
+  end
+
+  pfn parse_entries(raw : String) : List((String, String)) do
+    if String.is_empty(raw) then []
+    else
+      let records = String.split(raw, record_sep)
+      List.filter_map(records, fn r ->
+        match String.split_first(r, entry_sep) do
+        Some((k, v)) -> if String.is_empty(k) then None else Some((k, v))
+        None         -> None
+        end
+      )
+    end
+  end
+
+  pfn serialize_entries(entries : List((String, String))) : String do
+    String.join(List.map(entries, fn (k, v) -> k ++ entry_sep ++ v), record_sep)
+  end
+
+  pfn upsert_entry(entries : List((String, String)), key : String, value : String) : List((String, String)) do
+    let without = List.filter(entries, fn (k, _) -> k != key)
+    List.append(without, [(key, value)])
+  end
+
+  pfn lookup_entry(entries : List((String, String)), key : String) : Option(String) do
+    match entries do
+    Nil -> None
+    Cons((k, v), rest) ->
+      if k == key then Some(v)
+      else lookup_entry(rest, key)
+      end
+    end
+  end
+
+  pfn flash_role(key : String) : String do
+    match key do
+    "error"   -> "alert"
+    "warning" -> "alert"
+    _         -> "status"
+    end
+  end
+
+end
