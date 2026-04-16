@@ -36,6 +36,9 @@ These features have corresponding code in `lib/` and are usable today (within th
 | CSRF protection | `csrf.march` | Per-session token, `protect`/`ensure_token`/`skip`/`tag`; tokens from `Crypto.generate_token`; constant-time compare via `Crypto.secure_compare` |
 | Crypto primitives | `crypto.march` | Wraps stdlib `Crypto`: `hmac_sha256`, `derive_key`, `generate_token`, `hash_password`, `verify_password`, `secure_compare`, `bytes_to_string`, Base64 helpers |
 | After-send hooks | `bastion_server.march` | `run_after_send` + `dispatch_hook` wired in server plug; "session_commit" hook calls `Session.commit_from_conn` |
+| Auth middleware | `auth_middleware.march` | `load_current_user/2` + `load_current_user_with_remember/3`; `require_auth` (redirects to /login); `authenticated` sugar; `log_in` with optional remember-me cookie; `log_out` with optional token deleter; `redirect_after_login` |
+| Vault | `vault.march` | Wraps stdlib Vault: `open`, `put`, `put_ttl`, `get`, `get_or`, `delete`, `has`, `put_new` (atomic insert-if-absent), `update`, `size`, `keys`, `all`, `ns_*` helpers |
+| Rate limiting | `rate_limit.march` | Sliding window via Vault; `check/5` → `Ok|Error`; `limit/5` pipeline helper; `ip_key`; `x-ratelimit-*` + `retry-after` headers; 429 on exceed |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---

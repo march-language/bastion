@@ -1,0 +1,206 @@
+-- lib/vault.march — In-memory key-value store for Bastion.
+--
+-- Vault is a named, process-global hash table shared across all actors on a
+-- node without message passing.  Any actor holding the same VaultTable handle
+-- sees the same data.  It is the storage backend for rate limiting, fragment
+-- caching, and optional session storage.
+--
+-- This module wraps the March stdlib `Vault` module and adapts its API to the
+-- names described in the Bastion spec:
+--   stdlib `set`  → Bastion `put`
+--   stdlib `drop` → Bastion `delete`
+-- It also adds `put_new/3` (atomic insert-if-absent) which the stdlib omits.
+--
+-- TTL is expressed in **seconds** (matching the stdlib `Vault.set_ttl`).
+--
+-- ## Usage
+--
+--   -- At application startup (in the supervisor):
+--   let rate_table = Vault.open("bastion_rate_limits")
+--
+--   -- In a handler:
+--   Vault.put(rate_table, "ip:1.2.3.4", 1)
+--   Vault.get(rate_table, "ip:1.2.3.4")      -- Some(1)
+--   Vault.delete(rate_table, "ip:1.2.3.4")
+--
+--   -- Atomic insert-if-absent (for rate limit counters):
+--   let inserted = Vault.put_new(rate_table, "ip:1.2.3.4", 0)
+--   -- true  → key was absent, 0 was inserted
+--   -- false → key already existed, no change
+--
+--   -- With TTL (expires after 60 seconds):
+--   Vault.put_ttl(rate_table, "ip:1.2.3.4", 0, 60)
+--
+-- ## Namespace helpers
+--
+--   For one-off usage where you don't want to manage a handle:
+--
+--   Vault.ns_put("rate_limits", "ip:1.2.3.4", 0)
+--   Vault.ns_get("rate_limits", "ip:1.2.3.4")
+--   Vault.ns_delete("rate_limits", "ip:1.2.3.4")
+
+mod Vault do
+
+  import Vault as StdVault
+
+  -- ── Table management ──────────────────────────────────────────────────────
+
+  doc """
+  Create or retrieve a named Vault table.
+
+  If a table with this name already exists (from a previous `open` call or a
+  previous process run), returns the existing handle.  Otherwise creates a
+  new empty table.
+
+  Call once at startup and pass the handle around:
+
+      let rate_table = Vault.open("rate_limits")
+  """
+  fn open(name : String) do
+    match StdVault.whereis(name) do
+    Some(t) -> t
+    None    -> StdVault.new(name)
+    end
+  end
+
+  -- ── Core operations ───────────────────────────────────────────────────────
+
+  doc """
+  Insert or overwrite a key-value pair in the table.
+
+      Vault.put(table, "ip:1.2.3.4", 0)
+  """
+  fn put(table, key, value) do
+    StdVault.set(table, key, value)
+  end
+
+  doc """
+  Insert or overwrite with a TTL.  The entry is automatically evicted after
+  `ttl_secs` seconds (checked lazily on access — no background sweeper).
+
+      Vault.put_ttl(table, "ip:1.2.3.4", 0, 60)  -- expires in 60 seconds
+  """
+  fn put_ttl(table, key, value, ttl_secs : Int) do
+    StdVault.set_ttl(table, key, value, ttl_secs)
+  end
+
+  doc """
+  Look up a key.  Returns `Some(value)` if present and not expired, `None` otherwise.
+
+      Vault.get(table, "ip:1.2.3.4")  -- Some(count) or None
+  """
+  fn get(table, key) do
+    StdVault.get(table, key)
+  end
+
+  doc """
+  Look up a key, returning `default` when absent or expired.
+
+      Vault.get_or(table, "ip:1.2.3.4", 0)  -- 0 on first request
+  """
+  fn get_or(table, key, default) do
+    StdVault.get_or(table, key, default)
+  end
+
+  doc """
+  Remove a key from the table.  No-op if the key does not exist.
+
+      Vault.delete(table, "ip:1.2.3.4")
+  """
+  fn delete(table, key) do
+    StdVault.drop(table, key)
+  end
+
+  doc """
+  Return `true` if `key` exists and has not expired.
+
+      Vault.has(table, "ip:1.2.3.4")
+  """
+  fn has(table, key) do
+    StdVault.has(table, key)
+  end
+
+  doc """
+  Atomically insert `key → value` only when the key is absent or expired.
+
+  Returns `true` if the key was absent and the value was inserted.
+  Returns `false` if the key already exists (no update is performed).
+
+  This is the idiomatic way to initialise a counter:
+
+      if Vault.put_new(table, "ip:1.2.3.4", 0) do
+        -- first request from this IP
+      else
+        -- key already existed; increment via update
+      end
+  """
+  fn put_new(table, key, value) : Bool do
+    match StdVault.get(table, key) do
+    Some(_) -> false                      -- already present
+    None    ->
+      StdVault.set(table, key, value)
+      true
+    end
+  end
+
+  doc """
+  Atomically apply `f` to the current value at `key` and replace it.
+
+  No-op if the key is absent or expired.  Returns the updated value wrapped
+  in `Some`, or `None` if the key was absent.
+
+      Vault.update(table, "counter", fn n -> n + 1 end)
+  """
+  fn update(table, key, f) do
+    StdVault.update(table, key, f)
+  end
+
+  doc "Return the number of live (non-expired) entries in the table."
+  fn size(table) : Int do
+    StdVault.size(table)
+  end
+
+  doc "Return all live keys in the table."
+  fn keys(table) do
+    StdVault.keys(table)
+  end
+
+  doc "Return all live key-value pairs as a list of `(key, value)` tuples."
+  fn all(table) do
+    StdVault.all(table)
+  end
+
+  -- ── Namespace helpers ─────────────────────────────────────────────────────
+  --
+  -- These helpers use a string namespace name instead of a table handle.
+  -- They auto-create the namespace on first use — convenient for one-off
+  -- use cases where you don't want to manage a handle at startup.
+
+  doc """
+  Insert or overwrite using a namespace name.  Auto-creates the namespace.
+
+      Vault.ns_put("rate_limits", "ip:1.2.3.4", 0)
+  """
+  fn ns_put(ns : String, key, value) do
+    StdVault.ns_set(ns, key, value)
+  end
+
+  doc """
+  Look up using a namespace name.  Returns None if namespace or key is absent.
+
+      Vault.ns_get("rate_limits", "ip:1.2.3.4")
+  """
+  fn ns_get(ns : String, key) do
+    StdVault.ns_get(ns, key)
+  end
+
+  doc """
+  Remove using a namespace name.  No-op if namespace or key is absent.
+
+      Vault.ns_delete("rate_limits", "ip:1.2.3.4")
+  """
+  fn ns_delete(ns : String, key) do
+    StdVault.ns_drop(ns, key)
+  end
+
+end

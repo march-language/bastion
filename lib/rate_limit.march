@@ -1,0 +1,155 @@
+-- lib/rate_limit.march — Sliding window rate limiter for Bastion.
+--
+-- Protects sensitive endpoints (login, register, password reset) from brute
+-- force and abuse using a sliding window counter stored in a Vault table.
+--
+-- Algorithm:
+--   Each (endpoint_key, client_key) pair maps to a list of timestamps (ms).
+--   On each request:
+--     1. Read the list from Vault; filter out timestamps older than the window.
+--     2. Append the current timestamp.
+--     3. Write back with a TTL of `window_secs + 1`.
+--     4. If length > limit → 429 Too Many Requests.
+--
+-- The filtered list serves as its own cleanup — old hits fall off naturally.
+-- Because the write always updates the TTL, entries for active callers remain
+-- in Vault; entries for quiet callers expire automatically.
+--
+-- ## Usage
+--
+--   -- Open a dedicated table at startup (in your supervisor or app.march):
+--   let rate_table = Vault.open("rate_limits")
+--
+--   -- In a router handler:
+--   match RateLimit.check(conn, rate_table, RateLimit.ip_key, 5, 60) do
+--   Ok(conn)    -> AuthController.login(conn)
+--   Error(conn) -> conn
+--   end
+--
+--   -- Or use the middleware helper for clean pipeline composition:
+--   conn
+--   |> RateLimit.limit(rate_table, RateLimit.ip_key, 5, 60)
+--   |> AuthController.login()
+--
+-- ## Headers set on every response (success and 429)
+--
+--   x-ratelimit-limit     — configured maximum
+--   x-ratelimit-remaining — remaining requests in the current window
+--   x-ratelimit-reset     — Unix timestamp (seconds) when the window resets
+--
+-- On 429 responses, `retry-after` is also set to the number of seconds until
+-- the oldest request in the window expires.
+
+mod RateLimit do
+
+  import Vault
+  import Conn
+
+  -- ── Key helpers ───────────────────────────────────────────────────────────
+
+  doc """
+  Built-in key function: use the client IP address as the rate limit key.
+
+  Reads the `X-Forwarded-For` header (set by reverse proxies such as nginx or
+  Caddy) and falls back to the `X-Real-IP` header, then to a placeholder
+  `"unknown"` when neither is present.
+
+  If your proxy sets a different header, provide your own key function:
+
+      fn my_key(conn) -> HttpServer.get_req_header(conn, "x-my-client-ip") |> Option.unwrap_or("unknown")
+  """
+  fn ip_key(conn) : String do
+    match HttpServer.get_req_header(conn, "x-forwarded-for") do
+    Some(v) ->
+      -- X-Forwarded-For may be "client, proxy1, proxy2" — take the first part
+      match String.split_first(v, ",") do
+      Some((ip, _)) -> String.trim(ip)
+      None          -> String.trim(v)
+      end
+    None ->
+      match HttpServer.get_req_header(conn, "x-real-ip") do
+      Some(v) -> String.trim(v)
+      None    -> "unknown"
+      end
+    end
+  end
+
+  -- ── Core check ────────────────────────────────────────────────────────────
+
+  doc """
+  Check whether the request is within the rate limit.
+
+  - `table`      — Vault table for counter storage (see `Vault.open`)
+  - `key_fn`     — function from Conn to the rate limit key (e.g. `RateLimit.ip_key`)
+  - `limit`      — maximum number of requests allowed per `window_secs`
+  - `window_secs` — rolling window duration in seconds
+
+  Returns `Ok(conn)` with rate limit headers on success, or `Error(conn)`
+  with a halted 429 response when the limit is exceeded.
+
+      match RateLimit.check(conn, rate_table, RateLimit.ip_key, 5, 60) do
+      Ok(conn)    -> handle(conn)
+      Error(conn) -> conn
+      end
+  """
+  fn check(conn, table, key_fn, limit : Int, window_secs : Int) do
+    let k          = key_fn(conn)
+    let now_ms     = unix_time_ms(())
+    let window_ms  = window_secs * 1000
+    let cutoff     = now_ms - window_ms
+
+    -- Read existing timestamps; prune expired ones; add current.
+    let existing   = match Vault.get(table, k) do
+      Some(ts) -> ts
+      None     -> []
+      end
+    let live       = List.filter(existing, fn t -> t > cutoff)
+    let updated    = List.append(live, [now_ms])
+    let count      = List.length(updated)
+
+    -- Write back with TTL so entries for quiet clients expire automatically.
+    Vault.put_ttl(table, k, updated, window_secs + 1)
+
+    let remaining  = if count > limit then 0 else limit - count end
+    let reset_secs = match updated do
+      Nil          -> unix_time(()) + window_secs
+      Cons(oldest, _) -> (oldest / 1000) + window_secs
+      end
+
+    let conn2 = conn
+      |> HttpServer.put_resp_header("x-ratelimit-limit",     int_to_string(limit))
+      |> HttpServer.put_resp_header("x-ratelimit-remaining", int_to_string(remaining))
+      |> HttpServer.put_resp_header("x-ratelimit-reset",     int_to_string(reset_secs))
+
+    if count <= limit then Ok(conn2)
+    else
+      let retry_after = reset_secs - unix_time(())
+      let halted =
+        HttpServer.put_resp_header(conn2, "retry-after", int_to_string(retry_after))
+        |> HttpServer.send_resp(429, "Too Many Requests")
+        |> HttpServer.halt()
+      Error(halted)
+    end
+  end
+
+  doc """
+  Middleware variant of `check/5` for use in pipeline composition.
+
+  When the rate limit is exceeded, halts the pipeline and returns the 429
+  response conn directly.  When within the limit, passes the conn with headers
+  set to the next step.
+
+  Equivalent to pattern matching on `check/5` but more concise:
+
+      conn
+      |> RateLimit.limit(rate_table, RateLimit.ip_key, 5, 60)
+      |> AuthController.login()
+  """
+  fn limit(conn, table, key_fn, max_requests : Int, window_secs : Int) do
+    match check(conn, table, key_fn, max_requests, window_secs) do
+    Ok(conn2)    -> conn2
+    Error(halted) -> halted
+    end
+  end
+
+end
