@@ -232,6 +232,8 @@
       this._reconnectAttempts = 0;
       this._reconnectTimer = null;
       this._observer = null;
+      /** @type {IntersectionObserver|null} - watches data-march-hydrate="on-visible" islands */
+      this._visibilityObserver = null;
     }
 
     nextId() {
@@ -242,13 +244,26 @@
 
     init() {
       this.connectWebSocket();
+      this._startVisibilityObserver();
       this.discoverIslands();
       this.bindGlobalEvents();
       this._startObserver();
     }
 
     /**
-     * Scan the DOM for uninitialized island elements and register them.
+     * Scan the DOM for uninitialized island elements and schedule hydration
+     * according to the element's data-march-hydrate attribute.
+     *
+     * Hydration strategies (data-march-hydrate):
+     *   (absent)        — hydrate immediately (eager, default)
+     *   "lazy"          — hydrate after the page load event (or immediately
+     *                     if page is already loaded)
+     *   "idle"          — hydrate during the browser's idle period via
+     *                     requestIdleCallback (falls back to setTimeout)
+     *   "interaction"   — hydrate on first click, focus, or keypress on the
+     *                     element or its descendants
+     *   "on-visible"    — hydrate when the element scrolls into the viewport
+     *                     (IntersectionObserver with 10% threshold)
      *
      * Hydration order: parents before children. DOM order naturally guarantees
      * this for nested islands — querySelectorAll returns nodes in document order,
@@ -258,41 +273,148 @@
       const elements = document.querySelectorAll('[data-march-island]');
       elements.forEach(el => {
         if (el.dataset.marchInstanceId) return;  // already initialized
-        const instance = new IslandInstance(el, this);
-        this.instances.set(instance.instanceId, instance);
+        if (el.dataset.marchHydratePending) return;  // already scheduled
 
-        // Inject scoped CSS on first hydration
-        this._injectScopedCss(instance);
+        const strategy = (el.dataset.marchHydrate || '').toLowerCase();
 
-        // Load WASM module synchronously from registry if already available
-        if (window.__bastionWasm) {
-          const mod = window.__bastionWasm.getModule(instance.moduleName);
-          if (mod) {
-            instance.wasmModule = mod;
-          }
-        }
-
-        // Tell server about this island (Server mode and Client-with-channel)
-        this.send({
-          island: instance.instanceId,
-          type: 'init',
-          module: instance.moduleName,
-          payload: instance.state
-        });
-
-        // Async WASM loading (Phase 4)
-        if (window.__bastionWasm) {
-          window.__bastionWasm.loadModule(instance.moduleName).then(wasmMod => {
-            if (wasmMod) {
-              instance.wasmModule = wasmMod;
-              if (instance.state && Object.keys(instance.state).length > 0) {
-                const html = wasmMod.render(instance.state);
-                if (html !== null) instance.morph(html);
-              }
-            }
-          });
+        if (!strategy || strategy === 'eager') {
+          this._hydrateOne(el);
+        } else {
+          this._scheduleHydration(el, strategy);
         }
       });
+    }
+
+    /**
+     * Perform the actual hydration of a single island element.
+     * Registers the instance, injects CSS, loads WASM, and notifies the server.
+     * @param {HTMLElement} el
+     */
+    _hydrateOne(el) {
+      // Guard: may have been hydrated by a parallel deferred trigger
+      if (el.dataset.marchInstanceId) return;
+
+      // Clear the pending marker set by _scheduleHydration
+      delete el.dataset.marchHydratePending;
+
+      const instance = new IslandInstance(el, this);
+      this.instances.set(instance.instanceId, instance);
+
+      // Inject scoped CSS on first hydration
+      this._injectScopedCss(instance);
+
+      // Load WASM module synchronously from registry if already available
+      if (window.__bastionWasm) {
+        const mod = window.__bastionWasm.getModule(instance.moduleName);
+        if (mod) {
+          instance.wasmModule = mod;
+        }
+      }
+
+      // Tell server about this island (Server mode and Client-with-channel)
+      this.send({
+        island: instance.instanceId,
+        type: 'init',
+        module: instance.moduleName,
+        payload: instance.state
+      });
+
+      // Async WASM loading
+      if (window.__bastionWasm) {
+        window.__bastionWasm.loadModule(instance.moduleName).then(wasmMod => {
+          if (wasmMod) {
+            instance.wasmModule = wasmMod;
+            if (instance.state && Object.keys(instance.state).length > 0) {
+              const html = wasmMod.render(instance.state);
+              if (html !== null) instance.morph(html);
+            }
+          }
+        });
+      }
+    }
+
+    /**
+     * Schedule hydration of an element using the specified strategy.
+     * Marks the element as pending so discoverIslands doesn't re-schedule it.
+     * @param {HTMLElement} el
+     * @param {string} strategy - "lazy" | "idle" | "interaction" | "on-visible"
+     */
+    _scheduleHydration(el, strategy) {
+      el.dataset.marchHydratePending = '1';
+
+      switch (strategy) {
+        case 'lazy': {
+          // After the page load event (or immediately if already loaded)
+          if (document.readyState === 'complete') {
+            // Already past load — hydrate on next tick to avoid blocking paint
+            setTimeout(() => this._hydrateOne(el), 0);
+          } else {
+            const onLoad = () => {
+              window.removeEventListener('load', onLoad);
+              this._hydrateOne(el);
+            };
+            window.addEventListener('load', onLoad);
+          }
+          break;
+        }
+
+        case 'idle': {
+          // Hydrate during the browser's next idle period
+          if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(() => this._hydrateOne(el), { timeout: 2000 });
+          } else {
+            // Safari fallback
+            setTimeout(() => this._hydrateOne(el), 200);
+          }
+          break;
+        }
+
+        case 'interaction': {
+          // Hydrate on the first user interaction with the element or its children
+          const events = ['click', 'focus', 'keypress', 'touchstart', 'pointerdown'];
+          const handler = () => {
+            events.forEach(evt => el.removeEventListener(evt, handler, true));
+            this._hydrateOne(el);
+          };
+          events.forEach(evt => el.addEventListener(evt, handler, { once: true, capture: true, passive: true }));
+          break;
+        }
+
+        case 'on-visible': {
+          // Hydrate when the element enters the viewport (10% visible threshold)
+          if (this._visibilityObserver) {
+            this._visibilityObserver.observe(el);
+          } else {
+            // IntersectionObserver not available — hydrate immediately
+            this._hydrateOne(el);
+          }
+          break;
+        }
+
+        default: {
+          // Unknown strategy — fall back to eager
+          console.warn(`[bastion] Unknown hydration strategy "${strategy}", falling back to eager`);
+          this._hydrateOne(el);
+        }
+      }
+    }
+
+    /**
+     * Create a shared IntersectionObserver for on-visible island hydration.
+     * Hydrates when at least 10% of the island element is visible.
+     */
+    _startVisibilityObserver() {
+      if (this._visibilityObserver) return;
+      if (typeof IntersectionObserver === 'undefined') return;
+
+      this._visibilityObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            this._visibilityObserver.unobserve(entry.target);
+            this._hydrateOne(entry.target);
+          }
+        });
+      }, { threshold: 0.1 });
     }
 
     /**
