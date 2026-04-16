@@ -14,6 +14,7 @@ mod BastionServer do
   import Bastion
   import Conn
   import Session
+  import Depot.Middleware
 
   doc """
   Start the Bastion server with the given router and options.
@@ -96,6 +97,7 @@ mod BastionServer do
   pfn dispatch_hook(conn : Conn, hook_key : String) : Conn do
     match hook_key do
     "session_commit" -> Session.commit_from_conn(conn)
+    "pool_checkin"   -> Depot.Middleware.checkin_from_conn(conn)
     _               -> conn
     end
   end

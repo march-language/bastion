@@ -57,3 +57,4 @@ module  = "lib/forge/lower.march"
 ".march.html" = "bastion lower"
 
 [deps]
+depot = { path = "/Users/80197052/code/depot" }

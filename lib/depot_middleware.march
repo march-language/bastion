@@ -1,0 +1,129 @@
+-- lib/depot_middleware.march — Depot (PostgreSQL) pool integration for Bastion.
+--
+-- Checks out a database connection at the start of a request and returns it
+-- to the pool after the response is sent via the "pool_checkin" after-send hook.
+--
+-- The pool is created once at application startup (in the supervisor) and
+-- passed to `with_pool/2` in the endpoint pipeline:
+--
+--   -- In the app supervisor (app.march):
+--   let pool = Pool.start(Pool.default_pool_config(conn_cfg))
+--
+--   -- In the endpoint pipeline:
+--   conn
+--   |> Depot.Middleware.with_pool(pool)
+--   |> Session.load(secret_key_base)
+--   |> MyApp.Router.route()
+--
+--   -- In a handler:
+--   match Depot.Middleware.get_conn(conn) do
+--   Some(db) -> Depot.Query.exec_sql(query, db)
+--   None     -> Error("no db connection")
+--   end
+--
+-- The after-send hook "pool_checkin" is dispatched by BastionServer.
+-- BastionServer.dispatch_hook/2 must have a case for "pool_checkin":
+--   "pool_checkin" -> Depot.Middleware.checkin_from_conn(conn)
+-- (This is already wired in bastion_server.march.)
+
+mod Depot.Middleware do
+
+  import Pool
+  import Conn
+
+  -- Assign keys used internally
+  let pool_assign    = "_db_pool"
+  let conn_assign    = "_db_conn"
+  let checked_assign = "_db_checked_out"
+
+  -- ── Middleware ─────────────────────────────────────────────────────────────
+
+  doc """
+  Attach a Depot connection pool to the request and check out a connection.
+
+  Stores the pool Pid under `"_db_pool"` and the checked-out connection
+  under `"_db_conn"`.  Registers the `"pool_checkin"` after-send hook so
+  the connection is automatically returned to the pool after the response.
+
+  If checkout fails (pool exhausted, DB unreachable), assigns `None` for
+  `"_db_conn"` and does NOT register the checkin hook (nothing to return).
+  Handlers should check `Depot.Middleware.get_conn/1` before using the
+  connection.
+
+  Call early in the request pipeline, typically right after body parsing:
+
+      conn
+      |> Depot.Middleware.with_pool(pool)
+      |> Session.load(secret_key_base)
+      |> MyApp.Router.route()
+  """
+  fn with_pool(conn, pool) do
+    let conn2 = HttpServer.assign(conn, pool_assign, pool)
+    match Pool.checkout(pool) do
+    Err(_) ->
+      -- Checkout failed — assign None so handlers can detect missing conn
+      HttpServer.assign(conn2, conn_assign, None)
+    Ok(db_conn) ->
+      conn2
+      |> HttpServer.assign(conn_assign, Some(db_conn))
+      |> HttpServer.assign(checked_assign, "1")
+      |> Conn.register_after_send("pool_checkin")
+    end
+  end
+
+  -- ── Accessors ─────────────────────────────────────────────────────────────
+
+  doc """
+  Get the checked-out database connection from the request assigns.
+
+  Returns `Some(db_conn)` if a connection was successfully checked out,
+  or `None` if the pool was exhausted or `with_pool/2` was not called.
+
+      match Depot.Middleware.get_conn(conn) do
+      Some(db) -> run_query(db)
+      None     -> send_error(conn, 503, "database unavailable")
+      end
+  """
+  fn get_conn(conn) do
+    match HttpServer.get_assign(conn, conn_assign) do
+    Some(maybe) -> maybe
+    None        -> None
+    end
+  end
+
+  doc """
+  Get the pool Pid stored by `with_pool/2`.
+
+  Returns `Some(pool)` if `with_pool/2` was called, `None` otherwise.
+  """
+  fn get_pool(conn) do
+    HttpServer.get_assign(conn, pool_assign)
+  end
+
+  -- ── After-send hook ────────────────────────────────────────────────────────
+
+  doc """
+  Return the checked-out connection to the pool.
+
+  Called automatically by BastionServer via the `"pool_checkin"` after-send
+  hook registered by `with_pool/2`.  Safe to call even if no connection was
+  checked out (no-op in that case).
+
+  You should not need to call this directly — it is invoked by the server
+  after every response when `with_pool/2` was used.
+  """
+  fn checkin_from_conn(conn) do
+    -- Only checkin if we actually checked something out
+    match HttpServer.get_assign(conn, checked_assign) do
+    None    -> conn   -- nothing checked out
+    Some(_) ->
+      match (get_pool(conn), get_conn(conn)) do
+      (Some(pool), Some(db_conn)) ->
+        let _ = Pool.checkin(pool, db_conn)
+        conn
+      _ -> conn
+      end
+    end
+  end
+
+end

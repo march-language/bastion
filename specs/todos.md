@@ -25,9 +25,9 @@ The most impactful unblocked work. These are preconditions for most other featur
   - [x] Step 0b: Wire `Conn.after_send_hooks` dispatch in `bastion_server.march`; call `Session.commit_from_conn` for "session_commit" hook
   - [x] Step 1: `lib/crypto.march` — wraps stdlib `Crypto`; adds `hmac_sha256/2`, `derive_key/2`, `generate_token/1`, `bytes_to_string/1`; note: AES-256-GCM and true HKDF deferred pending runtime builtins
   - [x] Step 1b: Upgrade `session.march` crypto — replace `stub_hmac` with `Crypto.hmac_sha256` + `Crypto.derive_key`; fix `base64_decode` to handle `Ok(Bytes)`; use `Crypto.secure_compare`
-  - [ ] Step 2: Add Depot as a `[deps]` entry in Bastion's `forge.toml` — it is a separate lib at `/Users/80197052/code/depot` with real Postgres wire protocol (`connection.march`, `pool.march`), query builder, Gate, schema, migrations, and test sandbox. Currently Bastion does not declare it as a dependency.
-  - [ ] Step 2b: `lib/depot_middleware.march` — `with_pool` (pool attach), `after_send` pool checkin hook; wraps `Pool.checkout` / `Pool.checkin`
-  - [ ] Step 2c: Wire `Depot.Query` SQL generation — `Depot.Query` currently filters in-memory; needs a `to_sql/1` path that generates SQL strings executed via `Connection.exec_prepared`
+  - [x] Step 2: Add Depot as a `[deps]` entry in Bastion's `forge.toml` — `depot = { path = "/Users/80197052/code/depot" }`
+  - [x] Step 2b: `lib/depot_middleware.march` — `with_pool` checks out conn + registers "pool_checkin" hook; `get_conn`, `get_pool`, `checkin_from_conn`; BastionServer now dispatches "pool_checkin" → `Depot.Middleware.checkin_from_conn`
+  - [x] Step 2c: Wire `Depot.Query` SQL generation — extended Query type with `sql_conds` 7th field; `where_eq/ne/gt/lt/gte/lte/like/ilike/is_null/is_not_null`; `to_sql/1`, `to_params/1`, `exec_sql/2` (exec_prepared + zip cols), `count_sql/2`
   - [x] Step 3: `lib/session.march` — cookie session API complete; real HMAC-SHA256 signing via `Crypto.hmac_sha256` + derived key
   - [x] Step 4: `lib/flash.march` — `put`, `get`, `loaded_flashes`, `clear`, `delete`; `Form.FlashGroup` component
   - [x] Step 5: `lib/csrf.march` — token generation uses `Crypto.generate_token(32)`; validation uses `Crypto.secure_compare`

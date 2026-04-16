@@ -39,6 +39,8 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Auth middleware | `auth_middleware.march` | `load_current_user/2` + `load_current_user_with_remember/3`; `require_auth` (redirects to /login); `authenticated` sugar; `log_in` with optional remember-me cookie; `log_out` with optional token deleter; `redirect_after_login` |
 | Vault | `vault.march` | Wraps stdlib Vault: `open`, `put`, `put_ttl`, `get`, `get_or`, `delete`, `has`, `put_new` (atomic insert-if-absent), `update`, `size`, `keys`, `all`, `ns_*` helpers |
 | Rate limiting | `rate_limit.march` | Sliding window via Vault; `check/5` → `Ok|Error`; `limit/5` pipeline helper; `ip_key`; `x-ratelimit-*` + `retry-after` headers; 429 on exceed |
+| Depot integration | `depot_middleware.march`, `forge.toml` | Depot declared as dep; `with_pool` checks out conn + registers "pool_checkin" hook; `get_conn`/`get_pool`; auto-checkin after send |
+| Depot SQL queries | Depot repo `depot_query.march` | `where_eq/ne/gt/lt/gte/lte/like/ilike/is_null/is_not_null`; `to_sql`/`to_params`; `exec_sql` (exec_prepared + row→assoc-list); `count_sql` |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---
