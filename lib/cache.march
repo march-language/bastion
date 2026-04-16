@@ -1,0 +1,224 @@
+-- lib/cache.march — Cache
+--
+-- HTTP cache headers, response caching, and fragment caching for Bastion.
+-- All storage is backed by Vault (in-memory, per-node, TTL-aware).
+--
+-- ── HTTP ETags ────────────────────────────────────────────────────────────────
+--
+-- Use Cache.etag_from/2 in handlers after the response body is known:
+--
+--   fn show(conn) do
+--     let html = render_page()
+--     conn
+--     |> Cache.cache_control("public, max-age=600")
+--     |> Cache.etag_from(html)   -- halts with 304 if client cache is fresh
+--     |> HttpServer.html(200, html)
+--   end
+--
+-- ── Response caching ──────────────────────────────────────────────────────────
+--
+-- Cache the full response for expensive routes:
+--
+--   fn index(conn) do
+--     Cache.cached(conn, "posts:index", 60, fn conn2 ->
+--       let posts = Blog.list_posts()
+--       HttpServer.html(conn2, 200, render_posts(posts))
+--     end)
+--   end
+--
+-- ── Fragment caching ──────────────────────────────────────────────────────────
+--
+-- Cache expensive rendered fragments:
+--
+--   fn sidebar_html() do
+--     Cache.fragment("sidebar", 300, fn () -> render_sidebar() end)
+--   end
+
+mod Cache do
+
+  import HttpServer
+  import Vault
+  import Crypto
+
+  -- Vault table names for each cache type
+  let response_table = "_bastion_response_cache"
+  let fragment_table  = "_bastion_fragment_cache"
+
+  -- ── Cache-Control ─────────────────────────────────────────────────────────
+
+  doc """
+  Set the Cache-Control response header.
+
+  Common values:
+    "public, max-age=3600"          — cache for 1 hour, shareable
+    "private, max-age=0"            — client-only, no store
+    "no-store"                      — never cache (e.g. sensitive data)
+    "public, max-age=31536000"      — 1 year (use with content-hash URLs)
+
+      conn |> Cache.cache_control("public, max-age=600")
+  """
+  fn cache_control(conn, directives) do
+    HttpServer.put_resp_header(conn, "cache-control", directives)
+  end
+
+  -- ── ETags ─────────────────────────────────────────────────────────────────
+
+  doc """
+  Set an ETag from known content and short-circuit to 304 if the client
+  already has a fresh copy.
+
+  1. Computes SHA-256 of the content string and wraps it in quotes: "abc123".
+  2. Sets the ETag response header.
+  3. Reads If-None-Match from the request.
+  4. If the ETags match, halts the conn with a 304 Not Modified response
+     (empty body, no content-type). Subsequent calls like HttpServer.html are
+     no-ops when the conn is halted.
+
+  Call this AFTER building the response body but BEFORE sending it:
+
+      let html = render_page(data)
+      conn
+      |> Cache.etag_from(html)
+      |> HttpServer.html(200, html)
+  """
+  fn etag_from(conn, content) do
+    let tag   = "\"" ++ Crypto.sha256(content) ++ "\""
+    let conn2 = HttpServer.put_resp_header(conn, "etag", tag)
+    match HttpServer.get_req_header(conn2, "if-none-match") do
+    None         -> conn2
+    Some(client) ->
+      if client == tag then
+        HttpServer.send_resp(conn2, 304, "")
+      else
+        conn2
+      end
+    end
+  end
+
+  doc """
+  Set an explicit ETag value without computing it from content.
+  Use this when you have a known version identifier (e.g. a record's updated_at).
+
+      let tag = "v" ++ int_to_string(post.version)
+      conn |> Cache.etag(tag)
+  """
+  fn etag(conn, tag_value) do
+    let quoted = "\"" ++ tag_value ++ "\""
+    let conn2  = HttpServer.put_resp_header(conn, "etag", quoted)
+    match HttpServer.get_req_header(conn2, "if-none-match") do
+    None         -> conn2
+    Some(client) ->
+      if client == quoted then
+        HttpServer.send_resp(conn2, 304, "")
+      else conn2
+      end
+    end
+  end
+
+  -- ── Response caching ──────────────────────────────────────────────────────
+
+  doc """
+  Cache the full response for a route. On cache hit, replays the cached
+  status, headers, and body without calling generator. On miss, calls
+  generator, stores the result in Vault for ttl_secs, and returns.
+
+  key     — cache key string; use descriptive names like "posts:index"
+  ttl_secs — how long to keep the cached entry (seconds)
+  generator — fn(conn) -> conn that builds the response
+
+  Note: Only caches 200-level responses. Errors and redirects pass through.
+
+      Cache.cached(conn, "posts:index", 60, fn conn2 ->
+        let posts = Blog.list_posts()
+        HttpServer.html(conn2, 200, render_posts(posts))
+      end)
+  """
+  fn cached(conn, key, ttl_secs, generator) do
+    let table = Vault.open(response_table)
+    match Vault.get(table, key) do
+    Some(entry) ->
+      -- Cache hit: replay the stored response
+      let (cached_status, cached_headers, cached_body) = entry
+      List.fold_left(cached_headers, conn, fn c -> fn pair -> do
+        let (hk, hv) = pair
+        HttpServer.put_resp_header(c, hk, hv)
+      end)
+      |> HttpServer.send_resp(cached_status, cached_body)
+    None ->
+      -- Cache miss: run the generator
+      let result = generator(conn)
+      let status = HttpServer.status(result)
+      -- Only cache successful responses
+      if status >= 200 && status < 300 then do
+        let body    = HttpServer.resp_body(result)
+        let headers = HttpServer.resp_headers(result)
+        let entry   = (status, headers, body)
+        let _       = Vault.put_ttl(table, key, entry, ttl_secs)
+        result
+      end else
+        result
+      end
+    end
+  end
+
+  doc """
+  Invalidate a cached response by key.
+
+      Cache.invalidate("posts:index")
+  """
+  fn invalidate(key) do
+    let table = Vault.open(response_table)
+    Vault.delete(table, key)
+  end
+
+  doc """
+  Invalidate all cached responses whose keys start with prefix.
+  Useful for invalidating a group of related routes.
+
+      Cache.invalidate_prefix("posts:")
+  """
+  fn invalidate_prefix(prefix) do
+    let table = Vault.open(response_table)
+    let keys  = Vault.keys(table)
+    List.each(keys, fn k ->
+      if String.starts_with(k, prefix) then Vault.delete(table, k)
+      else ()
+      end
+    )
+  end
+
+  -- ── Fragment caching ──────────────────────────────────────────────────────
+
+  doc """
+  Cache a rendered string fragment. On hit, returns the cached string.
+  On miss, calls generator(), stores the result for ttl_secs, and returns it.
+
+  key      — cache key, e.g. "sidebar" or "user:42:avatar"
+  ttl_secs — how long to keep the fragment
+  generator — fn() -> String that renders the fragment
+
+      let html = Cache.fragment("global_stats", 300, fn () -> render_stats() end)
+  """
+  fn fragment(key, ttl_secs, generator) do
+    let table = Vault.open(fragment_table)
+    match Vault.get(table, key) do
+    Some(cached) -> cached
+    None -> do
+      let content = generator()
+      let _       = Vault.put_ttl(table, key, content, ttl_secs)
+      content
+    end
+    end
+  end
+
+  doc """
+  Invalidate a cached fragment by key.
+
+      Cache.invalidate_fragment("global_stats")
+  """
+  fn invalidate_fragment(key) do
+    let table = Vault.open(fragment_table)
+    Vault.delete(table, key)
+  end
+
+end
