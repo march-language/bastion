@@ -12,6 +12,8 @@ mod BastionServer do
   import HttpServer
   import Router
   import Bastion
+  import Conn
+  import Session
 
   doc """
   Start the Bastion server with the given router and options.
@@ -38,12 +40,13 @@ mod BastionServer do
     BastionServer.start_plug(pipeline, Bastion.default_opts(4000))
   """
   fn start_plug(plug : Conn -> Conn, opts : Opts) : Unit do
+    let wrapped = fn conn -> run_after_send(plug(conn))
     match opts do
     Opts(port, mc, it) -> do
       HttpServer.new(port)
       |> HttpServer.max_connections(mc)
       |> HttpServer.idle_timeout(it)
-      |> HttpServer.plug(plug)
+      |> HttpServer.plug(wrapped)
       |> HttpServer.listen()
     end
     end
@@ -57,7 +60,7 @@ mod BastionServer do
   fn spawn_n(router : Router, opts : Opts, n : Int) : Int do
     match opts do
     Opts(port, mc, it) -> do
-      let plug = Router.to_plug(router)
+      let plug = fn conn -> run_after_send(Router.to_plug(router)(conn))
       HttpServer.new(port)
       |> HttpServer.max_connections(mc)
       |> HttpServer.idle_timeout(it)
@@ -70,6 +73,31 @@ mod BastionServer do
   doc "Wait for a server subprocess returned by spawn_n to exit."
   fn wait_for(handle : Int) : Unit do
     HttpServer.wait_for(handle)
+  end
+
+  -- ── After-send hook dispatch ──────────────────────────────────────────────
+  --
+  -- Runs any after-send hooks registered on the conn via
+  -- Conn.register_after_send/2.  Called automatically by the wrapped plug
+  -- in start_plug/2 and spawn_n/3 after the request handler returns.
+  --
+  -- The hooks run BEFORE the HttpServer writes response headers to the socket,
+  -- which allows them to mutate the conn (e.g. write Set-Cookie headers).
+  --
+  -- Built-in hook keys:
+  --   "session_commit" — flushes the session cookie via Session.commit_from_conn
+
+  pfn run_after_send(conn : Conn) : Conn do
+    List.fold_left(Conn.after_send_hooks(conn), conn, fn acc hook_key ->
+      dispatch_hook(acc, hook_key)
+    )
+  end
+
+  pfn dispatch_hook(conn : Conn, hook_key : String) : Conn do
+    match hook_key do
+    "session_commit" -> Session.commit_from_conn(conn)
+    _               -> conn
+    end
   end
 
 end

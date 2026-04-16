@@ -19,6 +19,8 @@
 
 mod CSRF do
 
+  import Crypto
+
   -- -----------------------------------------------------------------------
   -- Token generation
   -- -----------------------------------------------------------------------
@@ -28,13 +30,10 @@ mod CSRF do
 
       CSRF.generate_token()  -- e.g. "dGhpcyBpcyBhIHRlc3Q..."
 
-  Uses 32 random bytes from `random_bytes/1` (CSPRNG), base64-encoded.
-  The result is URL-safe due to base64 padding — suitable for embedding in
-  HTML attributes without further escaping.
+  Uses 32 bytes from the OS CSPRNG, URL-safe base64-encoded (no padding).
   """
   fn generate_token() : String do
-    let bytes = random_bytes(32)
-    base64_encode(bytes)
+    Crypto.generate_token(32)
   end
 
   -- -----------------------------------------------------------------------
@@ -174,7 +173,7 @@ mod CSRF do
       let session_token = HttpServer.get_assign(conn, "_csrf_token")
       let body_token = parse_form_field(HttpServer.req_body(conn), "_csrf_token")
       match (session_token, body_token) do
-      (Some(st), Some(bt)) -> st == bt
+      (Some(st), Some(bt)) -> Crypto.secure_compare(st, bt)
       _ -> false
       end
     end

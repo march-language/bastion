@@ -32,7 +32,10 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Form rendering | `form.march` | Low-level tag builders + `Form.Input/Select/Textarea/Field/Error` ~H components; reads value/error from Gate |
 | Flash messages | `flash.march` | `Flash.put/get/loaded_flashes/clear/delete`; `Form.FlashGroup` ~H component; session-backed across redirects |
 | Cookie helpers | `conn.march` | `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `get_form_param` |
-| Cookie sessions | `session.march` | Signed+encrypted cookie session: `load`, `get/put/delete/clear`, `commit`, `persist`; auto-commit via after-send hook |
+| Cookie sessions | `session.march` | HMAC-SHA256-signed cookie session: `load`, `get/put/delete/clear`, `commit`, `persist`; auto-commit via after-send hook; derived signing key via `Crypto.derive_key` |
+| CSRF protection | `csrf.march` | Per-session token, `protect`/`ensure_token`/`skip`/`tag`; tokens from `Crypto.generate_token`; constant-time compare via `Crypto.secure_compare` |
+| Crypto primitives | `crypto.march` | Wraps stdlib `Crypto`: `hmac_sha256`, `derive_key`, `generate_token`, `hash_password`, `verify_password`, `secure_compare`, `bytes_to_string`, Base64 helpers |
+| After-send hooks | `bastion_server.march` | `run_after_send` + `dispatch_hook` wired in server plug; "session_commit" hook calls `Session.commit_from_conn` |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---
