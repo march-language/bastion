@@ -1,0 +1,191 @@
+-- lib/telemetry.march — Bastion.Telemetry: structured event hooks.
+--
+-- A lightweight telemetry bus that lets the framework emit named events and
+-- user code attach handlers to them.  The pattern mirrors :telemetry in the
+-- Erlang/Elixir ecosystem, adapted to March's type system.
+--
+-- Events are hierarchical string lists such as:
+--   ["bastion", "request", "start"]
+--   ["bastion", "request", "stop"]
+--   ["bastion", "depot", "query", "stop"]
+--   ["bastion", "channel", "message", "stop"]
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   -- Attach a handler at application startup:
+--   Bastion.Telemetry.attach(
+--     "my_logger",
+--     [["bastion", "request", "stop"]],
+--     fn event measurements metadata ->
+--       Logger.info("request completed", [
+--         ("path",     Conn.path(metadata.conn)),
+--         ("status",   String.from_int(measurements.status)),
+--         ("duration", String.from_int(measurements.duration_ms) ++ "ms")
+--       ])
+--     end
+--   )
+--
+--   -- Emit an event from framework or application code:
+--   Bastion.Telemetry.execute(
+--     ["bastion", "request", "stop"],
+--     { status = 200, duration_ms = 42 },
+--     { conn = conn }
+--   )
+--
+--   -- Detach when no longer needed:
+--   Bastion.Telemetry.detach("my_logger")
+
+mod Bastion.Telemetry do
+
+  import Vault
+
+  -- Vault table storing registered handlers
+  let table_name = "_bastion_telemetry"
+
+  -- ── Types ─────────────────────────────────────────────────────────────────
+
+  -- A telemetry event name: list of string segments
+  type EventName = List(String)
+
+  -- ── Attach / detach ───────────────────────────────────────────────────────
+
+  doc """
+  Attach a handler function to one or more event names.
+
+  handler_id    — unique string identifier for this handler (used to detach)
+  event_names   — list of event name lists to subscribe to
+  handler_fn    — fn(event_name, measurements, metadata) called on each event
+
+  If handler_id is already attached, the old handler is replaced.
+
+      Bastion.Telemetry.attach("my_metrics", [["bastion", "request", "stop"]], fn ev m d ->
+        update_counter(m.status)
+      end)
+  """
+  fn attach(handler_id : String, event_names : List(EventName), handler_fn) do
+    let table = Vault.open(table_name)
+    let entry = (event_names, handler_fn)
+    Vault.put(table, handler_id, entry)
+  end
+
+  doc """
+  Detach a previously attached handler.
+
+      Bastion.Telemetry.detach("my_metrics")
+  """
+  fn detach(handler_id : String) do
+    let table = Vault.open(table_name)
+    Vault.delete(table, handler_id)
+  end
+
+  doc "Return the list of all attached handler IDs."
+  fn attached_handlers() : List(String) do
+    let table = Vault.open(table_name)
+    Vault.keys(table)
+  end
+
+  -- ── Emit ──────────────────────────────────────────────────────────────────
+
+  doc """
+  Emit a telemetry event.
+
+  Iterates all attached handlers.  Handlers whose subscription list includes
+  this event name (or a prefix of it) are called inline.  Handler errors
+  are isolated: one failing handler does not prevent others from running.
+
+  event_name   — list of string segments, e.g. ["bastion", "request", "stop"]
+  measurements — record with numeric measurements (any shape)
+  metadata     — record with contextual data (any shape)
+
+      Bastion.Telemetry.execute(["bastion", "request", "stop"],
+        { status = 200, duration_ms = 42 },
+        { conn = conn })
+  """
+  fn execute(event_name : EventName, measurements, metadata) do
+    let table    = Vault.open(table_name)
+    let handlers = Vault.all(table)
+    List.each(handlers, fn pair ->
+      let (_, entry) = pair
+      let (subscriptions, handler_fn) = entry
+      let subscribed = List.any(subscriptions, fn sub_event ->
+        events_match(sub_event, event_name)
+      )
+      if subscribed do handler_fn(event_name, measurements, metadata) end
+    )
+  end
+
+  -- ── Span helpers ──────────────────────────────────────────────────────────
+
+  doc """
+  Execute a function while emitting start and stop telemetry events.
+
+  Emits `event_prefix ++ ["start"]` before calling fn, and
+  `event_prefix ++ ["stop"]` after.  The stop event includes a
+  `duration_ms` measurement.
+
+      Bastion.Telemetry.span(["bastion", "depot", "query"], metadata, fn () ->
+        Depot.exec(query)
+      end)
+  """
+  fn span(event_prefix : EventName, metadata, fn_) do
+    let start_event = List.append(event_prefix, ["start"])
+    let stop_event  = List.append(event_prefix, ["stop"])
+    execute(start_event, { duration_ms = 0 }, metadata)
+    let start_ms = Time.now_ms()
+    let result   = fn_()
+    let elapsed  = Time.now_ms() - start_ms
+    execute(stop_event, { duration_ms = elapsed }, metadata)
+    result
+  end
+
+  -- ── Framework event helpers ───────────────────────────────────────────────
+
+  doc """
+  Emit the standard request start event.  Call at the beginning of your pipeline.
+
+      Bastion.Telemetry.request_start(conn)
+  """
+  fn request_start(conn) do
+    execute(
+      ["bastion", "request", "start"],
+      { timestamp_ms = Time.now_ms() },
+      { conn = conn }
+    )
+  end
+
+  doc """
+  Emit the standard request stop event.  Call after the handler returns.
+
+  duration_ms — wall clock time from request_start to now
+  """
+  fn request_stop(conn, duration_ms : Int) do
+    execute(
+      ["bastion", "request", "stop"],
+      { duration_ms = duration_ms, status = HttpServer.status(conn) },
+      { conn = conn }
+    )
+  end
+
+  -- ── Event matching ────────────────────────────────────────────────────────
+  --
+  -- A handler subscribed to ["bastion", "request"] also receives
+  -- ["bastion", "request", "start"] and ["bastion", "request", "stop"].
+  -- An exact match ("bastion", "request", "stop") only matches that event.
+
+  pfn events_match(subscribed : EventName, event : EventName) : Bool do
+    is_prefix_of(subscribed, event) || subscribed == event
+  end
+
+  pfn is_prefix_of(prefix : EventName, target : EventName) : Bool do
+    match prefix do
+    []              -> true
+    Cons(p, rest_p) ->
+      match target do
+      []              -> false
+      Cons(t, rest_t) ->
+        if p == t do is_prefix_of(rest_p, rest_t) else false end
+      end
+    end
+  end
+
+end

@@ -64,6 +64,7 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Health check | `health.march` | `Bastion.Health`: `plug`, `plug_with_checks`, `check/2`; Vault-backed drain state; `start_drain()`/`draining?()` |
 | Multipart uploads | `upload.march` | `Bastion.Upload`: `parse_conn/2`, `parse/3`; `UploadedFile`, `UploadOpts`, `UploadError` types; boundary extraction; part splitting; header parsing; `default_opts/0`, `error_message/1` |
 | Idempotency keys | `idempotency.march` | `Bastion.Idempotency`: `protect/2`, `protect_with/3`; Vault-cached POST/PUT responses (TTL, scope prefix); replay with `X-Idempotent-Replayed: true`; `cached?`, `invalidate` |
+| Telemetry | `telemetry.march` | `Bastion.Telemetry`: `attach/3`, `detach/1`, `execute/3`; `span/3` (start/stop events with duration); `request_start/1`, `request_stop/2`; Vault-backed handler registry; prefix-match subscriptions |
 
 ---
 
