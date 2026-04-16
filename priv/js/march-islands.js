@@ -322,13 +322,19 @@
         }
       }
 
-      // Tell server about this island (Server mode and Client-with-channel)
-      this.send({
+      // Tell server about this island (Server mode and Client-with-channel).
+      // Include the channel topic when present so IslandSocket can subscribe
+      // this instance to PubSub and deliver server-push state updates.
+      const initMsg = {
         island: instance.instanceId,
         type: 'init',
         module: instance.moduleName,
         payload: instance.state
-      });
+      };
+      if (instance.channelTopic) {
+        initMsg.channel = instance.channelTopic;
+      }
+      this.send(initMsg);
 
       // Async WASM loading
       if (window.__bastionWasm) {

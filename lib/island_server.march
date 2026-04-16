@@ -1,0 +1,98 @@
+-- lib/island_server.march — Bastion.IslandServer: server-push helpers for islands.
+--
+-- Provides the application-code API for pushing state updates to connected
+-- Server-mode islands and triggering re-renders across all subscribers.
+--
+-- Under the hood this calls Bastion.PubSub.broadcast/4.  Every island instance
+-- that was rendered with Islands.wrap_with_channel(..., ServerOwned, ...) and
+-- whose JS runtime has called `init` registers a PubSub subscription on that
+-- topic.  A push here fans out to every connected instance simultaneously.
+--
+-- ── Typical usage ──────────────────────────────────────────────────────────────
+--
+--   -- In a Channel handler when scores change:
+--   fn handle_in(cc, "score_update", payload_json) do
+--     let new_scores = Scores.apply_update(Scores.current(), payload_json)
+--     let _ = Bastion.IslandServer.push("scoreboard:main", Json.encode(new_scores))
+--     Bastion.Channel.push(cc, "ok", "{}")
+--   end
+--
+--   -- In a page layout, render the Server island with a channel wired up:
+--   Islands.wrap_with_channel(
+--     "ScoreBoard", Islands.eager(), Islands.server_mode(),
+--     Scores.to_json(initial_scores), "",
+--     ScoreBoard.render(initial_scores),
+--     "scoreboard:main"
+--   )
+--
+-- ── How it works ──────────────────────────────────────────────────────────────
+--
+--   1. The JS runtime sends an `init` message that includes a `channel` field.
+--   2. IslandSocket subscribes the island instance to the PubSub topic, storing
+--      a send_fn that captures the WS socket, island ID, and render function.
+--   3. Calling IslandServer.push/2 broadcasts to that topic.
+--   4. Each subscriber's send_fn fires, sending `render` + `state` WS frames to
+--      the relevant browser connection.  No iteration over connections required.
+
+mod Bastion.IslandServer do
+
+  import Bastion.PubSub as PubSub
+
+  -- The event name used for all island state pushes.  IslandSocket subscribers
+  -- ignore the event name and treat any push as a state update, so this is a
+  -- documentation label only.
+  let push_event = "island_state"
+
+  -- ── State push ───────────────────────────────────────────────────────────
+
+  doc """
+  Push a state update to every Server-mode island connected on the given
+  channel topic.  Each instance will re-render using its registered render
+  function and send `render` + `state` WebSocket frames to the browser.
+
+  topic      — the channel topic matching the `data-march-channel` attribute
+  state_json — new state as a JSON string
+
+      Bastion.IslandServer.push("scoreboard:main", Json.encode(new_scores))
+      Bastion.IslandServer.push("dashboard:#{user_id}", Dashboard.encode(data))
+  """
+  fn push(topic : String, state_json : String) do
+    PubSub.broadcast(topic, push_event, state_json)
+  end
+
+  doc """
+  Push a state update to all subscribers *except* one.
+
+  Use this when the initiating client already has the new state (e.g. it just
+  sent it via channel_push) and does not need to receive it back.
+
+  exclude_sub — the PubSub sub_id to skip.  For islands the format is
+                "conn:<conn_id>:<island_id>", but callers can pass any
+                sub_id that was registered via Bastion.PubSub.subscribe/3.
+  """
+  fn push_from(exclude_sub : String, topic : String, state_json : String) do
+    PubSub.broadcast_from(exclude_sub, topic, push_event, state_json)
+  end
+
+  doc """
+  Return the number of island instances currently subscribed to a topic.
+  Useful in tests or admin dashboards to verify islands are connected.
+
+      let count = Bastion.IslandServer.subscriber_count("scoreboard:main")
+  """
+  fn subscriber_count(topic : String) : Int do
+    PubSub.subscriber_count(topic)
+  end
+
+  doc """
+  Return true if at least one island instance is connected on this topic.
+
+      if Bastion.IslandServer.has_subscribers("scoreboard:main") do
+        Bastion.IslandServer.push("scoreboard:main", state_json)
+      else () end
+  """
+  fn has_subscribers(topic : String) : Bool do
+    PubSub.has_subscribers(topic)
+  end
+
+end

@@ -50,6 +50,14 @@
 mod IslandSocket do
 
   import HttpServer
+  import Bastion.PubSub as PubSub
+  import Crypto
+  import Vault
+
+  -- Vault table for island→channel topic mappings (keyed by "conn_id:island_id").
+  -- Used to clean up PubSub subscriptions when an island is destroyed or the
+  -- WebSocket connection closes.
+  let channel_map_table = "_bastion_island_channel_map"
 
   -- ── Configuration ──────────────────────────────────────────────────────
 
@@ -355,7 +363,12 @@ mod IslandSocket do
       let req_path = HttpServer.path(conn)
       if req_path == socket_path do
         match origin_allowed(conn, allowed) do
-        true  -> WebSocket.upgrade(conn, fn ws_sock -> ws_loop(ws_sock, empty_state(), registry))
+        true  -> do
+          -- Generate a unique ID for this WebSocket connection so we can clean
+          -- up all PubSub subscriptions when the connection closes.
+          let conn_id = Crypto.generate_token(8)
+          WebSocket.upgrade(conn, fn ws_sock -> ws_loop(ws_sock, empty_state(), registry, conn_id))
+        end
         false -> HttpServer.send_resp(conn, 403, "origin not allowed")
         end
       else
@@ -392,27 +405,96 @@ mod IslandSocket do
 
   -- ── WebSocket loop ──────────────────────────────────────────────────────
 
-  pfn ws_loop(ws_sock : WsSocket, store : IslandState, registry : Registry) : Unit do
+  pfn ws_loop(ws_sock : WsSocket, store : IslandState, registry : Registry, conn_id : String) : Unit do
     match WebSocket.recv(ws_sock) do
     TextFrame(text) -> do
-      let new_store = handle_text(ws_sock, text, store, registry)
-      ws_loop(ws_sock, new_store, registry)
+      let new_store = handle_text(ws_sock, text, store, registry, conn_id)
+      ws_loop(ws_sock, new_store, registry, conn_id)
     end
-    Close(_, _) -> ()
+    Close(_, _) -> do
+      -- Remove all PubSub subscriptions created by this connection.
+      -- sub_ids follow the pattern "conn:<conn_id>:<island_id>" which matches
+      -- PubSub.unsubscribe_all's prefix scan.
+      let _ = PubSub.unsubscribe_all(conn_id)
+      cleanup_channel_vault(conn_id)
+    end
     Ping -> do
       WebSocket.send_frame(ws_sock, Pong)
-      ws_loop(ws_sock, store, registry)
+      ws_loop(ws_sock, store, registry, conn_id)
     end
-    _ -> ws_loop(ws_sock, store, registry)
+    _ -> ws_loop(ws_sock, store, registry, conn_id)
     end
   end
 
   -- ── Message dispatch ────────────────────────────────────────────────────
 
-  pfn handle_text(ws_sock : WsSocket, text : String, store : IslandState, registry : Registry) : IslandState do
-    let (new_store, responses) = dispatch_text(text, store, registry)
-    send_all(ws_sock, responses)
-    new_store
+  pfn handle_text(ws_sock : WsSocket, text : String, store : IslandState, registry : Registry, conn_id : String) : IslandState do
+    match Json.parse(text) do
+    Err(_) -> store
+    Ok(msg) -> do
+      let msg_type  = json_string_field(msg, "type")
+      let island_id = json_string_field(msg, "island")
+
+      -- ── channel_push: Client→server LWW state sync ─────────────────────
+      -- The client updates its local state and wants other subscribers of the
+      -- same channel topic to receive the new state.  We broadcast via PubSub,
+      -- excluding the sender so they don't receive their own update back.
+      -- This message does not affect server-side island state; skip dispatch.
+      if msg_type == "channel_push" do
+        let topic   = json_string_field(msg, "topic")
+        let payload = extract_payload(msg)
+        if not(String.is_empty(topic)) do
+          let sender_sub = "conn:" ++ conn_id ++ ":" ++ island_id
+          let _ = PubSub.broadcast_from(sender_sub, topic, "island_state", payload)
+          ()
+        else () end
+        store
+      else
+        -- ── Normal dispatch ───────────────────────────────────────────────
+        let (new_store, responses) = dispatch_text(text, store, registry)
+
+        -- ── PubSub side effects ───────────────────────────────────────────
+        -- init with channel: subscribe this island instance to the PubSub topic
+        -- so that server pushes (and LWW updates from other clients) reach it.
+        let _ = if msg_type == "init" do
+          let channel_topic = json_string_field(msg, "channel")
+          let module_name   = json_string_field(msg, "module")
+          if not(String.is_empty(channel_topic)) do
+            match find_handler(registry, module_name) do
+            Some(handler) -> do
+              let render_fn = extract_render_fn(handler)
+              let sub_id    = "conn:" ++ conn_id ++ ":" ++ island_id
+              -- Capture island_id and render_fn in the send_fn closure.
+              -- The _event argument is ignored — any push to the topic is a
+              -- state update regardless of event name.
+              let send_fn   = fn _event payload_json ->
+                let html = render_fn(payload_json)
+                WebSocket.send_frame(ws_sock, TextFrame(make_render_json(island_id, html)))
+                WebSocket.send_frame(ws_sock, TextFrame(make_state_json(island_id, payload_json)))
+              end
+              let _ = PubSub.subscribe(channel_topic, sub_id, send_fn)
+              store_island_channel(conn_id, island_id, channel_topic)
+            end
+            None -> ()
+            end
+          else () end
+        else if msg_type == "destroy" do
+          -- Unsubscribe this specific island instance from its channel topic.
+          match get_island_channel(conn_id, island_id) do
+          Some(topic) -> do
+            let sub_id = "conn:" ++ conn_id ++ ":" ++ island_id
+            let _ = PubSub.unsubscribe(topic, sub_id)
+            remove_island_channel(conn_id, island_id)
+          end
+          None -> ()
+          end
+        else () end end
+
+        send_all(ws_sock, responses)
+        new_store
+      end
+    end
+    end
   end
 
   pfn send_all(ws_sock : WsSocket, msgs : List(String)) : Unit do
@@ -585,6 +667,49 @@ mod IslandSocket do
   """
   fn process_msg_for_test(text : String, store : IslandState, registry : Registry) : (IslandState, List(String)) do
     dispatch_text(text, store, registry)
+  end
+
+  -- ── PubSub / channel-map helpers ────────────────────────────────────────
+
+  -- Extract the render function from an IslandHandler.
+  pfn extract_render_fn(h : IslandHandler) : (String -> String) do
+    match h do
+    IslandHandler(_, _, _, render_fn, _, _) -> render_fn
+    end
+  end
+
+  -- Store a conn_id+island_id → channel_topic mapping so we can unsubscribe
+  -- from the right topic when the island is destroyed.
+  pfn store_island_channel(conn_id : String, island_id : String, topic : String) do
+    let table = Vault.open(channel_map_table)
+    let _ = Vault.put(table, conn_id ++ ":" ++ island_id, topic)
+    ()
+  end
+
+  -- Retrieve the channel topic stored for a given conn+island pair.
+  pfn get_island_channel(conn_id : String, island_id : String) : Option(String) do
+    let table = Vault.open(channel_map_table)
+    Vault.get(table, conn_id ++ ":" ++ island_id)
+  end
+
+  -- Remove the channel-map entry for a single island (called on destroy).
+  pfn remove_island_channel(conn_id : String, island_id : String) do
+    let table = Vault.open(channel_map_table)
+    let _ = Vault.delete(table, conn_id ++ ":" ++ island_id)
+    ()
+  end
+
+  -- Remove all channel-map entries for a connection (called on WS close).
+  pfn cleanup_channel_vault(conn_id : String) do
+    let table  = Vault.open(channel_map_table)
+    let prefix = conn_id ++ ":"
+    let keys   = Vault.keys(table)
+    List.each(keys, fn key ->
+      if String.starts_with(key, prefix) do
+        let _ = Vault.delete(table, key)
+        ()
+      else () end
+    end)
   end
 
   -- ── JSON response builders ───────────────────────────────────────────────
