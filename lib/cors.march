@@ -1,0 +1,216 @@
+-- lib/cors.march — Cors
+--
+-- CORS (Cross-Origin Resource Sharing) middleware for Bastion.
+-- Off by default — call Cors.allow/2 only on routes that need it.
+--
+-- Usage in your router:
+--
+--   -- Apply CORS to all API routes
+--   fn route(conn, method, Cons("api", rest)) do
+--     conn
+--     |> Cors.allow(Cors.config(["https://frontend.myapp.com"]))
+--     |> MyApp.API.route(method, rest)
+--   end
+--
+--   -- Handle OPTIONS preflight for API routes
+--   fn route(conn, :options, Cons("api", _)) do
+--     conn
+--     |> Cors.allow(Cors.config(["https://frontend.myapp.com"]))
+--     |> HttpServer.send_resp(204, "")
+--   end
+--
+-- For wildcard origins (development or public APIs):
+--
+--   conn |> Cors.allow(Cors.config_open())
+--
+-- For credentialed requests (cookies / Authorization header):
+--
+--   conn |> Cors.allow(Cors.config_credentialed(["https://frontend.myapp.com"]))
+
+mod Cors do
+
+  import HttpServer
+  import Conn
+
+  -- ── Config type ─────────────────────────────────────────────────────────────
+
+  doc """
+  CORS configuration record.
+
+  Fields:
+    origins      : List(String)  — allowed origins; ["*"] for open APIs
+    methods      : List(String)  — allowed HTTP methods ("GET", "POST", etc.)
+    headers      : List(String)  — allowed request headers
+    expose       : List(String)  — response headers to expose to the browser
+    max_age      : Int           — preflight cache seconds (0 = no cache header)
+    credentials  : Bool          — whether to allow credentials (cookies, auth)
+
+  Use Cors.config/1, Cors.config_open/0, or Cors.config_credentialed/1
+  instead of building this record directly.
+  """
+  type CorsConfig = {
+    origins     : List(String),
+    methods     : List(String),
+    headers     : List(String),
+    expose      : List(String),
+    max_age     : Int,
+    credentials : Bool
+  }
+
+  -- ── Config constructors ──────────────────────────────────────────────────────
+
+  doc """
+  Build a basic CORS config for the given origins list.
+  Default methods: GET, POST, PUT, PATCH, DELETE, OPTIONS.
+  Default request headers: content-type, authorization.
+  No credentials (cookies not sent cross-origin).
+
+      Cors.config(["https://frontend.myapp.com", "https://staging.myapp.com"])
+  """
+  fn config(origins) do
+    {
+      origins     = origins,
+      methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      headers     = ["content-type", "authorization"],
+      expose      = [],
+      max_age     = 86400,
+      credentials = false
+    }
+  end
+
+  doc """
+  Open CORS config (wildcard origin). Suitable for fully public APIs.
+  Credentials are disabled (not allowed with wildcard origin per the spec).
+
+      conn |> Cors.allow(Cors.config_open())
+  """
+  fn config_open() do
+    {
+      origins     = ["*"],
+      methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      headers     = ["content-type", "authorization"],
+      expose      = [],
+      max_age     = 86400,
+      credentials = false
+    }
+  end
+
+  doc """
+  Credentialed CORS config for the given origins.
+  Allows cookies and Authorization headers cross-origin.
+  Wildcard origins are not allowed with credentials=true per the spec;
+  always pass explicit origins.
+
+      Cors.config_credentialed(["https://app.myapp.com"])
+  """
+  fn config_credentialed(origins) do
+    {
+      origins     = origins,
+      methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      headers     = ["content-type", "authorization"],
+      expose      = [],
+      max_age     = 86400,
+      credentials = true
+    }
+  end
+
+  -- ── Middleware ───────────────────────────────────────────────────────────────
+
+  doc """
+  Apply CORS headers to the response based on the config.
+
+  For simple requests: sets Access-Control-Allow-Origin (if request Origin
+  matches), Access-Control-Allow-Credentials, and any exposed headers.
+
+  For preflight (OPTIONS) requests: also sets Access-Control-Allow-Methods,
+  Access-Control-Allow-Headers, and Access-Control-Max-Age. The caller is
+  responsible for sending the 204 response for preflight routes.
+
+  If the request has no Origin header, or the origin is not in the allowed
+  list, no CORS headers are added (the request is treated as same-origin).
+
+      conn |> Cors.allow(Cors.config(["https://frontend.myapp.com"]))
+  """
+  fn allow(conn, cfg) do
+    match Conn.get_req_header(conn, "origin") do
+    None         -> conn   -- no Origin header; same-origin request, skip
+    Some(origin) ->
+      if is_origin_allowed(origin, cfg.origins) then
+        let conn2 = set_origin_header(conn, origin, cfg.origins, cfg.credentials)
+        let conn3 = set_expose_headers(conn2, cfg.expose)
+        let conn4 = match HttpServer.get_method(conn3) do
+          "OPTIONS" -> set_preflight_headers(conn3, cfg)
+          _         -> conn3
+          end
+        conn4
+      else
+        conn   -- origin not allowed; no CORS headers
+      end
+    end
+  end
+
+  -- ── Private helpers ──────────────────────────────────────────────────────────
+
+  pfn is_origin_allowed(origin, allowed) do
+    match allowed do
+    Nil               -> false
+    Cons("*", _)      -> true
+    Cons(h, rest)     ->
+      if h == origin then true
+      else is_origin_allowed(origin, rest)
+      end
+    end
+  end
+
+  pfn set_origin_header(conn, origin, allowed_origins, credentials) do
+    -- If wildcard and no credentials, set "*"; otherwise echo the specific origin
+    let allow_value = match allowed_origins do
+      Cons("*", Nil) ->
+        if credentials then origin  -- must echo origin when credentials=true
+        else "*"
+        end
+      _ -> origin
+    end
+    let conn2 = HttpServer.put_resp_header(conn, "access-control-allow-origin", allow_value)
+    -- Vary: Origin so caches key correctly when reflecting specific origins
+    let conn3 = match allowed_origins do
+      Cons("*", Nil) -> conn2
+      _              -> HttpServer.put_resp_header(conn2, "vary", "Origin")
+      end
+    if credentials then
+      HttpServer.put_resp_header(conn3, "access-control-allow-credentials", "true")
+    else
+      conn3
+    end
+  end
+
+  pfn set_expose_headers(conn, expose) do
+    match expose do
+    Nil -> conn
+    _   ->
+      let value = join_strings(expose, ", ")
+      HttpServer.put_resp_header(conn, "access-control-expose-headers", value)
+    end
+  end
+
+  pfn set_preflight_headers(conn, cfg) do
+    let methods_str = join_strings(cfg.methods, ", ")
+    let headers_str = join_strings(cfg.headers, ", ")
+    let conn2 = HttpServer.put_resp_header(conn, "access-control-allow-methods", methods_str)
+    let conn3 = HttpServer.put_resp_header(conn2, "access-control-allow-headers", headers_str)
+    if cfg.max_age > 0 then
+      HttpServer.put_resp_header(conn3, "access-control-max-age", int_to_string(cfg.max_age))
+    else
+      conn3
+    end
+  end
+
+  pfn join_strings(lst, sep) do
+    match lst do
+    Nil            -> ""
+    Cons(h, Nil)   -> h
+    Cons(h, rest)  -> h ++ sep ++ join_strings(rest, sep)
+    end
+  end
+
+end

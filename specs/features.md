@@ -45,6 +45,8 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Auth scaffold generator | `forge/gen_auth.march` | `forge bastion.gen.auth` — generates Users+UserTokens migrations, Accounts context, Auth middleware, Registration/Session/Settings/Confirmation/PasswordReset controllers (with `RateLimit.check` on login/register/reset), AccountsFixtures; prints router wiring instructions |
 | Test depot sandbox | `test_depot.march` | `Bastion.Test.Depot` — wraps `Depot.Test`; `start_sandbox`, `checkout(tables)`, `checkin`, `sandboxed(tables, fn)`, `stop_sandbox`; per-test Vault rollback |
 | Test auth helpers | `test_auth.march` | `Bastion.Test.Auth` — `log_in_user/2`, `log_in_user_with_secret/3`, `logged_in?/1`, `assert_redirects_to_login/2`; injects session into test conn |
+| Security headers | `security_headers.march` | `SecurityHeaders.defaults/1` — x-frame-options, x-content-type-options, x-xss-protection, referrer-policy, permissions-policy, COOP, COEP; `hsts/2`; `csp_base/1`, `csp_with_ws/2`; individual overrides |
+| CORS middleware | `cors.march` | `Cors.allow/2` + `CorsConfig` record; `config/1`, `config_open/0`, `config_credentialed/1`; handles preflight (OPTIONS), origin matching, vary header, credentials |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---
