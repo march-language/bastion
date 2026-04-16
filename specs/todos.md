@@ -36,7 +36,7 @@ The most impactful unblocked work. These are preconditions for most other featur
   - [x] Step 8: `lib/rate_limit.march` — sliding window counter in Vault; `check/5` returns `Ok(conn)|Error(conn)`; `limit/5` pipeline helper; `ip_key` built-in; `x-ratelimit-*` + `retry-after` headers; 429 on exceed
   - [x] Step 9: `forge depot.migrate` / `forge depot.rollback` wired in Bastion — `lib/forge/depot_migrate.march`, `depot_rollback.march`, `depot_migrations.march`, `depot_reset.march` wrap `CmdDepot.*`; registered in `forge.toml` as `bastion.depot.migrate/rollback/migrations/reset`
   - [x] Step 10: `forge gen.auth session` generator — `lib/forge/gen_auth.march`; generates users+user_tokens migrations, Accounts context, Auth middleware, Registration/Session/Settings/Confirmation/PasswordReset controllers with rate limiting (RateLimit.check on login/register/reset), AccountsFixtures test support; router route hints printed on run
-  - [ ] Step 11: `Bastion.Test.Depot.checkout` test sandbox + `Bastion.Test.Auth.log_in_user` helper — `Depot.Test` sandbox exists in depot repo; needs wiring into Bastion test helpers
+  - [x] Step 11: `Bastion.Test.Depot.checkout` test sandbox + `Bastion.Test.Auth.log_in_user` helper — `lib/test_depot.march` wraps `Depot.Test` sandbox; `lib/test_auth.march` provides `log_in_user/2`, `log_in_user_with_secret/3`, `logged_in?/1`, `assert_redirects_to_login/2`
 
 ---
 

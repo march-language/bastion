@@ -43,6 +43,8 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Depot SQL queries | Depot repo `depot_query.march` | `where_eq/ne/gt/lt/gte/lte/like/ilike/is_null/is_not_null`; `to_sql`/`to_params`; `exec_sql` (exec_prepared + row→assoc-list); `count_sql` |
 | Depot migration CLI | `forge/depot_migrate.march`, `depot_rollback.march`, `depot_migrations.march`, `depot_reset.march` | `forge bastion.depot.migrate/rollback/migrations/reset` — thin wrappers over `CmdDepot.*` from Depot lib; migration files in `priv/depot/migrations/`, log in `.march/depot/migrations.log` |
 | Auth scaffold generator | `forge/gen_auth.march` | `forge bastion.gen.auth` — generates Users+UserTokens migrations, Accounts context, Auth middleware, Registration/Session/Settings/Confirmation/PasswordReset controllers (with `RateLimit.check` on login/register/reset), AccountsFixtures; prints router wiring instructions |
+| Test depot sandbox | `test_depot.march` | `Bastion.Test.Depot` — wraps `Depot.Test`; `start_sandbox`, `checkout(tables)`, `checkin`, `sandboxed(tables, fn)`, `stop_sandbox`; per-test Vault rollback |
+| Test auth helpers | `test_auth.march` | `Bastion.Test.Auth` — `log_in_user/2`, `log_in_user_with_secret/3`, `logged_in?/1`, `assert_redirects_to_login/2`; injects session into test conn |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
 
 ---

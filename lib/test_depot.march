@@ -1,0 +1,89 @@
+-- lib/test_depot.march — Bastion.Test.Depot
+--
+-- Test sandbox integration for Depot. Wraps Depot.Test to provide per-test
+-- transaction rollback for the Vault-backed Depot store, so each test starts
+-- with a clean slate without needing to seed/truncate tables manually.
+--
+-- Usage in a test module:
+--
+--   -- Once at the start of the suite:
+--   Bastion.Test.Depot.start_sandbox()
+--
+--   -- Around each test:
+--   Bastion.Test.Depot.checkout(["users", "user_tokens"])
+--   -- ... run test ...
+--   Bastion.Test.Depot.checkin()
+--
+--   -- Or use the convenience wrapper:
+--   Bastion.Test.Depot.sandboxed(["users"], fn () ->
+--     Depot.Repo.insert(MyApp.Accounts.User.schema(), gate)
+--     Test.assert_ok(result, "insert should succeed")
+--   )
+
+mod Bastion.Test.Depot do
+
+  import Depot.Test as DepotTest
+
+  doc """
+  Start the Depot test sandbox. Call once before your test suite.
+  Required before checkout/checkin/sandboxed can be used.
+
+      Bastion.Test.Depot.start_sandbox()
+  """
+  fn start_sandbox() do
+    DepotTest.start_sandbox()
+  end
+
+  doc """
+  Stop the Depot test sandbox. Call once after your test suite.
+
+      Bastion.Test.Depot.stop_sandbox()
+  """
+  fn stop_sandbox() do
+    DepotTest.stop_sandbox()
+  end
+
+  doc """
+  Snapshot the current state of the given schema tables before a test.
+  Pass the table names that the test will write to. Pairs with checkin/0.
+
+      Bastion.Test.Depot.checkout(["users", "user_tokens"])
+  """
+  fn checkout(tables) do
+    DepotTest.checkout(tables)
+  end
+
+  doc """
+  Roll back all sandboxed tables to the snapshot taken by checkout/1.
+  Call after each test to undo writes made during the test.
+
+      Bastion.Test.Depot.checkin()
+  """
+  fn checkin() do
+    DepotTest.checkin()
+  end
+
+  doc """
+  Run a test function inside a sandbox transaction.
+  Checkpoints the given tables, calls func(), then rolls back.
+  Use this instead of manual checkout/checkin pairs.
+
+      Bastion.Test.Depot.sandboxed(["users", "user_tokens"], fn () ->
+        let result = MyApp.Accounts.register_user(attrs)
+        Test.assert_ok(result, "registration should succeed")
+      )
+  """
+  fn sandboxed(tables, func) do
+    DepotTest.sandboxed(tables, func)
+  end
+
+  doc """
+  Returns true if the sandbox is currently active.
+
+      if Bastion.Test.Depot.active() do ... end
+  """
+  fn active() do
+    DepotTest.active()
+  end
+
+end
