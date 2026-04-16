@@ -50,6 +50,7 @@ Bastion occupies a similar space to Phoenix in the Elixir ecosystem — opiniona
 | [auth-session-database.md](auth-session-database.md) | **Implementation plan** — build sequence, dependency order, API design for the full auth/session/database stack |
 | [auth.md](auth.md) | Session system, auth generators (session/token/OAuth/magic_link), generated auth middleware |
 | [security.md](security.md) | CSRF protection, security headers, CSP, CORS, rate limiting, request size limits, HTTPS redirect |
+| [form-handling.md](form-handling.md) | Three-tier form model (plain/enhanced/island), Gate validation API, built-in form components, flash messages, shared WASM validation |
 
 ### Storage and Caching
 
