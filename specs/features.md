@@ -35,8 +35,8 @@ Specced and designed but not yet fully implemented. These are the active build a
 |---------|------|--------|---------|
 | `~H` templates | [templates.md](templates.md) | Design complete, not implemented | Needs: (1) triple-quoted sigil fix in March parser, (2) `Html`/`IOList` runtime modules |
 | `.march.html` template files | [template-file-format.md](template-file-format.md) | Design complete, not implemented | Needs: `~H` fix + `bastion lower` CLI + `[preprocessors]` in forge + `.march.spans` sidecar in March compiler |
-| WASM island compilation | [wasm-islands.md](wasm-islands.md) | Infrastructure complete | Tier 4 browser target (`wasm32-unknown-unknown`) not yet in March compiler |
-| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete | Depends on WASM compilation + `~H` templates |
+| WASM island compilation | [wasm-islands.md](wasm-islands.md) | Near-complete | Compiler target done; JS runtime ~95% done. Remaining: deferred hydration strategies (lazy/idle/on-visible/on-interaction) + `march_island_msg_from_name` wiring |
+| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete | Depends on `~H` templates; WASM compiler blocker resolved |
 | Channels / WebSocket | [channels.md](channels.md) | Draft spec | Needs Channel server implementation |
 | CSP nonce injection | [csp.md](csp.md) | Draft spec | Depends on `~H` for automatic nonce injection |
 | Route verification | [route-verification.md](route-verification.md) | Draft spec | Needs compiler integration for route helper generation |

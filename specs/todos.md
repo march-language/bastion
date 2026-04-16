@@ -44,11 +44,11 @@ Specced and queued. Roughly priority order within each group.
 - [ ] Island WASM hot-swap in dev without state loss ([open-questions.md](open-questions.md) §4)
 
 ### WASM / Islands
-- [ ] Tier 4 WASM browser target (`wasm32-unknown-unknown`) in March compiler ([open-questions.md](open-questions.md) §2) — this is the big blocker
-- [ ] WASM actor runtime — green threads / mailboxes / `Pid(a)` in WASM target. Decide: per-island instance or shared with cooperative scheduling ([open-questions.md](open-questions.md) §5)
-- [ ] JS glue sidecar generation (`Counter.glue.js`) alongside `.wasm`
-- [ ] `march_alloc` / `march_dealloc` for string passing across WASM boundary
+- [ ] Deferred hydration strategies in `march-islands.js` — `data-march-hydrate="lazy|idle|interaction|on-visible"` attributes are set server-side but the JS runtime loads all islands eagerly. Implement: `lazy` (load after page load), `idle` (requestIdleCallback), `interaction` (first click/focus), `on-visible` (IntersectionObserver)
+- [ ] Wire `march_island_msg_from_name` in `wasm-bridge.js` — currently the runtime passes JSON message strings directly; should use the exported name-based variant constructor for zero-field enum messages
+- [ ] End-to-end island integration test — compile a simple island to WASM, serve it, verify hydration and state update round-trip in a browser
 - [ ] `forge gen.island` generator
+- [ ] WASM actor runtime — green threads / mailboxes in WASM target. Decide: per-island instance or shared cooperative scheduling ([open-questions.md](open-questions.md) §5) — post-v1
 
 ### Auth, Security & Storage
 - [ ] Security headers middleware — HSTS, X-Frame-Options, X-Content-Type-Options ([security.md](security.md))

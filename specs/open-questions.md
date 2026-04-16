@@ -6,9 +6,9 @@
 
 ## Open Design Questions
 
-1. **Sigil implementation**: Exact parser changes needed to support `~H"""..."""` and `~CSS"""..."""` in March's lexer. Needs a design spike.
+1. **Sigil implementation**: Triple-quoted `~H"""..."""` parser production is missing in `lib/parser/parser.mly` — the lexer handles it but the parser has no rule combining `SIGIL_PREFIX` with a triple-quoted string. See [template-file-format.md](template-file-format.md) §Layer 1a for the fix.
 
-2. **WASM compilation target**: Which WASM toolchain? Direct compilation from March AST, or via an intermediate representation? How does the WASM runtime handle March's actor model and green threads?
+2. ~~**WASM compilation target**~~ — **Resolved.** The `wasm32-unknown-unknown` target is fully implemented in `lib/tir/llvm_emit.ml` (target triple, pointer size, island export functions, bump allocator runtime). The compiler accepts `--target wasm32-unknown-unknown` and produces valid browser WASM. Forge's `cmd_build.ml` already uses it for `@island` modules. Remaining work is JS-side: deferred hydration strategies and `march_island_msg_from_name` wiring in `priv/js/`. See todos.md.
 
 3. **Island serialization**: How are props serialized from server to client for hydration? JSON is the natural choice (consistent with the JS interop boundary), but should there be a binary fast-path for large datasets?
 
