@@ -7,22 +7,38 @@
 --
 -- Enforced type signatures:
 --
---   wrap         : HttpServer.Conn     -> TypedConn(Raw)
---   parse_body   : TypedConn(Raw)      -> TypedConn(Parsed)
---   load_session : TypedConn(Parsed)   -> TypedConn(WithSession)
---   require_auth : TypedConn(WithSession) -> TypedConn(Authenticated)
---   unwrap       : TypedConn(s)        -> HttpServer.Conn
---   with_db      : HttpServer.Conn     -> HttpServer.Conn  (WithDB
---                    compositionality deferred: needs intersection/row types)
+--   wrap               : HttpServer.Conn        -> TypedConn(Raw)
+--   parse_body         : TypedConn(Raw)         -> TypedConn(Parsed)
+--   load_session       : TypedConn(Parsed)      -> TypedConn(WithSession)
+--   load_current_user  : TypedConn(WithSession) -> TypedConn(WithSession)  (soft, never halts)
+--   unwrap             : TypedConn(s)           -> HttpServer.Conn
+--   with_db            : HttpServer.Conn        -> HttpServer.Conn  (WithDB
+--                          compositionality deferred: needs intersection/row types)
+--
+-- Auth is a gate, not a pipeline step.  require_auth is called inside
+-- route handlers and returns Result — callers handle both branches:
+--
+--   require_auth  : TypedConn(WithSession) -> Result(TypedConn(Authenticated), Conn)
+--   authenticated : TypedConn(WithSession) -> (TypedConn(Authenticated) -> Conn) -> Conn
 --
 -- Standard endpoint pipeline:
 --
 --   fn call(conn) do
---     let c = TypedMiddleware.wrap(conn)
---            |> TypedMiddleware.parse_body()
---            |> TypedMiddleware.load_session(MyApp.Config.secret_key_base())
---            |> TypedMiddleware.require_auth()
---     TypedMiddleware.unwrap(c) |> MyApp.Router.route()
+--     wrap(conn)
+--     |> parse_body()
+--     |> load_session(secret)
+--     |> load_current_user(fn id -> MyApp.Accounts.get_user(db, id) end)
+--     |> unwrap()
+--     |> MyApp.Router.route()
+--   end
+--
+-- Inside a handler that requires authentication:
+--
+--   fn handle_dashboard(conn) do
+--     let tc = wrap(conn) |> parse_body() |> load_session(secret) |> load_current_user(loader)
+--     authenticated(tc, fn tc ->
+--       Dashboard.render(tc) |> unwrap()
+--     end)
 --   end
 
 mod TypedMiddleware do
@@ -137,48 +153,90 @@ mod TypedMiddleware do
   -- ── Authentication ────────────────────────────────────────────────
 
   doc """
-  Require the current_user_id assign to be set.
+  Soft auth check: load the current user from the session into conn assigns.
 
-  Returns Ok(conn) if the conn carries an authenticated user ID, or
-  Error(conn) with a 401 Unauthorized response if not.
+  Reads current_user_id from the session, calls loader(conn, id) to fetch
+  the user, and assigns the result under "current_user".  If no session
+  user ID is present, or the loader returns an error (e.g. deleted user),
+  assigns None.  Never halts.
 
-  Enforced type: TypedConn(WithSession) -> TypedConn(Authenticated)
+  Enforced type: TypedConn(WithSession) -> TypedConn(WithSession)
 
-  If the current_user_id assign is missing, the underlying conn is
-  halted with 401 Unauthorized but still tagged Authenticated so the
-  pipeline can continue without branching at the type level.  Handlers
-  should check HttpServer.halted/1 on the unwrapped conn.
+  This belongs in the pipeline.  For a hard auth gate (halt on failure),
+  call require_auth/1 inside the route handler after the pipeline runs.
   """
-  fn require_auth(tc : TypedConn(WithSession)) : TypedConn(Authenticated) do
+  fn load_current_user(tc : TypedConn(WithSession), loader) : TypedConn(WithSession) do
     let conn = unwrap(tc)
-    TypedConn(require_auth_raw(conn))
+    let user = match HttpServer.get_assign(conn, "current_user_id") do
+      None     -> None
+      Some(id) -> match loader(conn, id) do
+        Ok(u)  -> Some(u)
+        Error(_) -> None
+        end
+    end
+    TypedConn(HttpServer.assign(conn, "current_user", user))
   end
 
-  pfn require_auth_raw(conn) do
-    match HttpServer.get_assign(conn, "current_user_id") do
-    None    -> HttpServer.text(conn, 401, "Unauthorized")
-    Some(_) -> conn
+  doc """
+  Auth gate: require an authenticated user.  Call inside route handlers,
+  not in the pipeline.
+
+  Returns Ok(TypedConn(Authenticated)) if a current user is loaded, or
+  Error(Conn) with a halted redirect to /login if not.
+
+  The Error branch carries a plain Conn (not TypedConn) because it is a
+  finished response that needs no further type tracking.
+
+  Use with the `with` expression or the `authenticated/2` helper:
+
+    with Ok(tc) <- require_auth(tc) do
+      ...
+    else
+      Error(conn) -> conn
+    end
+  """
+  fn require_auth(tc : TypedConn(WithSession)) : Result(TypedConn(Authenticated), Conn) do
+    match HttpServer.get_assign(unwrap(tc), "current_user") do
+    Some(_) -> Ok(TypedConn(unwrap(tc)))
+    None    ->
+      let conn = unwrap(tc)
+                 |> HttpServer.put_resp_header("location", "/login")
+                 |> HttpServer.send_resp(302, "")
+                 |> HttpServer.halt()
+      Error(conn)
     end
   end
 
   doc """
-  Set the current authenticated user ID in the conn assigns.
+  Sugar for the common require_auth pattern.
 
-  Call this after successfully verifying credentials (password, token, etc.)
-  to mark the conn as authenticated for downstream middleware.
+  Calls handler with a TypedConn(Authenticated) if auth passes, or returns
+  the halted redirect conn directly if not.  The handler is only ever
+  called with a genuinely authenticated conn.
   """
-  fn set_current_user(conn, user_id) do
-    HttpServer.assign(conn, "current_user_id", user_id)
+  fn authenticated(tc : TypedConn(WithSession), handler) : Conn do
+    match require_auth(tc) do
+    Ok(authed)     -> handler(authed)
+    Error(halted)  -> halted
+    end
   end
 
   doc """
-  Get the current authenticated user ID from the conn assigns.
+  Get the current user assigned by load_current_user.
 
-  Returns None if require_auth has not been called or the user is not
-  authenticated.
+  Returns None if load_current_user was not called or no user was found.
+  Callable at any pipeline stage but only meaningful after WithSession.
   """
-  fn get_current_user_id(conn) do
-    HttpServer.get_assign(conn, "current_user_id")
+  fn get_current_user(tc) do
+    HttpServer.get_assign(unwrap(tc), "current_user")
+  end
+
+  doc """
+  Set the current user ID in conn assigns (used by auth generators and
+  log_in helpers to mark a user as logged in for the current request).
+  """
+  fn set_current_user_id(conn, user_id) do
+    HttpServer.assign(conn, "current_user_id", user_id)
   end
 
   -- ── Database pool ─────────────────────────────────────────────────
