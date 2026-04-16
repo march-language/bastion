@@ -1,0 +1,159 @@
+-- lib/idempotency.march — Bastion.Idempotency: idempotency-key middleware.
+--
+-- Implements Stripe-style idempotency keys for POST and PUT requests.
+-- When a client retries an operation with the same Idempotency-Key header,
+-- the cached response is replayed verbatim without re-executing the handler.
+-- This prevents duplicate charges, duplicate emails, and duplicate records.
+--
+-- ── Flow ───────────────────────────────────────────────────────────────────────
+--
+--   Request has Idempotency-Key header?
+--     NO  → pass through normally (no enforcement)
+--     YES → check Vault cache
+--       HIT  → return 200 with cached response (X-Idempotent-Replayed: true)
+--       MISS → execute handler, cache result if 2xx, return result
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   -- Protect all POST/PUT routes with default settings (24h TTL):
+--   let c = Bastion.Idempotency.protect(conn, fn () -> router_plug(conn) end)
+--
+--   -- Custom TTL (1 hour) and optional scope prefix (e.g. user ID):
+--   let scope = match Session.get(conn, "current_user_id") do
+--     Some(uid) -> uid
+--     None      -> "anon"
+--   end
+--   let c = Bastion.Idempotency.protect_with(conn, fn () -> router_plug(conn) end,
+--             Bastion.Idempotency.opts(3600, scope))
+
+mod Bastion.Idempotency do
+
+  import HttpServer
+  import Vault
+
+  let table_name = "_bastion_idempotency"
+
+  -- ── Options ───────────────────────────────────────────────────────────────
+
+  type IdempotencyOpts = {
+    ttl_secs : Int,      -- cache TTL in seconds (default 86400 = 24h)
+    scope    : String    -- prefix to namespace keys (e.g. user ID); empty = global
+  }
+
+  doc "Default options: 24-hour TTL, no scope prefix."
+  fn default_opts() : IdempotencyOpts do
+    { ttl_secs = 86400, scope = "" }
+  end
+
+  doc "Build custom options with a TTL and an optional scope prefix."
+  fn opts(ttl_secs : Int, scope : String) : IdempotencyOpts do
+    { ttl_secs = ttl_secs, scope = scope }
+  end
+
+  -- ── Middleware ────────────────────────────────────────────────────────────
+
+  doc """
+  Protect a handler with idempotency-key semantics using default options.
+
+  handler_fn is a zero-arg function that produces the conn response.
+
+      let c = Bastion.Idempotency.protect(conn, fn () -> router_plug(conn) end)
+  """
+  fn protect(conn, handler_fn : () -> Conn) do
+    protect_with(conn, handler_fn, default_opts())
+  end
+
+  doc """
+  Protect a handler with idempotency-key semantics and custom options.
+
+  handler_fn — fn() → Conn, called only on cache miss
+  opts       — IdempotencyOpts with ttl_secs and scope
+
+      let scope_key = Session.get(conn, "user_id") |> Option.unwrap_or("anon")
+      let c = Bastion.Idempotency.protect_with(conn, fn () -> router(conn) end,
+                Bastion.Idempotency.opts(3600, scope_key))
+  """
+  fn protect_with(conn, handler_fn : () -> Conn, opts : IdempotencyOpts) do
+    -- Only apply to POST and PUT
+    let method = HttpServer.method(conn)
+    if method != "POST" && method != "PUT" do
+      handler_fn()
+    else
+      match HttpServer.get_req_header(conn, "idempotency-key") do
+      None      -> handler_fn()     -- no key: pass through
+      Some(raw_key) ->
+        let key = build_key(raw_key, opts.scope)
+        let table = Vault.open(table_name)
+        match Vault.get(table, key) do
+        Some(cached) ->
+          -- Cache hit: replay the stored response
+          replay_cached(conn, cached)
+        None ->
+          -- Cache miss: execute and cache if successful
+          let result  = handler_fn()
+          let status  = HttpServer.status(result)
+          if status >= 200 && status < 300 do
+            let body    = HttpServer.resp_body(result)
+            let headers = HttpServer.resp_headers(result)
+            let entry   = (status, headers, body)
+            let _       = Vault.put_ttl(table, key, entry, opts.ttl_secs)
+            result
+          else
+            result
+          end
+        end
+      end
+    end
+  end
+
+  -- ── Cache replay ──────────────────────────────────────────────────────────
+
+  pfn replay_cached(conn, cached) do
+    let (cached_status, cached_headers, cached_body) = cached
+    let with_headers = List.fold_left(cached_headers, conn, fn c pair ->
+      let (hk, hv) = pair
+      HttpServer.put_resp_header(c, hk, hv)
+    )
+    HttpServer.put_resp_header(with_headers, "x-idempotent-replayed", "true")
+    |> HttpServer.send_resp(cached_status, cached_body)
+  end
+
+  -- ── Key construction ──────────────────────────────────────────────────────
+
+  -- Build a namespaced cache key: "scope:raw_key" or just "raw_key".
+  pfn build_key(raw_key : String, scope : String) : String do
+    if String.is_empty(scope) do
+      raw_key
+    else
+      scope ++ ":" ++ raw_key
+    end
+  end
+
+  -- ── Introspection ─────────────────────────────────────────────────────────
+
+  doc """
+  Return true if an idempotency-key response is currently cached.
+  Useful in tests to assert that a key was stored after a successful request.
+  """
+  fn cached?(key : String) : Bool do
+    cached_with_scope?(key, "")
+  end
+
+  doc "Return true if an idempotency-key response is cached under a given scope."
+  fn cached_with_scope?(key : String, scope : String) : Bool do
+    let table = Vault.open(table_name)
+    Vault.has(table, build_key(key, scope))
+  end
+
+  doc "Invalidate a cached idempotency key (e.g. after a compensating transaction)."
+  fn invalidate(key : String) do
+    invalidate_with_scope(key, "")
+  end
+
+  doc "Invalidate a cached idempotency key under a given scope."
+  fn invalidate_with_scope(key : String, scope : String) do
+    let table = Vault.open(table_name)
+    Vault.delete(table, build_key(key, scope))
+  end
+
+end

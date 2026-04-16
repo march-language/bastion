@@ -1,0 +1,365 @@
+-- lib/channel_server.march — WebSocket server for Bastion Channels.
+--
+-- Bastion.ChannelServer multiplexes multiple topics over a single WebSocket
+-- connection, routing joins, incoming events, and leaves to user-defined
+-- channel handler modules.  It integrates with Bastion.PubSub so that
+-- broadcasts from any handler are delivered to all subscribed connections.
+--
+-- ── Wire protocol (JSON) ───────────────────────────────────────────────────────
+--
+-- Client → Server (incoming frames):
+--   {"topic":"room:42","event":"join",   "payload":{},          "ref":"1"}
+--   {"topic":"room:42","event":"leave",  "payload":{},          "ref":"2"}
+--   {"topic":"room:42","event":"msg:new","payload":{"body":"hi"},"ref":"3"}
+--   {"topic":"phoenix", "event":"heartbeat","payload":{},       "ref":"4"}
+--
+-- Server → Client (reply to join/leave/heartbeat):
+--   {"topic":"room:42","event":"reply","payload":{"status":"ok","response":{}},"ref":"1"}
+--   {"topic":"room:42","event":"reply","payload":{"status":"error","response":{"reason":"unauthorized"}},"ref":"1"}
+--
+-- Server → Client (broadcast / push):
+--   {"topic":"room:42","event":"msg:new","payload":{...},"ref":null}
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   let routes =
+--     Bastion.ChannelServer.new_routes()
+--     |> Bastion.ChannelServer.add_route("room:", MyApp.RoomChannel.join, MyApp.RoomChannel.handle_in)
+--
+--   -- In the server pipeline:
+--   HttpServer.new(4000)
+--   |> HttpServer.plug(Bastion.ChannelServer.plug(routes))
+--   |> HttpServer.listen()
+--
+--   -- Or with a custom path:
+--   |> HttpServer.plug(Bastion.ChannelServer.plug_at("/socket/websocket", routes))
+
+mod Bastion.ChannelServer do
+
+  import HttpServer
+  import Bastion.Channel as Channel
+  import Bastion.PubSub as PubSub
+  import Crypto
+
+  -- ── Route type ────────────────────────────────────────────────────────────
+  --
+  -- A ChannelRoute maps a topic prefix to a pair of handler functions.
+  --
+  --   prefix      — topic must start with this string (e.g. "room:", "chat:")
+  --   join_fn     — fn(conn, topic, params_json) → Result(ChannelConn, String)
+  --   handle_in_fn — fn(conn, event, payload_json) → ChannelConn
+  --
+  -- Multiple routes are tried in the order they were added; the first prefix
+  -- match wins.
+
+  type ChannelRoute = ChannelRoute(
+    String,                                                           -- topic prefix
+    (Channel.ChannelConn, String, String) -> Result(Channel.ChannelConn, String),  -- join_fn
+    (Channel.ChannelConn, String, String) -> Channel.ChannelConn     -- handle_in_fn
+  )
+
+  type ChannelRoutes = ChannelRoutes(List(ChannelRoute))
+
+  -- ── Route builders ────────────────────────────────────────────────────────
+
+  doc "Create an empty route table."
+  fn new_routes() : ChannelRoutes do
+    ChannelRoutes([])
+  end
+
+  doc """
+  Register a topic prefix with its channel handler functions.
+
+  prefix       — topic must start with this string (e.g. "room:", "")
+  join_fn      — fn(conn, topic, params_json) → Result(ChannelConn, String)
+  handle_in_fn — fn(conn, event, payload_json) → ChannelConn
+
+  The empty string prefix "\"\"" matches every topic — use it as a catch-all
+  after more specific prefixes.
+
+      routes
+      |> ChannelServer.add_route("room:",  MyApp.RoomChannel.join,  MyApp.RoomChannel.handle_in)
+      |> ChannelServer.add_route("system:", MyApp.SysChannel.join,  MyApp.SysChannel.handle_in)
+  """
+  fn add_route(
+    routes : ChannelRoutes,
+    prefix : String,
+    join_fn : (Channel.ChannelConn, String, String) -> Result(Channel.ChannelConn, String),
+    handle_in_fn : (Channel.ChannelConn, String, String) -> Channel.ChannelConn
+  ) : ChannelRoutes do
+    match routes do
+    ChannelRoutes(rs) ->
+      ChannelRoutes(List.append(rs, [ChannelRoute(prefix, join_fn, handle_in_fn)]))
+    end
+  end
+
+  -- ── WebSocket plug ────────────────────────────────────────────────────────
+
+  doc """
+  Build a Conn → Conn plug that serves the channel WebSocket at the default
+  path /_bastion/channel.
+
+  Requests to any other path pass through unchanged.
+  """
+  fn plug(routes : ChannelRoutes) : Channel.ChannelConn -> Channel.ChannelConn do
+    plug_at("/_bastion/channel", routes)
+  end
+
+  doc """
+  Build a Conn → Conn plug that serves the channel WebSocket at a custom path.
+
+      HttpServer.plug(ChannelServer.plug_at("/socket/websocket", routes))
+  """
+  fn plug_at(path : String, routes : ChannelRoutes) do
+    fn conn ->
+      if HttpServer.path(conn) == path do
+        WebSocket.upgrade(conn, fn ws_sock ->
+          let conn_id = Crypto.generate_token(16)
+          channel_loop(ws_sock, [], routes, conn_id)
+        )
+      else
+        conn
+      end
+    end
+  end
+
+  -- ── WebSocket loop ────────────────────────────────────────────────────────
+  --
+  -- active_conns : List((topic, ChannelConn))
+  --   Tracks each topic this connection has joined, along with its current
+  --   ChannelConn (which carries user assigns set during join/handle_in).
+
+  pfn channel_loop(
+    ws_sock,
+    active_conns : List((String, Channel.ChannelConn)),
+    routes : ChannelRoutes,
+    conn_id : String
+  ) do
+    match WebSocket.recv(ws_sock) do
+    TextFrame(text) ->
+      let active2 = handle_frame(ws_sock, text, active_conns, routes, conn_id)
+      channel_loop(ws_sock, active2, routes, conn_id)
+    Ping ->
+      WebSocket.send_frame(ws_sock, Pong)
+      channel_loop(ws_sock, active_conns, routes, conn_id)
+    Close(_, _) ->
+      PubSub.unsubscribe_all(conn_id)
+    _ ->
+      channel_loop(ws_sock, active_conns, routes, conn_id)
+    end
+  end
+
+  -- ── Frame dispatch ────────────────────────────────────────────────────────
+
+  pfn handle_frame(
+    ws_sock,
+    text : String,
+    active_conns : List((String, Channel.ChannelConn)),
+    routes : ChannelRoutes,
+    conn_id : String
+  ) : List((String, Channel.ChannelConn)) do
+    match Json.parse(text) do
+    Err(_) -> active_conns
+    Ok(msg) ->
+      let topic       = json_str(msg, "topic")
+      let event       = json_str(msg, "event")
+      let ref         = json_str(msg, "ref")
+      let payload_str = extract_payload(msg)
+      match event do
+      "join"      -> do_join(ws_sock, topic, payload_str, ref, active_conns, routes, conn_id)
+      "leave"     -> do_leave(ws_sock, topic, ref, active_conns, conn_id)
+      "heartbeat" ->
+        send_reply(ws_sock, "phoenix", "ok", "{}", ref)
+        active_conns
+      _ ->
+        do_handle_in(ws_sock, topic, event, payload_str, ref, active_conns, routes)
+      end
+    end
+  end
+
+  -- ── Join ──────────────────────────────────────────────────────────────────
+
+  pfn do_join(
+    ws_sock,
+    topic : String,
+    params_json : String,
+    ref : String,
+    active_conns : List((String, Channel.ChannelConn)),
+    routes : ChannelRoutes,
+    conn_id : String
+  ) : List((String, Channel.ChannelConn)) do
+    -- Already joined — idempotent OK
+    match find_active(active_conns, topic) do
+    Some(_) ->
+      send_reply(ws_sock, topic, "ok", "{}", ref)
+      active_conns
+    None ->
+      -- Build push_fn: sends server-initiated events to this client
+      let topic_push_fn = fn (ev, payload_json) ->
+        WebSocket.send_frame(ws_sock, TextFrame(make_push_frame(topic, ev, payload_json)))
+      let cc = Channel.new_conn(topic, conn_id, topic_push_fn)
+      match find_route(routes, topic) do
+      None ->
+        send_reply(ws_sock, topic, "error", "{\"reason\":\"no_route\"}", ref)
+        active_conns
+      Some(route) ->
+        match route do
+        ChannelRoute(_, join_fn, _) ->
+          match join_fn(cc, topic, params_json) do
+          Ok(joined_cc) ->
+            -- Register with PubSub so broadcasts reach this socket
+            let sub_id = Channel.sub_id(joined_cc, topic)
+            let sub_fn = fn (ev, payload_json) ->
+              WebSocket.send_frame(ws_sock, TextFrame(make_push_frame(topic, ev, payload_json)))
+            PubSub.subscribe(topic, sub_id, sub_fn)
+            send_reply(ws_sock, topic, "ok", "{}", ref)
+            Cons((topic, joined_cc), active_conns)
+          Err(reason) ->
+            send_reply(ws_sock, topic, "error",
+              "{\"reason\":\"" ++ json_escape(reason) ++ "\"}", ref)
+            active_conns
+          end
+        end
+      end
+    end
+  end
+
+  -- ── Leave ─────────────────────────────────────────────────────────────────
+
+  pfn do_leave(
+    ws_sock,
+    topic : String,
+    ref : String,
+    active_conns : List((String, Channel.ChannelConn)),
+    conn_id : String
+  ) : List((String, Channel.ChannelConn)) do
+    -- Use a synthetic ChannelConn just to build the sub_id
+    let dummy_push = fn (_, _) -> ()
+    let dummy_cc   = Channel.new_conn(topic, conn_id, dummy_push)
+    PubSub.unsubscribe(topic, Channel.sub_id(dummy_cc, topic))
+    send_reply(ws_sock, topic, "ok", "{}", ref)
+    List.filter(active_conns, fn pair ->
+      let (t, _) = pair
+      t != topic
+    )
+  end
+
+  -- ── handle_in ─────────────────────────────────────────────────────────────
+
+  pfn do_handle_in(
+    ws_sock,
+    topic : String,
+    event : String,
+    payload_json : String,
+    ref : String,
+    active_conns : List((String, Channel.ChannelConn)),
+    routes : ChannelRoutes
+  ) : List((String, Channel.ChannelConn)) do
+    match find_active(active_conns, topic) do
+    None ->
+      -- Not joined; send error reply and leave conn unchanged
+      send_reply(ws_sock, topic, "error", "{\"reason\":\"not_joined\"}", ref)
+      active_conns
+    Some(cc) ->
+      match find_route(routes, topic) do
+      None -> active_conns
+      Some(route) ->
+        match route do
+        ChannelRoute(_, _, handle_in_fn) ->
+          let new_cc = handle_in_fn(cc, event, payload_json)
+          replace_active(active_conns, topic, new_cc)
+        end
+      end
+    end
+  end
+
+  -- ── Route lookup ──────────────────────────────────────────────────────────
+
+  pfn find_route(routes : ChannelRoutes, topic : String) : Option(ChannelRoute) do
+    match routes do
+    ChannelRoutes(rs) -> find_in_routes(rs, topic)
+    end
+  end
+
+  pfn find_in_routes(rs : List(ChannelRoute), topic : String) : Option(ChannelRoute) do
+    match rs do
+    []              -> None
+    Cons(r, rest)   ->
+      match r do
+      ChannelRoute(prefix, _, _) ->
+        if String.starts_with(topic, prefix) do Some(r)
+        else find_in_routes(rest, topic)
+        end
+      end
+    end
+  end
+
+  -- ── Active-conn helpers ───────────────────────────────────────────────────
+
+  pfn find_active(
+    active_conns : List((String, Channel.ChannelConn)),
+    topic : String
+  ) : Option(Channel.ChannelConn) do
+    match active_conns do
+    []                    -> None
+    Cons((t, cc), rest)   ->
+      if t == topic do Some(cc) else find_active(rest, topic) end
+    end
+  end
+
+  pfn replace_active(
+    active_conns : List((String, Channel.ChannelConn)),
+    topic : String,
+    new_cc : Channel.ChannelConn
+  ) : List((String, Channel.ChannelConn)) do
+    List.map(active_conns, fn pair ->
+      let (t, cc) = pair
+      if t == topic do (topic, new_cc) else (t, cc) end
+    )
+  end
+
+  -- ── JSON frame builders ───────────────────────────────────────────────────
+
+  pfn send_reply(
+    ws_sock,
+    topic : String,
+    status : String,
+    response_json : String,
+    ref : String
+  ) do
+    let frame = "{\"topic\":\"" ++ json_escape(topic) ++
+                "\",\"event\":\"reply\",\"payload\":{\"status\":\"" ++ status ++
+                "\",\"response\":" ++ response_json ++
+                "},\"ref\":\"" ++ json_escape(ref) ++ "\"}"
+    WebSocket.send_frame(ws_sock, TextFrame(frame))
+  end
+
+  pfn make_push_frame(topic : String, event : String, payload_json : String) : String do
+    "{\"topic\":\"" ++ json_escape(topic) ++
+    "\",\"event\":\"" ++ json_escape(event) ++
+    "\",\"payload\":" ++ payload_json ++
+    ",\"ref\":null}"
+  end
+
+  -- ── JSON helpers (parallel to island_socket.march) ────────────────────────
+
+  pfn json_str(obj : JsonValue, key : String) : String do
+    match Json.get(obj, key) do
+    Some(JsonValue.Str(s)) -> s
+    _                      -> ""
+    end
+  end
+
+  pfn extract_payload(msg : JsonValue) : String do
+    match Json.get(msg, "payload") do
+    Some(v) -> Json.to_string(v)
+    None    -> "null"
+    end
+  end
+
+  pfn json_escape(s : String) : String do
+    let s1 = String.replace_all(s, "\\", "\\\\")
+    String.replace_all(s1, "\"", "\\\"")
+  end
+
+end

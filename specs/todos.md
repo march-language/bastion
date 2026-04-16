@@ -18,8 +18,8 @@ The most impactful unblocked work. These are preconditions for most other featur
 - [x] ~~**`IOList` runtime module**~~ — Implemented in `lib/io_list.march`.
 - [x] ~~**`Css.style/1` helper**~~ — Implemented in `lib/css.march`.
 - [ ] **Islands data flow implementation** — Implement the `Server` / `Client` dataflow modes, parent-child prop binding, and explicit event dispatch as specced in [islands-data-flow.md](islands-data-flow.md). Depends on `~H` for template rendering in islands.
-- [ ] **Kill `window.marchIslands.send` global bus** — Replace with the parent-child dispatch model from [islands-data-flow.md](islands-data-flow.md). See wasm-islands.md current design.
-- [ ] **Channel server implementation** — Spec is complete ([channels.md](channels.md)), implementation needed. Unblocks: island-to-server sync, real-time features, Presence.
+- [x] **Kill `window.marchIslands.send` global bus** — The rewritten `march-islands.js` never exposed a global send bus; `window.__bastionIslands` is debug-only. Parent-child dispatch and channel push are the only send paths.
+- [x] **Channel server implementation** — `lib/pubsub.march` (`Bastion.PubSub`), `lib/channel.march` (`Bastion.Channel`), `lib/channel_server.march` (`Bastion.ChannelServer`), `lib/test_channel.march` (`Bastion.Test.Channel`); Vault-backed PubSub, multiplexed topic WS loop, join/leave/handle_in dispatch, test interception helpers.
 - [ ] **Auth/session/database stack** — See [auth-session-database.md](auth-session-database.md) for the full sequenced plan, API design, error handling, security checklist, and end-to-end example. Build in this order:
   - [x] Step 0: Conn prerequisites — `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `get_form_param` added to `lib/conn.march`
   - [x] Step 0b: Wire `Conn.after_send_hooks` dispatch in `bastion_server.march`; call `Session.commit_from_conn` for "session_commit" hook
@@ -54,7 +54,7 @@ Specced and queued. Roughly priority order within each group.
 - [x] Deferred hydration strategies in `march-islands.js` — `data-march-hydrate="lazy|idle|interaction|on-visible"`; `_hydrateOne(el)` extracted from discoverIslands; `_scheduleHydration(el, strategy)` dispatches to: `lazy` (window load event or setTimeout), `idle` (requestIdleCallback + Safari fallback), `interaction` (once/capture on click/focus/keypress/touch/pointer), `on-visible` (shared IntersectionObserver with 10% threshold)
 - [x] Wire `march_island_msg_from_name` in `wasm-bridge.js` — `_buildMsgPtr()` uses `march_island_msg_from_name(ptr, len)` for zero-field enum messages (plain string or `{tag: "Name"}`); falls back to JSON string for payloaded messages or when export is absent
 - [ ] End-to-end island integration test — compile a simple island to WASM, serve it, verify hydration and state update round-trip in a browser
-- [ ] `forge gen.island` generator
+- [x] `forge gen.island` generator — `lib/forge/gen_island.march`; generates `@island` module stub in `lib/islands/<name>.march`; `--server` flag generates server-handler stub; `--compile` flag builds WASM immediately; updates `priv/static/islands/manifest.json`
 - [ ] WASM actor runtime — green threads / mailboxes in WASM target. Decide: per-island instance or shared cooperative scheduling ([open-questions.md](open-questions.md) §5) — post-v1
 
 ### Auth, Security & Storage
@@ -81,15 +81,16 @@ Specced and queued. Roughly priority order within each group.
 - [ ] CSS variables / theming conventions ([css-styling.md](css-styling.md))
 
 ### JS Interop
-- [ ] `Cmd` abstraction layer for WASM → JS calls ([js-interop.md](js-interop.md))
-- [ ] Built-in `Cmd` implementations: `window.*`, DOM manipulation, `fetch`, `localStorage` ([js-interop.md](js-interop.md))
-- [ ] JS → WASM message protocol (JSON envelope) ([js-interop.md](js-interop.md))
+- [x] `Cmd` abstraction layer for WASM → JS calls — `lib/cmd.march`: `Bastion.Cmd` type + constructors (`none`, `batch`, `http_get`, `http_post`, `after`, `every`, `focus`, `blur`, `push_url`, `replace_url`, `store_local`, `load_local`, `remove_local`, `channel_push`, `map`); JSON envelope spec documented; requires `march_island_update_cmd`/`march_island_last_cmd` WASM exports from compiler
+- [x] Built-in `Cmd` implementations: `window.*`, DOM manipulation, `fetch`, `localStorage` — `executeCmd(instance, cmd)` in `march-islands.js` handles all built-in tags; wired into `IslandInstance.dispatch()` via `updateWithCmd()`; `wasm-bridge.js` `WasmIslandModule.updateWithCmd()` reads cmd JSON via `march_island_last_cmd` sidecar export
+- [x] JS FFI layer (WASM → browser) — `lib/js.march`: `Bastion.JS` with `call`, `global`, `eval`, `query_selector`, DOM attribute helpers, value converters; `extern "bastion" "js_*"` declarations; `wasm-bridge.js` handle table + late-bound memory reference wires up the `bastion` import namespace
+- [x] JS → WASM message protocol (JSON envelope) — `window.Bastion.getIsland(name)` returns `IslandHandle` with `.send(msg)`, `.getState()`, `.all()`; `Bastion.onDispatch(name, cb)` observer; wired in `march-islands.js` `dispatch()` hook
 
 ### Developer Experience
-- [ ] `forge dev` live reload (file watcher + WebSocket notify) ([dev-experience.md](dev-experience.md))
-- [ ] Dev error overlay in-browser ([dev-experience.md](dev-experience.md), [error-handling.md](error-handling.md))
-- [ ] Hot deploy / connection draining on SIGTERM ([hot-deploy.md](hot-deploy.md))
-- [ ] `forge dev` dashboard ([dev-experience.md](dev-experience.md))
+- [x] `forge dev` live reload — `lib/dev.march`: `Bastion.Dev.live_reload` plug serves `/_bastion/reload` WebSocket (drop on restart triggers browser reload) + `/_bastion/live-reload.js` client; `live_reload_tag()` returns script tag for layouts; `dev_env?()` detects MARCH_ENV
+- [ ] Dev error overlay in-browser ([dev-experience.md](dev-experience.md), [error-handling.md](error-handling.md)) — needs March try/catch or framework-level panic handler
+- [x] Hot deploy / connection draining — `lib/health.march`: `Bastion.Health.plug` serves `GET /health`; `start_drain()`/`draining?()` Vault-backed drain flag; `plug_with_checks/2` runs custom probes; 503 on drain
+- [x] `forge dev` dashboard — `lib/metrics.march` (`Bastion.Metrics`): `instrument/1` timing wrapper + `record/1` plug, `summary()`, Vault ring buffer; `lib/dev.march` extended with `dashboard` plug serving `/_bastion` HTML page with request stats and recent request log
 - [ ] Embedded asset size limits — determine threshold for `--embed-assets` ([open-questions.md](open-questions.md) §8)
 
 ### Generators
@@ -99,14 +100,16 @@ Specced and queued. Roughly priority order within each group.
 - [x] `forge gen.migration` — `lib/forge/gen_migration.march`; generates timestamped migration stub
 
 ### Testing
-- [ ] Channel testing helpers ([testing.md](testing.md))
+- [x] Channel testing helpers — `lib/test_channel.march`: `join/3`, `push/4`, `intercept/1`, `assert_broadcast/3`, `refute_broadcast/3`, `captured_broadcasts/1`, `assert_assign/3`
+- [x] HTTP test conn builder — `lib/test_conn.march`: `build_conn/2,3`; `put_req_header/body/cookie`, `put_query_params`; `authenticate_as`, `with_api_token`; `assert_status`, `assert_header`, `assert_html_contains`, `assert_redirected_to`, `assert_json`; requires `HttpServer.test_conn/2` stdlib primitive
 - [ ] Island integration tests (SSR + update, no WASM) ([testing.md](testing.md))
 
 ### Operations
+- [x] `forge bastion.release` — `lib/forge/release.march`; builds binary (release mode), compiles WASM islands, copies static assets to `_build/release/<name>/`; `--embed-assets` embeds statics into binary; `--dockerfile` generates Dockerfile with health-check; `--clean` wipes release dir first; warns if `SECRET_KEY_BASE` unset
 - [ ] Deployment guide — single binary, env config, health checks, graceful shutdown ([deployment.md](deployment.md))
 - [x] Structured logging + request ID propagation — `lib/logger.march`: `Logger.debug/info/warn/error(msg, meta)` + `*_conn` helpers; human format (dev) vs JSON (prod) via MARCH_ENV; `Middleware.request_id` upgraded to use `Crypto.generate_token(16)` + set `x-request-id` response header; `Middleware.logger` uses `Logger.info`
-- [ ] OpenTelemetry tracing — decide default sample rate ([telemetry.md](telemetry.md), [open-questions.md](open-questions.md) §9)
-- [ ] Streaming multipart upload middleware ([uploads.md](uploads.md))
+- [x] Telemetry events — `lib/telemetry.march`: `Bastion.Telemetry.attach/3`, `detach/1`, `execute/3`; `span/3` (emits start/stop events around a fn, measures duration_ms); `request_start/1`, `request_stop/2`; Vault-backed handler registry; prefix-match subscriptions (["bastion","request"] matches all sub-events)
+- [x] Multipart upload middleware — `lib/upload.march`: `Bastion.Upload.parse_conn/2` + `parse/3`; boundary extraction from Content-Type; part splitting; header/Content-Disposition parsing; `UploadedFile`/`UploadOpts`/`UploadError` types; `default_opts`, `error_message`
 
 ---
 

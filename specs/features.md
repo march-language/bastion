@@ -55,6 +55,21 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Structured logging | `logger.march` | `Logger.debug/info/warn/error(msg, meta)` + `*_conn/3` helpers; human format `HH:MM:SS.mmm [level] msg  k=v` (dev) or JSON one-liner (prod) via MARCH_ENV |
 | Request ID middleware | `middleware.march` | `Middleware.request_id` upgraded: `Crypto.generate_token(16)` for new IDs, echoes `x-request-id` response header; `Middleware.logger` uses `Logger.info` with request_id in meta |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
+| PubSub | `pubsub.march` | `Bastion.PubSub`: `subscribe`, `unsubscribe`, `unsubscribe_all`, `broadcast`, `broadcast_from`; Vault-backed send_fn registry; inline delivery |
+| Channel connection | `channel.march` | `Bastion.Channel`: `ChannelConn` type; `assign`, `get_assign`, `push`, `broadcast_from`, `sub_id`; used by both server and test helpers |
+| Channel server | `channel_server.march` | `Bastion.ChannelServer`: `add_route`, `plug`, `plug_at`; multiplexed topic WS loop; join/leave/heartbeat/handle_in; PubSub integration |
+| Channel test helpers | `test_channel.march` | `Bastion.Test.Channel`: `join/3`, `push/4`, `intercept/1`, `assert_broadcast/3`, `refute_broadcast/3`, `captured_broadcasts/1` |
+| Request metrics | `metrics.march` | `Bastion.Metrics`: `instrument/1` (timing wrapper), `record/1` (plug); `summary()`, `total()`, `error_count()`, `recent_requests()`; Vault ring-buffer (last 100); `reset()` |
+| Live reload + dashboard | `dev.march` | `Bastion.Dev`: `live_reload` plug; `live_reload_tag()`; `dashboard` plug (`/_bastion` HTML page with metrics); `request_timer`, `server_timing`, `conn_inspector`; `dev_env?()` |
+| Health check | `health.march` | `Bastion.Health`: `plug`, `plug_with_checks`, `check/2`; Vault-backed drain state; `start_drain()`/`draining?()` |
+| Multipart uploads | `upload.march` | `Bastion.Upload`: `parse_conn/2`, `parse/3`; `UploadedFile`, `UploadOpts`, `UploadError` types; boundary extraction; part splitting; header parsing; `default_opts/0`, `error_message/1` |
+| Idempotency keys | `idempotency.march` | `Bastion.Idempotency`: `protect/2`, `protect_with/3`; Vault-cached POST/PUT responses (TTL, scope prefix); replay with `X-Idempotent-Replayed: true`; `cached?`, `invalidate` |
+| Telemetry | `telemetry.march` | `Bastion.Telemetry`: `attach/3`, `detach/1`, `execute/3`; `span/3` (start/stop events with duration); `request_start/1`, `request_stop/2`; Vault-backed handler registry; prefix-match subscriptions |
+| HTTP test conn builder | `test_conn.march` | `Bastion.Test.Conn`: `build_conn/2,3`; `put_req_header`, `put_req_body`, `put_req_cookie`, `put_query_params`; `authenticate_as`, `with_api_token`; `assert_status`, `assert_header`, `assert_html_contains`, `assert_redirected_to`, `assert_json`; `get_resp_header`, `resp_status`, `resp_body` |
+| JS → island public API | `priv/js/march-islands.js` | `window.Bastion.getIsland(name)` → `IslandHandle` with `.send(msg)`, `.getState()`, `.all()`, `.count`; `Bastion.onDispatch(name, cb)` dispatch observer; allows host-page JS to communicate with islands |
+| Cmd abstraction (WASM → JS) | `lib/cmd.march`, `priv/js/march-islands.js`, `priv/js/wasm-bridge.js` | `Bastion.Cmd` type + constructors; `executeCmd` runtime for `HttpGet/Post`, `After/Every`, `Focus/Blur`, `PushUrl/ReplaceUrl`, `StoreLocal/LoadLocal/RemoveLocal`, `ChannelPush`, `Batch`; `WasmIslandModule.updateWithCmd()` reads cmd via `march_island_last_cmd` sidecar export |
+| JS FFI layer (WASM → browser) | `lib/js.march`, `priv/js/wasm-bridge.js` | `Bastion.JS`: `call`, `global`, `eval`, `query_selector`, `get/set/remove_attribute`, `add_event_listener`, `string_val/int_val/bool_val/json_val`, `to_string/to_int`; JS handle table in wasm-bridge.js; `extern "bastion" "js_*"` imports; late-bound memory reference |
+| Release builder | `forge/release.march`, `forge.toml` | `forge bastion.release`; compiles binary (release mode) + WASM islands + static assets → `_build/release/<name>/`; `--embed-assets` bakes statics into binary; `--dockerfile` generates Dockerfile with HEALTHCHECK; `--clean` wipes release dir |
 
 ---
 
@@ -64,12 +79,12 @@ Specced and designed but not yet fully implemented. These are the active build a
 
 | Feature | Spec | Status | Blocker |
 |---------|------|--------|---------|
-| `~H` templates | [templates.md](templates.md) | Design complete, not implemented | Needs `Html`/`IOList` runtime modules (triple-quoted sigil parsing already works) |
-| `.march.html` template files | [template-file-format.md](template-file-format.md) | All layers implemented | Triple-quoted `~H` sigils work; `[preprocessors]` in forge; `.march.spans` sidecar in compiler; lowering pass + runtime in Bastion |
-| WASM island compilation | [wasm-islands.md](wasm-islands.md) | Near-complete | Compiler target done; JS runtime ~95% done. Remaining: deferred hydration strategies (lazy/idle/on-visible/on-interaction) + `march_island_msg_from_name` wiring |
-| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete | Depends on `~H` templates; WASM compiler blocker resolved |
-| Channels / WebSocket | [channels.md](channels.md) | Draft spec | Needs Channel server implementation |
-| CSP nonce injection | [csp.md](csp.md) | Draft spec | Depends on `~H` for automatic nonce injection |
+| `~H` templates | [templates.md](templates.md) | Runtime modules done (`html.march`, `io_list.march`, `css.march`); template lowering pass + `bastion lower` CLI done; sigil parsing works | Needs compiler `~H` pass to lower templates at compile time; `.march.spans` sidecar for error reporting not yet in compiler |
+| `.march.html` template files | [template-file-format.md](template-file-format.md) | All Bastion layers implemented | `.march.spans` sidecar support needs March compiler change (span map for error line reporting); otherwise all done |
+| WASM island compilation | [wasm-islands.md](wasm-islands.md) | **JS runtime complete** | All JS-side work done (hydration strategies, `march_island_msg_from_name`, Cmd executor, FFI layer, public API); pending: end-to-end integration test |
+| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete; server-side (ChannelServer, PubSub, Channel) and JS client runtime done | Bastion.Cmd + islands-data-flow runtime path needs `~H` templates for server-driven rendering |
+| Channels / WebSocket | [channels.md](channels.md) | Server + PubSub + test helpers fully implemented | Client-side channel hook in islands depends on `~H` templates for Server-mode island rendering |
+| CSP nonce injection | [csp.md](csp.md) | Draft spec | Depends on `~H` compiler pass for automatic nonce injection |
 | Route verification | [route-verification.md](route-verification.md) | Draft spec | Needs compiler integration for route helper generation |
 
 ---

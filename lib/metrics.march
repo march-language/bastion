@@ -1,0 +1,169 @@
+-- lib/metrics.march — Bastion.Metrics: lightweight request metrics.
+--
+-- Collects request counts, error counts, and response timing for the dev
+-- dashboard and optional production observability.  All data is stored in
+-- Vault so it's zero-overhead when the middleware isn't in the pipeline.
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   -- In your endpoint (dev mode only, or always for production monitoring):
+--   let c = Bastion.Metrics.record(conn)
+--
+--   -- Or via Middleware.pipeline:
+--   Middleware.pipeline([Bastion.Metrics.record, router_plug], conn)
+--
+--   -- Query stats:
+--   let summary = Bastion.Metrics.summary()
+--   -- { total: 142, errors: 3, avg_ms: 1.8, recent: [...] }
+--
+--   -- Reset all counters (useful in tests):
+--   Bastion.Metrics.reset()
+
+mod Bastion.Metrics do
+
+  import HttpServer
+  import Vault
+
+  let table_name    = "_bastion_metrics"
+  let total_key     = "total"
+  let error_key     = "errors"
+  let total_ms_key  = "total_ms"
+  let recent_key    = "recent"
+
+  let max_recent    = 100   -- keep last N requests
+
+  -- ── Types ─────────────────────────────────────────────────────────────────
+
+  type RequestEntry = {
+    method    : String,
+    path      : String,
+    status    : Int,
+    duration  : Int   -- milliseconds
+  }
+
+  type MetricsSummary = {
+    total   : Int,
+    errors  : Int,
+    avg_ms  : Int,
+    recent  : List(RequestEntry)
+  }
+
+  -- ── Middleware plug ───────────────────────────────────────────────────────
+
+  doc """
+  Wrap a plug to record request metrics around it (measures handler duration).
+
+  Use this to instrument the router or any plug-composable handler:
+
+      let app = Bastion.Metrics.instrument(Router.to_plug(router))
+      HttpServer.new(4000) |> HttpServer.plug(app) |> HttpServer.listen()
+  """
+  fn instrument(plug_fn) do
+    fn conn ->
+      let start  = Time.now_ms()
+      let result = plug_fn(conn)
+      let elapsed = Time.now_ms() - start
+      let status  = HttpServer.status(result)
+      let method  = HttpServer.method(conn)
+      let path    = HttpServer.path(conn)
+      let entry   = { method = method, path = path, status = status, duration = elapsed }
+      do_record(entry, status)
+      result
+    end
+  end
+
+  doc """
+  Plug that records basic request info (method, path) without duration.
+
+  Use when the plug is composed into a pipeline rather than wrapping it.
+  Status is recorded as 0 since it's not known until after the handler runs.
+  For accurate status + timing, prefer instrument/1.
+
+      Middleware.pipeline([Bastion.Metrics.record, router], conn)
+  """
+  fn record(conn) do
+    let method = HttpServer.method(conn)
+    let path   = HttpServer.path(conn)
+    let entry  = { method = method, path = path, status = 0, duration = 0 }
+    do_record(entry, 0)
+    conn
+  end
+
+  pfn do_record(entry : RequestEntry, status : Int) do
+    let table = Vault.open(table_name)
+    -- Increment counters
+    let _ = Vault.update(table, total_key, fn n -> n + 1)
+    let _ = match Vault.get(table, total_key) do
+      None -> Vault.put(table, total_key, 1)
+      _    -> ()
+    end
+    if status >= 500 do
+      let _ = Vault.update(table, error_key, fn n -> n + 1)
+      let _ = match Vault.get(table, error_key) do
+        None -> Vault.put(table, error_key, 1)
+        _    -> ()
+      end
+      ()
+    end
+    -- Accumulate total milliseconds for average calculation
+    let _ = Vault.update(table, total_ms_key, fn ms -> ms + entry.duration)
+    let _ = match Vault.get(table, total_ms_key) do
+      None -> Vault.put(table, total_ms_key, entry.duration)
+      _    -> ()
+    end
+    -- Ring buffer of recent requests
+    let recent = Vault.get_or(table, recent_key, [])
+    let trimmed = if List.length(recent) >= max_recent do
+      List.drop(recent, 1)
+    else
+      recent
+    end
+    Vault.put(table, recent_key, List.append(trimmed, [entry]))
+  end
+
+  -- ── Queries ───────────────────────────────────────────────────────────────
+
+  doc """
+  Return a summary of all recorded metrics.
+
+      let s = Bastion.Metrics.summary()
+      s.total    -- total requests
+      s.errors   -- 5xx count
+      s.avg_ms   -- average response time (ms)
+      s.recent   -- last up to 100 requests
+  """
+  fn summary() : MetricsSummary do
+    let table   = Vault.open(table_name)
+    let total   = Vault.get_or(table, total_key, 0)
+    let errors  = Vault.get_or(table, error_key, 0)
+    let total_ms = Vault.get_or(table, total_ms_key, 0)
+    let avg_ms  = if total > 0 do total_ms / total else 0 end
+    let recent  = Vault.get_or(table, recent_key, [])
+    { total = total, errors = errors, avg_ms = avg_ms, recent = recent }
+  end
+
+  doc "Return the total number of requests recorded."
+  fn total() : Int do
+    let table = Vault.open(table_name)
+    Vault.get_or(table, total_key, 0)
+  end
+
+  doc "Return the number of 5xx errors recorded."
+  fn error_count() : Int do
+    let table = Vault.open(table_name)
+    Vault.get_or(table, error_key, 0)
+  end
+
+  doc "Return the last N recorded requests (up to 100)."
+  fn recent_requests() : List(RequestEntry) do
+    let table = Vault.open(table_name)
+    Vault.get_or(table, recent_key, [])
+  end
+
+  doc "Reset all metrics counters.  Useful in tests."
+  fn reset() do
+    let table = Vault.open(table_name)
+    Vault.clear(table)
+  end
+
+end

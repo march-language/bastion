@@ -1,0 +1,275 @@
+-- lib/dev.march — Bastion.Dev: development-only tools.
+--
+-- Provides live reload (browser refresh on server restart), dev timing
+-- middleware, and conn inspection logging.  These tools should only be
+-- activated when MARCH_ENV is "dev".
+--
+-- ── Live Reload ────────────────────────────────────────────────────────────────
+--
+-- When the dev server restarts (forge dev detects a .march change and kills the
+-- process), all browser WebSocket connections to /_bastion/reload are dropped.
+-- The injected client-side script detects the drop and reloads the page.
+--
+-- Setup (add to your endpoint in dev mode):
+--
+--   -- 1. Add the Dev plugs to your pipeline:
+--   let app = fn conn ->
+--     let c = Bastion.Dev.live_reload(conn)  -- handles /_bastion/reload and /_bastion/live-reload.js
+--     ...
+--
+--   -- 2. Add the script tag to your root layout:
+--   <script src="/_bastion/live-reload.js"></script>
+--
+-- Or use the combined helper that checks MARCH_ENV automatically:
+--
+--   let c = if Bastion.Dev.dev_env?() do Bastion.Dev.live_reload(conn) else conn end
+
+mod Bastion.Dev do
+
+  import HttpServer
+  import Bastion.Metrics
+
+  -- ── Environment ───────────────────────────────────────────────────────────
+
+  doc """
+  Returns true when MARCH_ENV is "dev" or "development" (or unset, since dev
+  is the default when no environment is specified).
+  """
+  fn dev_env?() : Bool do
+    match Process.env("MARCH_ENV") do
+    None    -> true
+    Some(e) ->
+      let lower = String.to_lowercase(e)
+      lower == "dev" || lower == "development"
+    end
+  end
+
+  -- ── Live Reload ───────────────────────────────────────────────────────────
+
+  let reload_ws_path  = "/_bastion/reload"
+  let reload_js_path  = "/_bastion/live-reload.js"
+
+  doc """
+  Plug that handles both the live-reload WebSocket endpoint and the browser
+  JS client file.
+
+  - GET /_bastion/reload (Upgrade: websocket) — keep-alive WebSocket. When the
+    dev server restarts and drops the connection, the client reloads the page.
+  - GET /_bastion/live-reload.js — serves the client-side JavaScript.
+
+  Other paths pass through unchanged.
+
+      let c = Bastion.Dev.live_reload(conn)
+  """
+  fn live_reload(conn) do
+    let path = HttpServer.path(conn)
+    if path == reload_ws_path do
+      -- Upgrade to WebSocket and hold the connection alive.
+      -- The dev server restart kills this process, dropping all connections.
+      -- The browser JS detects the drop and reloads.
+      WebSocket.upgrade(conn, fn ws -> reload_ws_loop(ws))
+    else if path == reload_js_path do
+      serve_reload_js(conn)
+    else
+      conn
+    end
+  end
+
+  doc """
+  Return a <script> HTML tag pointing to the live-reload client JS.
+
+  Add this to your root layout when in dev mode:
+
+      if Bastion.Dev.dev_env?() do
+        Bastion.Dev.live_reload_tag()
+      end
+  """
+  fn live_reload_tag() : String do
+    "<script src=\"/_bastion/live-reload.js\"></script>"
+  end
+
+  -- WebSocket loop: stay alive, handle ping/close.
+  -- No data is sent to the client — the connection itself is the signal.
+  pfn reload_ws_loop(ws) do
+    match WebSocket.recv(ws) do
+    Ping         ->
+      WebSocket.send_frame(ws, Pong)
+      reload_ws_loop(ws)
+    Close(_, _)  -> ()
+    _            -> reload_ws_loop(ws)
+    end
+  end
+
+  -- Serve the live-reload.js client script inline (no file system lookup needed).
+  pfn serve_reload_js(conn) do
+    HttpServer.put_resp_header(conn, "content-type", "text/javascript; charset=utf-8")
+    |> HttpServer.put_resp_header("cache-control", "no-store")
+    |> HttpServer.send_resp(200, reload_js_source())
+  end
+
+  pfn reload_js_source() : String do
+    "(function(){" ++
+    "  function connect(){" ++
+    "    var proto=location.protocol==='https:'?'wss:':'ws:';" ++
+    "    var ws=new WebSocket(proto+'//'+location.host+'/_bastion/reload');" ++
+    "    ws.onopen=function(){" ++
+    "      if(window.__bastionReloadReconnected){" ++
+    "        console.log('[Bastion] Reconnected — reloading');" ++
+    "        location.reload();" ++
+    "      } else {" ++
+    "        console.log('[Bastion] Live reload connected');" ++
+    "      }" ++
+    "    };" ++
+    "    ws.onclose=function(){" ++
+    "      window.__bastionReloadReconnected=true;" ++
+    "      console.log('[Bastion] Connection dropped — reconnecting in 500ms...');" ++
+    "      setTimeout(connect,500);" ++
+    "    };" ++
+    "    ws.onerror=function(){" ++
+    "      ws.close();" ++
+    "    };" ++
+    "  }" ++
+    "  connect();" ++
+    "})();"
+  end
+
+  -- ── Dev Middleware ────────────────────────────────────────────────────────
+
+  doc """
+  Middleware that logs detailed timing for each request.
+
+  Adds an X-Request-Time header with the wall-clock time spent.
+
+      let app = fn conn ->
+        Bastion.Dev.request_timer(conn)
+        |> router_plug
+  """
+  fn request_timer(conn) do
+    let start    = Time.now_ms()
+    let result   = conn
+    let elapsed  = Time.now_ms() - start
+    HttpServer.put_resp_header(result, "x-request-time", String.from_int(elapsed) ++ "ms")
+  end
+
+  doc """
+  Middleware that adds a Server-Timing response header.
+
+  Useful for measuring time spent in the browser DevTools Network panel.
+
+      conn |> Bastion.Dev.server_timing
+  """
+  fn server_timing(conn) do
+    let start = Time.now_ms()
+    let result = conn
+    let elapsed = Time.now_ms() - start
+    let timing  = "total;dur=" ++ String.from_int(elapsed)
+    HttpServer.put_resp_header(result, "server-timing", timing)
+  end
+
+  doc """
+  Middleware that logs the full conn state to stdout.
+
+  Prints method, path, headers, assigns, and query params.
+  Useful for debugging request handling.
+
+      conn |> Bastion.Dev.conn_inspector
+  """
+  fn conn_inspector(conn) do
+    let method  = HttpServer.method(conn)
+    let path    = HttpServer.path(conn)
+    let headers = HttpServer.req_headers(conn)
+    println("[Bastion.Dev] " ++ method ++ " " ++ path)
+    List.each(headers, fn pair ->
+      let (k, v) = pair
+      println("  " ++ k ++ ": " ++ v)
+    )
+    conn
+  end
+
+  -- ── Dev Dashboard ─────────────────────────────────────────────────────────
+
+  doc """
+  Plug that serves a dev dashboard at /_bastion.
+
+  Shows live request metrics (from Bastion.Metrics), Vault table stats,
+  and recent request log.
+
+  Add this to your dev pipeline before the router:
+
+      let c = Bastion.Dev.dashboard(conn)
+  """
+  fn dashboard(conn) do
+    let path = HttpServer.path(conn)
+    if path == "/_bastion" || path == "/_bastion/" do
+      serve_dashboard(conn)
+    else
+      conn
+    end
+  end
+
+  pfn serve_dashboard(conn) do
+    let s       = Bastion.Metrics.summary()
+    let total   = String.from_int(s.total)
+    let errors  = String.from_int(s.errors)
+    let avg_ms  = String.from_int(s.avg_ms)
+    let rows    = render_recent(s.recent)
+    let html =
+      "<!DOCTYPE html><html lang='en'><head>" ++
+      "<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>" ++
+      "<title>Bastion Dev Dashboard</title>" ++
+      "<style>" ++
+      "body{font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:1rem;color:#1a1a1a;}" ++
+      "h1{color:#7c3aed;margin:0 0 .5rem}" ++
+      ".stats{display:flex;gap:2rem;margin:1.5rem 0;}" ++
+      ".stat{background:#f5f3ff;border-radius:8px;padding:.75rem 1.25rem;}" ++
+      ".stat .label{font-size:.75rem;color:#6b7280;text-transform:uppercase;letter-spacing:.05em}" ++
+      ".stat .value{font-size:1.5rem;font-weight:700;color:#7c3aed}" ++
+      ".stat.error .value{color:#dc2626}" ++
+      "table{width:100%;border-collapse:collapse;font-size:.875rem;}" ++
+      "th{text-align:left;padding:.5rem .75rem;border-bottom:2px solid #e5e7eb;color:#6b7280;font-weight:600}" ++
+      "td{padding:.4rem .75rem;border-bottom:1px solid #f3f4f6;}" ++
+      ".method{font-weight:600;color:#059669}" ++
+      ".status-ok{color:#059669}.status-err{color:#dc2626}.status-red{color:#f97316}" ++
+      "footer{margin-top:2rem;color:#9ca3af;font-size:.8rem}" ++
+      "</style></head><body>" ++
+      "<h1>Bastion Dev Dashboard</h1>" ++
+      "<div class='stats'>" ++
+      "  <div class='stat'><div class='label'>Requests</div><div class='value'>" ++ total ++ "</div></div>" ++
+      "  <div class='stat error'><div class='label'>Errors (5xx)</div><div class='value'>" ++ errors ++ "</div></div>" ++
+      "  <div class='stat'><div class='label'>Avg Response</div><div class='value'>" ++ avg_ms ++ "ms</div></div>" ++
+      "</div>" ++
+      "<h2>Recent Requests</h2>" ++
+      "<table><thead><tr><th>Method</th><th>Path</th><th>Status</th><th>Duration</th></tr></thead>" ++
+      "<tbody>" ++ rows ++ "</tbody></table>" ++
+      "<footer>Bastion · MARCH_ENV=dev</footer>" ++
+      "</body></html>"
+    HttpServer.put_resp_header(conn, "content-type", "text/html; charset=utf-8")
+    |> HttpServer.put_resp_header("cache-control", "no-store")
+    |> HttpServer.send_resp(200, html)
+  end
+
+  pfn render_recent(entries : List(Bastion.Metrics.RequestEntry)) : String do
+    let reversed = List.reverse(entries)
+    let rows     = List.map(reversed, fn e ->
+      let status_class = if e.status >= 500 do "status-err"
+                         else if e.status >= 400 do "status-red"
+                         else "status-ok"
+                         end
+      let dur = if e.duration == 0 do "—" else String.from_int(e.duration) ++ "ms" end
+      "<tr>" ++
+      "<td class='method'>" ++ html_escape(e.method) ++ "</td>" ++
+      "<td>" ++ html_escape(e.path) ++ "</td>" ++
+      "<td class='" ++ status_class ++ "'>" ++ String.from_int(e.status) ++ "</td>" ++
+      "<td>" ++ dur ++ "</td>" ++
+      "</tr>"
+    )
+    String.join(rows, "")
+  end
+
+  pfn html_escape(s : String) : String do
+    let s1 = String.replace_all(s, "&", "&amp;")
+    let s2 = String.replace_all(s1, "<", "&lt;")
+    String.replace_all(s2, ">", "&gt;")
+  end
+
+end

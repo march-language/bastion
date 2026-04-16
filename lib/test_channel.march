@@ -1,0 +1,174 @@
+-- lib/test_channel.march — Bastion.Test.Channel: test helpers for channel handlers.
+--
+-- Test channel handlers without a live WebSocket connection.  Calls join and
+-- handle_in functions directly, and captures PubSub broadcasts via a Vault-
+-- backed intercept table so they can be asserted on.
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   mod MyApp.RoomChannelTest do
+--     import Bastion.Test.Channel as TestChannel
+--
+--     test "joining a room succeeds" do
+--       let result = TestChannel.join(MyApp.RoomChannel.join, "room:general", "{}")
+--       assert (result == Ok(_))
+--     end
+--
+--     test "sending a message broadcasts to the room" do
+--       let stop = TestChannel.intercept("room:general")
+--       let Ok(conn) = TestChannel.join(MyApp.RoomChannel.join, "room:general", "{}")
+--       TestChannel.push(conn, MyApp.RoomChannel.handle_in, "message:new", "{\"body\":\"hi\"}")
+--       TestChannel.assert_broadcast("room:general", "message:new", "{\"body\":\"hi\"}")
+--       stop()
+--     end
+--   end
+
+mod Bastion.Test.Channel do
+
+  import Bastion.Channel as Channel
+  import Bastion.PubSub as PubSub
+  import Vault
+
+  -- Vault table for captured broadcast messages (keyed by topic)
+  let capture_table = "_bastion_test_channel_captures"
+
+  -- ── Simulated join ────────────────────────────────────────────────────────
+
+  doc """
+  Simulate a channel join without a live WebSocket.
+
+  join_fn      — the handler's join function (e.g. MyApp.RoomChannel.join)
+  topic        — topic string (e.g. "room:general")
+  params_json  — join params as a JSON string (e.g. "{}")
+
+  Returns Ok(ChannelConn) on success or Err(reason) on rejection.
+
+  The ChannelConn's push_fn is a no-op in tests.  Use assert_push/3 on the
+  returned conn to verify direct pushes (not yet implemented — see below).
+  """
+  fn join(
+    join_fn : (Channel.ChannelConn, String, String) -> Result(Channel.ChannelConn, String),
+    topic : String,
+    params_json : String
+  ) : Result(Channel.ChannelConn, String) do
+    let conn_id  = "test_conn_" ++ topic
+    let push_fn  = fn (_, _) -> ()   -- no-op; no live socket in tests
+    let cc       = Channel.new_conn(topic, conn_id, push_fn)
+    join_fn(cc, topic, params_json)
+  end
+
+  doc """
+  Simulate a channel join with a specific connection ID.  Useful when you need
+  to distinguish multiple test connections in the same test.
+  """
+  fn join_as(
+    join_fn : (Channel.ChannelConn, String, String) -> Result(Channel.ChannelConn, String),
+    topic : String,
+    params_json : String,
+    conn_id : String
+  ) : Result(Channel.ChannelConn, String) do
+    let push_fn  = fn (_, _) -> ()
+    let cc       = Channel.new_conn(topic, conn_id, push_fn)
+    join_fn(cc, topic, params_json)
+  end
+
+  -- ── Simulated push (handle_in) ────────────────────────────────────────────
+
+  doc """
+  Push an event to a joined channel and return the updated ChannelConn.
+
+  handle_in_fn — the handler's handle_in function
+  conn         — channel connection returned by join/3
+  event        — event name (e.g. "message:new")
+  payload_json — payload as a JSON string
+
+      let conn2 = TestChannel.push(conn, MyApp.RoomChannel.handle_in, "message:new", "{\"body\":\"hi\"}")
+  """
+  fn push(
+    conn : Channel.ChannelConn,
+    handle_in_fn : (Channel.ChannelConn, String, String) -> Channel.ChannelConn,
+    event : String,
+    payload_json : String
+  ) : Channel.ChannelConn do
+    handle_in_fn(conn, event, payload_json)
+  end
+
+  -- ── Broadcast interception ────────────────────────────────────────────────
+
+  doc """
+  Intercept PubSub broadcasts to a topic, capturing them for assertion.
+
+  Returns a zero-arg function that unregisters the interceptor.  Call it in
+  test teardown or wrap your test body with it:
+
+      let stop = TestChannel.intercept("room:general")
+      -- ... test actions ...
+      TestChannel.assert_broadcast("room:general", "message:new", "{...}")
+      stop()
+  """
+  fn intercept(topic : String) : () -> () do
+    let table  = Vault.open(capture_table)
+    let sub_id = "_test_intercept_" ++ topic
+    let sub_fn = fn (event, payload_json) ->
+      let current = Vault.get_or(table, topic, [])
+      Vault.put(table, topic, List.append(current, [(event, payload_json)]))
+    PubSub.subscribe(topic, sub_id, sub_fn)
+    fn () -> PubSub.unsubscribe(topic, sub_id)
+  end
+
+  doc """
+  Assert that a broadcast was captured for the given topic, event, and payload.
+
+  Requires intercept/1 to have been called for the topic before the action
+  that triggers the broadcast.
+
+      TestChannel.assert_broadcast("room:general", "message:new", "{\"body\":\"hi\"}")
+  """
+  fn assert_broadcast(topic : String, event : String, payload_json : String) do
+    let table    = Vault.open(capture_table)
+    let captured = Vault.get_or(table, topic, [])
+    let found    = List.any(captured, fn pair ->
+      let (ev, payload) = pair
+      ev == event && payload == payload_json
+    )
+    assert found
+  end
+
+  doc """
+  Assert that NO broadcast matching event+payload was made to a topic.
+  """
+  fn refute_broadcast(topic : String, event : String, payload_json : String) do
+    let table    = Vault.open(capture_table)
+    let captured = Vault.get_or(table, topic, [])
+    let found    = List.any(captured, fn pair ->
+      let (ev, payload) = pair
+      ev == event && payload == payload_json
+    )
+    assert !found
+  end
+
+  doc "Clear all captured broadcasts for a topic."
+  fn clear_broadcasts(topic : String) do
+    let table = Vault.open(capture_table)
+    Vault.delete(table, topic)
+  end
+
+  doc "Return all captured broadcasts for a topic as a list of (event, payload_json) pairs."
+  fn captured_broadcasts(topic : String) : List((String, String)) do
+    let table = Vault.open(capture_table)
+    Vault.get_or(table, topic, [])
+  end
+
+  -- ── Assign helpers ────────────────────────────────────────────────────────
+
+  doc """
+  Assert that a channel connection has an assign with the given key and value.
+
+      TestChannel.assert_assign(conn, "room_id", "general")
+  """
+  fn assert_assign(conn : Channel.ChannelConn, key : String, value : String) do
+    let actual = Channel.get_assign(conn, key)
+    assert (actual == Some(value))
+  end
+
+end

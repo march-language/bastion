@@ -73,6 +73,10 @@ module  = "lib/forge/depot_migrations.march"
 command = "bastion.depot.reset"
 module  = "lib/forge/depot_reset.march"
 
+[archive.task.bastion.release]
+command = "bastion.release"
+module  = "lib/forge/release.march"
+
 [preprocessors]
 ".march.html" = "bastion lower"
 

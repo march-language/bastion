@@ -221,6 +221,58 @@
     }
 
     /**
+     * Apply a message to the state, returning both the success flag AND
+     * any Cmd produced by the island's update function.
+     *
+     * Requires the WASM module to export:
+     *   march_island_update_cmd(state_ptr, msg_ptr)  → new_state_ptr
+     *   march_island_last_cmd()                       → cmd_json_str_ptr | 0
+     *
+     * The compiler emits march_island_update_cmd instead of march_island_update
+     * when the island's update function returns (State, Cmd(Msg)) tuples.
+     * march_island_last_cmd() returns the Cmd portion of the last call's result.
+     *
+     * Falls back to the plain update() path if march_island_update_cmd is absent.
+     *
+     * @param {string|Object} msgPayload
+     * @returns {{ updated: boolean, cmd: Object|null }}
+     */
+    updateWithCmd(msgPayload) {
+      // Fast path: island doesn't produce Cmds
+      if (typeof this.exports.march_island_update_cmd !== 'function') {
+        const updated = this.update(msgPayload);
+        return { updated, cmd: null };
+      }
+      if (!this.statePtr) return { updated: false, cmd: null };
+
+      const msgPtr = this._buildMsgPtr(msgPayload);
+      if (msgPtr === null) return { updated: false, cmd: null };
+
+      try {
+        const newStatePtr = this.exports.march_island_update_cmd(this.statePtr, msgPtr);
+        if (!newStatePtr) return { updated: false, cmd: null };
+
+        this.statePtr = newStatePtr;
+
+        // Read the Cmd if march_island_last_cmd is exported
+        let cmd = null;
+        if (typeof this.exports.march_island_last_cmd === 'function') {
+          const cmdPtr = this.exports.march_island_last_cmd();
+          if (cmdPtr) {
+            const cmdStr = this._readString(cmdPtr);
+            if (cmdStr) {
+              try { cmd = JSON.parse(cmdStr); } catch (_) {}
+            }
+          }
+        }
+        return { updated: true, cmd };
+      } catch (e) {
+        console.warn(`[bastion/wasm] ${this.moduleName}.update_with_cmd() failed:`, e);
+        return { updated: false, cmd: null };
+      }
+    }
+
+    /**
      * Merge remote state into local state.
      * Phase 5: default is server-wins (discard local, use server HTML).
      * Custom merge functions are not yet wired through the WASM boundary.
@@ -280,13 +332,97 @@
     async _fetchAndInstantiate(moduleName) {
       const url = `${this.islandsBasePath}/${moduleName}.wasm`;
       try {
+        // ── JS FFI handle table ───────────────────────────────────────────────
+        // JS objects are stored in a handle table keyed by integer handles.
+        // WASM code passes handles back to JS for further DOM/API operations.
+        const jsHandles = new Map();
+        let jsHandleCounter = 1;
+        const js_store = (val) => {
+          if (val === null || val === undefined) return 0;
+          const h = jsHandleCounter++;
+          jsHandles.set(h, val);
+          return h;
+        };
+        const js_load = (h) => h ? jsHandles.get(h) : undefined;
+
+        // Late-bound memory reference.  importObject closures capture this ref;
+        // it is patched to the actual WASM memory after instantiation.
+        let wasmMemory = null;
+        const readStr = (ptr) => {
+          if (!ptr || !wasmMemory) return '';
+          const mem = new DataView(wasmMemory.buffer);
+          const lenLo  = mem.getUint32(ptr + 16, true);
+          const dataPtr = mem.getUint32(ptr + 24, true);
+          if (!dataPtr || lenLo === 0) return '';
+          const bytes = new Uint8Array(wasmMemory.buffer, dataPtr, lenLo);
+          return new TextDecoder('utf-8').decode(bytes);
+        };
+        const resolvePath = (path, root) => {
+          if (!path) return undefined;
+          return path.split('.').reduce((obj, key) => obj != null ? obj[key] : undefined, root);
+        };
+
         // WASM imports: declare external functions used by March runtime stubs
+        // and the Bastion.JS FFI (lib/js.march).
         const importObject = {
           env: {
             march_print:    () => {},
             march_println:  () => {},
             march_panic:    () => { throw new Error('march panic'); },
-          }
+          },
+          // Bastion.JS FFI — matches `extern "bastion" "js_*"` declarations in lib/js.march
+          bastion: {
+            js_call: (funcPathPtr, _argsPtr) => {
+              const funcPath = readStr(funcPathPtr);
+              const fn_ = resolvePath(funcPath, window);
+              if (typeof fn_ !== 'function') return 0;
+              // args: March list traversal deferred — call with no args for now
+              try { return js_store(fn_()); } catch (_) { return 0; }
+            },
+            js_global: (propPathPtr) => {
+              const val = resolvePath(readStr(propPathPtr), window);
+              return js_store(val !== undefined ? val : null);
+            },
+            js_eval: (codePtr) => {
+              try { return js_store(eval(readStr(codePtr))); } catch (_) { return 0; } // eslint-disable-line no-eval
+            },
+            js_query_selector: (selectorPtr) => {
+              try { return js_store(document.querySelector(readStr(selectorPtr))); } catch (_) { return 0; }
+            },
+            js_get_attribute: (h, attrPtr) => {
+              const el = js_load(h);
+              if (!el || typeof el.getAttribute !== 'function') return 0;
+              const v = el.getAttribute(readStr(attrPtr));
+              return js_store(v !== null ? v : null);
+            },
+            js_set_attribute: (h, attrPtr, valuePtr) => {
+              const el = js_load(h);
+              if (el && typeof el.setAttribute === 'function')
+                el.setAttribute(readStr(attrPtr), readStr(valuePtr));
+              return 0;
+            },
+            js_remove_attribute: (h, attrPtr) => {
+              const el = js_load(h);
+              if (el && typeof el.removeAttribute === 'function')
+                el.removeAttribute(readStr(attrPtr));
+              return 0;
+            },
+            // Full callback support requires WASM function table — deferred
+            js_add_event_listener: (_h, _eventPtr, _handlerPtr) => 0,
+            js_string_to_ref: (strPtr)  => js_store(readStr(strPtr)),
+            js_int_to_ref:    (n)       => js_store(n),
+            js_bool_to_ref:   (b)       => js_store(!!b),
+            js_json_to_ref:   (strPtr)  => {
+              try { return js_store(JSON.parse(readStr(strPtr))); } catch (_) { return 0; }
+            },
+            // js_ref_to_string: writing a March String back into WASM memory requires
+            // march_alloc_export — deferred until island compiler support is complete
+            js_ref_to_string: (_h, _outPtr) => 0,
+            js_ref_to_int: (h) => {
+              const v = js_load(h);
+              return typeof v === 'number' ? v : 0;
+            },
+          },
         };
 
         let instance;
@@ -306,6 +442,9 @@
           const result = await WebAssembly.instantiate(bytes, importObject);
           instance = result.instance;
         }
+
+        // Patch the late-bound memory reference so FFI imports can read strings
+        wasmMemory = instance.exports.memory;
 
         const mod = new WasmIslandModule(instance, moduleName);
         mod.initState();
