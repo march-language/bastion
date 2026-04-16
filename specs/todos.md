@@ -63,8 +63,8 @@ Specced and queued. Roughly priority order within each group.
 - [ ] `forge gen.auth token / oauth / magic_link` — post-v1 auth strategies ([auth.md](auth.md))
 - [ ] Vault full API — bags, ordered sets, bulk ops; after core Vault (Step 7) ships ([vault.md](vault.md))
 - [ ] Vault/Depot session backends — alternative to cookie sessions ([auth-session-database.md](auth-session-database.md))
-- [ ] HTTP ETag + response caching ([caching.md](caching.md))
-- [ ] Fragment caching ([caching.md](caching.md))
+- [x] HTTP ETag + response caching — `lib/cache.march`; `Cache.etag_from/2` (SHA-256 + 304 short-circuit), `Cache.etag/2` (explicit tag), `Cache.cache_control/2`, `Cache.cached/4` (Vault-backed full response cache), `Cache.invalidate/1`, `Cache.invalidate_prefix/1`
+- [x] Fragment caching — `lib/cache.march`; `Cache.fragment/3` (Vault-backed string fragment cache), `Cache.invalidate_fragment/1`
 
 ### Forms
 - [x] `Gate` changeset validation — `cast`, `validate_required/format/length/number/inclusion/confirmation`, `add_error`, `error_for` (`lib/gate.march`)
