@@ -59,7 +59,7 @@ mod Bastion.Metrics do
       HttpServer.new(4000) |> HttpServer.plug(app) |> HttpServer.listen()
   """
   fn instrument(plug_fn) do
-    fn conn ->
+    fn conn -> do
       let start  = Time.now_ms()
       let result = plug_fn(conn)
       let elapsed = Time.now_ms() - start
@@ -104,6 +104,7 @@ mod Bastion.Metrics do
         _    -> ()
       end
       ()
+    else ()
     end
     -- Accumulate total milliseconds for average calculation
     let _ = Vault.update(table, total_ms_key, fn ms -> ms + entry.duration)

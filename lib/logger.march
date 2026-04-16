@@ -61,20 +61,21 @@ mod Logger do
   pfn format_time_human(ms) do
     let total_secs = ms / 1000
     let millis     = ms - (total_secs * 1000)
-    let secs       = total_secs mod 60
-    let mins       = (total_secs / 60) mod 60
-    let hours      = (total_secs / 3600) mod 24
+    let secs       = total_secs %60
+    let mins       = (total_secs / 60) %60
+    let hours      = (total_secs / 3600) %24
     pad2(hours) ++ ":" ++ pad2(mins) ++ ":" ++ pad2(secs) ++ "." ++ pad3(millis)
   end
 
   pfn pad2(n) do
-    if n < 10 then "0" ++ int_to_string(n) else int_to_string(n) end
+    if n < 10 do "0" ++ int_to_string(n) else int_to_string(n) end
   end
 
   pfn pad3(n) do
-    if n < 10 then "00" ++ int_to_string(n)
-    else if n < 100 then "0" ++ int_to_string(n)
+    if n < 10 do "00" ++ int_to_string(n)
+    else if n < 100 do "0" ++ int_to_string(n)
     else int_to_string(n)
+    end
     end
   end
 
@@ -83,7 +84,7 @@ mod Logger do
   --   12:34:56.789 [info]  message  key=value  key2=value2
 
   pfn format_human(level, msg, meta) do
-    let ts    = format_time_human(unix_time_ms(()))
+    let ts    = format_time_human(float_to_int(unix_time(()) * 1000.0))
     let color = level_to_ansi(level)
     let lvl   = "[" ++ level_to_string(level) ++ "]"
     let base  = ts ++ " " ++ color ++ lvl ++ ansi_reset ++ " " ++ msg
@@ -100,7 +101,7 @@ mod Logger do
     Nil -> acc
     Cons((k, v), rest) ->
       let pair = k ++ "=" ++ v
-      let next = if acc == "" then pair else acc ++ "  " ++ pair end
+      let next = if acc == "" do pair else acc ++ "  " ++ pair end
       build_kv_pairs(rest, next)
     end
   end
@@ -110,7 +111,7 @@ mod Logger do
   --   {"ts":"12:34:56.789","level":"info","msg":"message","key":"value"}
 
   pfn format_json(level, msg, meta) do
-    let ts  = format_time_human(unix_time_ms(()))
+    let ts  = format_time_human(float_to_int(unix_time(()) * 1000.0))
     let lvl = level_to_string(level)
     let base_fields =
       "\"ts\":\"" ++ ts ++ "\","
@@ -148,8 +149,9 @@ mod Logger do
 
   pfn log(level, msg, meta) do
     let line =
-      if is_json_env() then format_json(level, msg, meta)
+      if is_json_env() do format_json(level, msg, meta)
       else format_human(level, msg, meta)
+      end
     println(line)
   end
 
@@ -209,7 +211,7 @@ mod Logger do
   """
   fn info_conn(conn, msg, meta) do
     let rid = request_id_from_conn(conn)
-    let full_meta = if rid == "" then meta else Cons(("request_id", rid), meta) end
+    let full_meta = if rid == "" do meta else Cons(("request_id", rid), meta) end
     log(Info, msg, full_meta)
   end
 
@@ -218,7 +220,7 @@ mod Logger do
   """
   fn warn_conn(conn, msg, meta) do
     let rid = request_id_from_conn(conn)
-    let full_meta = if rid == "" then meta else Cons(("request_id", rid), meta) end
+    let full_meta = if rid == "" do meta else Cons(("request_id", rid), meta) end
     log(Warn, msg, full_meta)
   end
 
@@ -227,7 +229,7 @@ mod Logger do
   """
   fn error_conn(conn, msg, meta) do
     let rid = request_id_from_conn(conn)
-    let full_meta = if rid == "" then meta else Cons(("request_id", rid), meta) end
+    let full_meta = if rid == "" do meta else Cons(("request_id", rid), meta) end
     log(Error, msg, full_meta)
   end
 

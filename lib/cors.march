@@ -34,20 +34,18 @@ mod Cors do
 
   -- ── Config type ─────────────────────────────────────────────────────────────
 
-  doc """
-  CORS configuration record.
-
-  Fields:
-    origins      : List(String)  — allowed origins; ["*"] for open APIs
-    methods      : List(String)  — allowed HTTP methods ("GET", "POST", etc.)
-    headers      : List(String)  — allowed request headers
-    expose       : List(String)  — response headers to expose to the browser
-    max_age      : Int           — preflight cache seconds (0 = no cache header)
-    credentials  : Bool          — whether to allow credentials (cookies, auth)
-
-  Use Cors.config/1, Cors.config_open/0, or Cors.config_credentialed/1
-  instead of building this record directly.
-  """
+  -- CORS configuration record.
+  --
+  -- Fields:
+  --   origins      : List(String)  — allowed origins; ["*"] for open APIs
+  --   methods      : List(String)  — allowed HTTP methods ("GET", "POST", etc.)
+  --   headers      : List(String)  — allowed request headers
+  --   expose       : List(String)  — response headers to expose to the browser
+  --   max_age      : Int           — preflight cache seconds (0 = no cache header)
+  --   credentials  : Bool          — whether to allow credentials (cookies, auth)
+  --
+  -- Use Cors.config/1, Cors.config_open/0, or Cors.config_credentialed/1
+  -- instead of building this record directly.
   type CorsConfig = {
     origins     : List(String),
     methods     : List(String),
@@ -135,7 +133,7 @@ mod Cors do
     match Conn.get_req_header(conn, "origin") do
     None         -> conn   -- no Origin header; same-origin request, skip
     Some(origin) ->
-      if is_origin_allowed(origin, cfg.origins) then
+      if is_origin_allowed(origin, cfg.origins) do
         let conn2 = set_origin_header(conn, origin, cfg.origins, cfg.credentials)
         let conn3 = set_expose_headers(conn2, cfg.expose)
         let conn4 = match HttpServer.get_method(conn3) do
@@ -156,7 +154,7 @@ mod Cors do
     Nil               -> false
     Cons("*", _)      -> true
     Cons(h, rest)     ->
-      if h == origin then true
+      if h == origin do true
       else is_origin_allowed(origin, rest)
       end
     end
@@ -166,7 +164,7 @@ mod Cors do
     -- If wildcard and no credentials, set "*"; otherwise echo the specific origin
     let allow_value = match allowed_origins do
       Cons("*", Nil) ->
-        if credentials then origin  -- must echo origin when credentials=true
+        if credentials do origin  -- must echo origin when credentials=true
         else "*"
         end
       _ -> origin
@@ -177,7 +175,7 @@ mod Cors do
       Cons("*", Nil) -> conn2
       _              -> HttpServer.put_resp_header(conn2, "vary", "Origin")
       end
-    if credentials then
+    if credentials do
       HttpServer.put_resp_header(conn3, "access-control-allow-credentials", "true")
     else
       conn3
@@ -198,7 +196,7 @@ mod Cors do
     let headers_str = join_strings(cfg.headers, ", ")
     let conn2 = HttpServer.put_resp_header(conn, "access-control-allow-methods", methods_str)
     let conn3 = HttpServer.put_resp_header(conn2, "access-control-allow-headers", headers_str)
-    if cfg.max_age > 0 then
+    if cfg.max_age > 0 do
       HttpServer.put_resp_header(conn3, "access-control-max-age", int_to_string(cfg.max_age))
     else
       conn3

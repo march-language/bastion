@@ -1,0 +1,32 @@
+-- lib/cmd_depot.march — Bastion stub for CmdDepot (migration runner)
+--
+-- This stub satisfies the compile-time dependency of lib/forge/depot_*.march
+-- forge tasks during `forge test` and `forge build`.
+-- The real CmdDepot implementation is provided by depot/lib/forge/cmd_depot.march
+-- and is used when the depot archive tasks run.
+--
+-- Do not use this module directly — use `forge bastion.depot.migrate` etc.
+
+mod CmdDepot do
+
+  doc "Run all pending Depot migrations."
+  fn migrate() : Result(String, String) do
+    panic("CmdDepot.migrate: not available in stub — run forge bastion.depot.migrate")
+  end
+
+  doc "Roll back the last N Depot migrations."
+  fn rollback(n : Int) : Result(String, String) do
+    panic("CmdDepot.rollback: not available in stub")
+  end
+
+  doc "List all migrations and their status."
+  fn migrations() : Result(String, String) do
+    panic("CmdDepot.migrations: not available in stub")
+  end
+
+  doc "Reset the database by dropping and recreating all tables."
+  fn reset() : Result(String, String) do
+    panic("CmdDepot.reset: not available in stub")
+  end
+
+end

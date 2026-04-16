@@ -92,9 +92,9 @@ mod Gate do
       match get_change(g, field) do
       None    -> add_error(g, field, "can't be blank")
       Some(v) ->
-        if String.is_empty(String.trim(v))
-        then add_error(g, field, "can't be blank")
+        if String.is_empty(String.trim(v)) do add_error(g, field, "can't be blank")
         else g
+        end
       end
     )
   end
@@ -108,7 +108,7 @@ mod Gate do
     match get_change(gate, field) do
     None    -> gate
     Some(v) ->
-      if Regex.match(pattern, v) then gate
+      if Regex.matches(pattern, v) do gate
       else add_error(gate, field, "has invalid format")
       end
     end
@@ -130,11 +130,11 @@ mod Gate do
       List.fold_left(constraints, gate, fn (g, c) ->
         match c do
         LenMin(n) ->
-          if len >= n then g
+          if len >= n do g
           else add_error(g, field, "is too short (minimum is " ++ int_to_string(n) ++ " characters)")
           end
         LenMax(n) ->
-          if len <= n then g
+          if len <= n do g
           else add_error(g, field, "is too long (maximum is " ++ int_to_string(n) ++ " characters)")
           end
         end
@@ -160,11 +160,11 @@ mod Gate do
         List.fold_left(constraints, gate, fn (g, c) ->
           match c do
           NumMin(min) ->
-            if n >= min then g
+            if n >= min do g
             else add_error(g, field, "must be greater than or equal to " ++ int_to_string(min))
             end
           NumMax(max) ->
-            if n <= max then g
+            if n <= max do g
             else add_error(g, field, "must be less than or equal to " ++ int_to_string(max))
             end
           end
@@ -182,7 +182,7 @@ mod Gate do
     match get_change(gate, field) do
     None    -> gate
     Some(v) ->
-      if List.member(v, values) then gate
+      if List.member(v, values) do gate
       else add_error(gate, field, "is not included in the list")
       end
     end
@@ -201,7 +201,7 @@ mod Gate do
     let conf_field = field ++ "_confirmation"
     match (get_change(gate, field), get_change(gate, conf_field)) do
     (Some(v), Some(c)) ->
-      if v == c then gate
+      if v == c do gate
       else add_error(gate, conf_field, "does not match " ++ field)
       end
     _ -> gate
@@ -237,7 +237,7 @@ mod Gate do
 
       if Gate.valid?(gate) do Depot.insert(db, schema, gate) end
   """
-  fn valid?(gate : Gate) : Bool do
+  fn valid(gate : Gate) : Bool do
     match gate do
     Gate(_, errors, _) -> List.is_empty(errors)
     end
@@ -343,7 +343,7 @@ mod Gate do
     match pairs do
     Nil -> None
     Cons((k, v), rest) ->
-      if k == key then Some(v)
+      if k == key do Some(v)
       else lookup_pair(rest, key)
       end
     end
@@ -353,7 +353,7 @@ mod Gate do
     match pairs do
     Nil -> [(key, value)]
     Cons((k, v), rest) ->
-      if k == key then Cons((key, value), rest)
+      if k == key do Cons((key, value), rest)
       else Cons((k, v), upsert_pair(rest, key, value))
       end
     end

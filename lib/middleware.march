@@ -57,7 +57,7 @@ mod Middleware do
       Some(id) -> id
       None     -> ""
       end
-    let meta = if rid == "" then [("path", path_str)]
+    let meta = if rid == "" do [("path", path_str)]
                else [("path", path_str), ("request_id", rid)]
                end
     Logger.info(method_str ++ " " ++ path_str, meta)

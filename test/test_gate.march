@@ -24,7 +24,7 @@ describe "Gate.cast" do
 
   test "fresh gate is valid" do
     let gate = Gate.cast([], [])
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 end
 
@@ -56,32 +56,32 @@ describe "Gate.validate_required" do
   test "valid when field is present and non-empty" do
     let gate = Gate.cast([("email", "a@b.com")], ["email"])
                |> Gate.validate_required(["email"])
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 
   test "error when field is absent" do
     let gate = Gate.cast([], ["email"])
                |> Gate.validate_required(["email"])
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
     assert (Gate.error_for(gate, "email") != None)
   end
 
   test "error when field is empty string" do
     let gate = Gate.cast([("email", "")], ["email"])
                |> Gate.validate_required(["email"])
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
   end
 
   test "error when field is whitespace only" do
     let gate = Gate.cast([("email", "   ")], ["email"])
                |> Gate.validate_required(["email"])
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
   end
 
   test "validates multiple fields" do
     let gate = Gate.cast([("email", "a@b.com")], ["email", "password"])
                |> Gate.validate_required(["email", "password"])
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
     assert (Gate.error_for(gate, "password") != None)
     assert (Gate.error_for(gate, "email") == None)
   end
@@ -93,13 +93,13 @@ describe "Gate.validate_length" do
   test "valid when within range" do
     let gate = Gate.cast([("pw", "helloworld12")], ["pw"])
                |> Gate.validate_length("pw", [LenMin(12), LenMax(72)])
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 
   test "error when too short" do
     let gate = Gate.cast([("pw", "short")], ["pw"])
                |> Gate.validate_length("pw", [LenMin(12)])
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
     match Gate.error_for(gate, "pw") do
     None    -> assert false
     Some(e) -> assert (string_contains(e, "too short"))
@@ -109,7 +109,7 @@ describe "Gate.validate_length" do
   test "error when too long" do
     let gate = Gate.cast([("name", "averylongnamethatexceedslimit")], ["name"])
                |> Gate.validate_length("name", [LenMax(10)])
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
     match Gate.error_for(gate, "name") do
     None    -> assert false
     Some(e) -> assert (string_contains(e, "too long"))
@@ -119,7 +119,7 @@ describe "Gate.validate_length" do
   test "no error when field absent" do
     let gate = Gate.cast([], ["pw"])
                |> Gate.validate_length("pw", [LenMin(12)])
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 end
 
@@ -129,19 +129,19 @@ describe "Gate.validate_inclusion" do
   test "valid when value in list" do
     let gate = Gate.cast([("role", "admin")], ["role"])
                |> Gate.validate_inclusion("role", ["admin", "member"])
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 
   test "error when value not in list" do
     let gate = Gate.cast([("role", "superuser")], ["role"])
                |> Gate.validate_inclusion("role", ["admin", "member"])
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
   end
 
   test "no error when field absent" do
     let gate = Gate.cast([], ["role"])
                |> Gate.validate_inclusion("role", ["admin", "member"])
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 end
 
@@ -151,20 +151,20 @@ describe "Gate.validate_confirmation" do
   test "valid when field matches confirmation" do
     let gate = Gate.cast([("password", "secret123"), ("password_confirmation", "secret123")], ["password", "password_confirmation"])
                |> Gate.validate_confirmation("password")
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 
   test "error when field does not match confirmation" do
     let gate = Gate.cast([("password", "secret123"), ("password_confirmation", "wrong")], ["password", "password_confirmation"])
                |> Gate.validate_confirmation("password")
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
     assert (Gate.error_for(gate, "password_confirmation") != None)
   end
 
   test "no error when confirmation field absent" do
     let gate = Gate.cast([("password", "secret123")], ["password"])
                |> Gate.validate_confirmation("password")
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 end
 
@@ -196,7 +196,7 @@ describe "Gate.add_error" do
   test "add_error marks gate invalid" do
     let gate = Gate.cast([], [])
                |> Gate.add_error("email", "has already been taken")
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
   end
 
   test "error_for returns the message" do
@@ -228,7 +228,7 @@ describe "Gate pipeline" do
                |> Gate.validate_required(["email", "password"])
                |> Gate.validate_length("password", [LenMin(12)])
     -- email passes required, password fails length
-    assert (!Gate.valid?(gate))
+    assert (!Gate.valid(gate))
     assert (Gate.error_for(gate, "email") == None)
     assert (Gate.error_for(gate, "password") != None)
   end
@@ -238,7 +238,7 @@ describe "Gate pipeline" do
     let gate = Gate.cast(params, ["email", "password"])
                |> Gate.validate_required(["email", "password"])
                |> Gate.validate_length("password", [LenMin(12)])
-    assert (Gate.valid?(gate))
+    assert (Gate.valid(gate))
   end
 end
 

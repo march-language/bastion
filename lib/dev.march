@@ -35,7 +35,7 @@ mod Bastion.Dev do
   Returns true when MARCH_ENV is "dev" or "development" (or unset, since dev
   is the default when no environment is specified).
   """
-  fn dev_env?() : Bool do
+  fn dev_env() : Bool do
     match Process.env("MARCH_ENV") do
     None    -> true
     Some(e) ->
@@ -72,6 +72,7 @@ mod Bastion.Dev do
       serve_reload_js(conn)
     else
       conn
+    end
     end
   end
 
@@ -179,8 +180,7 @@ mod Bastion.Dev do
     let path    = HttpServer.path(conn)
     let headers = HttpServer.req_headers(conn)
     println("[Bastion.Dev] " ++ method ++ " " ++ path)
-    List.each(headers, fn pair ->
-      let (k, v) = pair
+    List.each(headers, fn (k, v) ->
       println("  " ++ k ++ ": " ++ v)
     )
     conn
@@ -250,10 +250,11 @@ mod Bastion.Dev do
 
   pfn render_recent(entries : List(Bastion.Metrics.RequestEntry)) : String do
     let reversed = List.reverse(entries)
-    let rows     = List.map(reversed, fn e ->
+    let rows     = List.map(reversed, fn e -> do
       let status_class = if e.status >= 500 do "status-err"
                          else if e.status >= 400 do "status-red"
                          else "status-ok"
+                         end
                          end
       let dur = if e.duration == 0 do "—" else String.from_int(e.duration) ++ "ms" end
       "<tr>" ++
@@ -262,7 +263,7 @@ mod Bastion.Dev do
       "<td class='" ++ status_class ++ "'>" ++ String.from_int(e.status) ++ "</td>" ++
       "<td>" ++ dur ++ "</td>" ++
       "</tr>"
-    )
+    end)
     String.join(rows, "")
   end
 

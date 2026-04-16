@@ -186,8 +186,9 @@ mod Conn do
       Some(v) -> v
       None    -> ""
       end
-    let updated = if String.is_empty(current) then hook_key
+    let updated = if String.is_empty(current) do hook_key
                   else current ++ "," ++ hook_key
+                  end
     HttpServer.assign(conn, "_after_send_hooks", updated)
   end
 
@@ -200,7 +201,7 @@ mod Conn do
     match HttpServer.get_assign(conn, "_after_send_hooks") do
     None    -> []
     Some(v) ->
-      if String.is_empty(v) then []
+      if String.is_empty(v) do []
       else String.split(v, ",")
       end
     end
@@ -229,7 +230,7 @@ mod Conn do
     Cons(pair, rest) ->
       match String.split_first(pair, "=") do
       Some((k, v)) ->
-        if String.trim(k) == name then Some(v)
+        if String.trim(k) == name do Some(v)
         else find_cookie(rest, name)
         end
       None -> find_cookie(rest, name)
@@ -240,7 +241,7 @@ mod Conn do
   pfn build_cookie(name : String, value : String, opts : List((String, String))) : String do
     let base = name ++ "=" ++ value
     let attrs = String.join(List.map(opts, fn (k, v) ->
-      if String.is_empty(v) then "; " ++ k
+      if String.is_empty(v) do "; " ++ k
       else "; " ++ k ++ "=" ++ v
       end
     ), "")
@@ -253,7 +254,7 @@ mod Conn do
     Cons(pair, rest) ->
       match String.split_first(pair, "=") do
       Some((k, v)) ->
-        if k == key then Some(v)
+        if k == key do Some(v)
         else find_param(rest, key)
         end
       None -> find_param(rest, key)

@@ -117,7 +117,7 @@ mod Flash do
     """
     fn render(conn : Conn) : IOList do
       let messages = Flash.loaded_flashes(conn)
-      if List.is_empty(messages) then IOList.empty()
+      if List.is_empty(messages) do IOList.from_string("")
       else
         let html = String.join(List.map(messages, fn (key, msg) ->
           Flash.render_one(key, msg)
@@ -149,12 +149,12 @@ mod Flash do
   end
 
   pfn parse_entries(raw : String) : List((String, String)) do
-    if String.is_empty(raw) then []
+    if String.is_empty(raw) do []
     else
       let records = String.split(raw, record_sep)
       List.filter_map(records, fn r ->
         match String.split_first(r, entry_sep) do
-        Some((k, v)) -> if String.is_empty(k) then None else Some((k, v))
+        Some((k, v)) -> if String.is_empty(k) do None else Some((k, v)) end
         None         -> None
         end
       )
@@ -174,7 +174,7 @@ mod Flash do
     match entries do
     Nil -> None
     Cons((k, v), rest) ->
-      if k == key then Some(v)
+      if k == key do Some(v)
       else lookup_entry(rest, key)
       end
     end

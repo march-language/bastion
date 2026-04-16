@@ -37,15 +37,12 @@ mod Bastion.Upload do
 
   -- ── Types ─────────────────────────────────────────────────────────────────
 
-  doc """
-  An uploaded file from a multipart/form-data request.
-
-    field_name   — HTML input name attribute
-    filename     — original filename supplied by the browser
-    content_type — MIME type (from the part's Content-Type header, or "application/octet-stream")
-    content      — raw file bytes as a String
-    size         — byte size of the content
-  """
+  -- An uploaded file from a multipart/form-data request.
+  --   field_name   — HTML input name attribute
+  --   filename     — original filename supplied by the browser
+  --   content_type — MIME type (from the part's Content-Type header, or "application/octet-stream")
+  --   content      — raw file bytes as a String
+  --   size         — byte size of the content
   type UploadedFile = {
     field_name   : String,
     filename     : String,
@@ -54,7 +51,7 @@ mod Bastion.Upload do
     size         : Int
   }
 
-  doc "Options for multipart parsing."
+  -- Options for multipart parsing.
   type UploadOpts = {
     max_file_size  : Int,           -- max bytes per file (default 10MB)
     max_files      : Int,           -- max number of file fields (default 10)
@@ -62,13 +59,13 @@ mod Bastion.Upload do
     allowed_types  : List(String)   -- allowed MIME types; empty = all allowed
   }
 
-  doc "Result of a successful multipart parse."
+  -- Result of a successful multipart parse.
   type UploadResult = {
     files  : List(UploadedFile),
     fields : List((String, String))
   }
 
-  doc "Reasons a multipart parse can fail."
+  -- Reasons a multipart parse can fail.
   type UploadError =
     FileTooLarge(String, Int)         -- filename, actual size
     | TooManyFiles(Int)               -- actual file count
@@ -241,6 +238,7 @@ mod Bastion.Upload do
     else
       s
     end
+    end
   end
 
   -- Strip trailing \r\n from part body
@@ -252,6 +250,7 @@ mod Bastion.Upload do
       String.slice_bytes(s, 0, sz - 1)
     else
       s
+    end
     end
   end
 
@@ -290,6 +289,8 @@ mod Bastion.Upload do
         }
         collect_parts(remaining, opts, Cons(uf, files), fields, n_files + 1)
       end
+      end
+      end
     None ->
       -- Text field
       let size = String.byte_size(part_body)
@@ -316,7 +317,7 @@ mod Bastion.Upload do
   end
 
   pfn find_header(headers : List((String, String)), name : String) : String do
-    match List.filter(headers, fn pair -> let (k, _) = pair; k == name) do
+    match List.filter(headers, fn (k, _) -> k == name) do
     Cons((_, v), _) -> v
     []              -> ""
     end

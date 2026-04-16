@@ -112,8 +112,8 @@ end
 
 -- ── Source generators ────────────────────────────────────────────────────────
 
-pfn schema_source(app, context, schema, table, fields) do
-  let schema_mod = app ++ "." ++ context ++ "." ++ schema
+pfn schema_source(app_name, context, schema, table, fields) do
+  let schema_mod = app_name ++ "." ++ context ++ "." ++ schema
   let field_lines = build_schema_fields(fields, "")
   let cast_fields = build_cast_list(fields)
   let required_fields = build_required_list(fields)
@@ -161,19 +161,19 @@ pfn build_schema_fields(fields, acc) do
 end
 
 pfn build_cast_list(fields) do
-  let names = List.map(fields, fn pair -> do let (n, _) = pair in "\"" ++ n ++ "\"" end)
+  let names = List.map(fields, fn (n, _) -> "\"" ++ n ++ "\"")
   String.join(names, ", ")
 end
 
 pfn build_required_list(fields) do
   -- All fields are required by default
-  let names = List.map(fields, fn pair -> do let (n, _) = pair in "\"" ++ n ++ "\"" end)
+  let names = List.map(fields, fn (n, _) -> "\"" ++ n ++ "\"")
   String.join(names, ", ")
 end
 
-pfn context_source(app, context, schema, table, fields) do
-  let context_mod = app ++ "." ++ context
-  let schema_mod  = app ++ "." ++ context ++ "." ++ schema
+pfn context_source(app_name, context, schema, table, fields) do
+  let context_mod = app_name ++ "." ++ context
+  let schema_mod  = app_name ++ "." ++ context ++ "." ++ schema
   let schema_var  = String.to_lowercase(schema)
   let _ = fields  -- fields not needed in context template (schema defines them)
   let _ = table
@@ -289,8 +289,8 @@ fn run(args) do
         println("Usage: forge bastion.gen.context <Context> <Schema> <table> [field:type ...]")
       end
       Cons(table, field_args) -> do
-        let app           = detect_app_name()
-        let app_snake     = String.to_lowercase(app)
+        let app_name      = detect_app_name()
+        let app_snake     = String.to_lowercase(app_name)
         let ctx_snake     = pascal_to_snake(context)
         let schema_snake  = pascal_to_snake(schema)
         let fields        = parse_fields(field_args)
@@ -311,8 +311,8 @@ fn run(args) do
         let context_file = "lib/" ++ app_snake ++ "/" ++ ctx_snake ++ ".march"
         let mig_file     = mig_dir ++ "/" ++ String.from_int(ts) ++ "_create_" ++ table ++ ".march"
 
-        write(schema_file)(schema_source(app, context, schema, table, fields))
-        write(context_file)(context_source(app, context, schema, table, fields))
+        write(schema_file)(schema_source(app_name, context, schema, table, fields))
+        write(context_file)(context_source(app_name, context, schema, table, fields))
         write(mig_file)(migration_source(table, fields, ts))
 
         println("")
@@ -324,7 +324,7 @@ fn run(args) do
         println("     forge bastion.depot.migrate")
         println("")
         println("2. Use the context in your handlers:")
-        println("     alias " ++ app ++ "." ++ context ++ " as " ++ context)
+        println("     alias " ++ app_name ++ "." ++ context ++ " as " ++ context)
         println("     let items = " ++ context ++ ".list_" ++ String.to_lowercase(schema) ++ "s()")
         println("")
         println("3. Generate a handler:")

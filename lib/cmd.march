@@ -62,17 +62,13 @@ mod Bastion.Cmd do
 
   -- ── Types ──────────────────────────────────────────────────────────────────
 
-  doc """
-  A `Cmd(msg)` represents a side-effect produced by an island's `update` function.
-
-  Islands return `(new_state, Cmd(Msg))` from `update`.  The runtime executes
-  the command and may deliver a new `Msg` back to the island when the command
-  completes (e.g. an HTTP response arrives or a timer fires).
-
-  Cmd is a value type — it does not execute until the runtime processes it.
-  """
+  -- A Cmd(msg) represents a side-effect produced by an island's update function.
+  -- Islands return (new_state, Cmd(Msg)) from update.  The runtime executes
+  -- the command and may deliver a new Msg back to the island when the command
+  -- completes (e.g. an HTTP response arrives or a timer fires).
+  -- Cmd is a value type — it does not execute until the runtime processes it.
   type Cmd(msg) =
-    | CmdNone
+    CmdNone
     | CmdBatch(List(Cmd(msg)))
     | CmdHttpGet(String, String -> msg)         -- url, response_body -> Msg
     | CmdHttpPost(String, String, String -> msg) -- url, body, response_body -> Msg

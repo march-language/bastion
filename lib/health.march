@@ -44,7 +44,7 @@ mod Bastion.Health do
   doc """
   Returns true when a drain is in progress (start_drain was called).
   """
-  fn draining?() : Bool do
+  fn draining() : Bool do
     let table = Vault.open(health_table)
     match Vault.get(table, drain_key) do
     Some(true) -> true
@@ -87,7 +87,7 @@ mod Bastion.Health do
   """
   fn plug_with_checks(conn, checks : List(Check)) do
     if HttpServer.path(conn) == "/health" do
-      if draining?() do
+      if draining() do
         respond(conn, 503, "draining", [])
       else
         let failures = run_checks(checks)

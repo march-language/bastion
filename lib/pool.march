@@ -1,0 +1,47 @@
+-- lib/pool.march — Bastion stub for Pool (actor-based DB connection pool)
+--
+-- This stub satisfies the compile-time dependency of depot_middleware.march
+-- during `forge test`.  The real Pool implementation is provided by the
+-- `depot` library dependency (see forge.toml) and is used at runtime.
+--
+-- Do not use this module directly — use Depot.Middleware instead.
+
+mod Pool do
+
+  -- Opaque pool handle (PID of the pool supervisor actor)
+  type Pool = Pool(Int)
+
+  -- Opaque DB connection handle
+  type DbConn = DbConn(Int)
+
+  -- Pool configuration (mirrors depot/lib/pool.march)
+  type PoolConfig = {
+    min_size           : Int,
+    max_size           : Int,
+    idle_timeout_ms    : Int,
+    connect_timeout_ms : Int,
+    conn_config        : String
+  }
+
+  doc "Start a connection pool from a PoolConfig. Returns the pool handle."
+  fn start(config : PoolConfig) : Pool do
+    panic("Pool.start: not available in test stub — use the depot library at runtime")
+  end
+
+  doc "Return a default PoolConfig for a given connection config."
+  fn default_pool_config(conn_cfg : String) : PoolConfig do
+    { min_size = 5, max_size = 20, idle_timeout_ms = 300000,
+      connect_timeout_ms = 5000, conn_config = conn_cfg }
+  end
+
+  doc "Check out a connection from the pool."
+  fn checkout(pool : Pool) : Result(DbConn, String) do
+    panic("Pool.checkout: not available in test stub")
+  end
+
+  doc "Return a connection to the pool."
+  fn checkin(pool : Pool, db_conn : DbConn) do
+    panic("Pool.checkin: not available in test stub")
+  end
+
+end

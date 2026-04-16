@@ -110,7 +110,7 @@ mod RateLimit do
     -- Write back with TTL so entries for quiet clients expire automatically.
     Vault.put_ttl(table, k, updated, window_secs + 1)
 
-    let remaining  = if count > limit then 0 else limit - count end
+    let remaining  = if count > limit do 0 else limit - count end
     let reset_secs = match updated do
       Nil          -> unix_time(()) + window_secs
       Cons(oldest, _) -> (oldest / 1000) + window_secs
@@ -121,14 +121,14 @@ mod RateLimit do
       |> HttpServer.put_resp_header("x-ratelimit-remaining", int_to_string(remaining))
       |> HttpServer.put_resp_header("x-ratelimit-reset",     int_to_string(reset_secs))
 
-    if count <= limit then Ok(conn2)
+    if count <= limit do Ok(conn2)
     else
       let retry_after = reset_secs - unix_time(())
       let halted =
         HttpServer.put_resp_header(conn2, "retry-after", int_to_string(retry_after))
         |> HttpServer.send_resp(429, "Too Many Requests")
         |> HttpServer.halt()
-      Error(halted)
+      Err(halted)
     end
   end
 
@@ -148,7 +148,7 @@ mod RateLimit do
   fn limit(conn, table, key_fn, max_requests : Int, window_secs : Int) do
     match check(conn, table, key_fn, max_requests, window_secs) do
     Ok(conn2)    -> conn2
-    Error(halted) -> halted
+    Err(halted) -> halted
     end
   end
 

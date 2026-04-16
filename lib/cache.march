@@ -87,7 +87,7 @@ mod Cache do
     match HttpServer.get_req_header(conn2, "if-none-match") do
     None         -> conn2
     Some(client) ->
-      if client == tag then
+      if client == tag do
         HttpServer.send_resp(conn2, 304, "")
       else
         conn2
@@ -108,7 +108,7 @@ mod Cache do
     match HttpServer.get_req_header(conn2, "if-none-match") do
     None         -> conn2
     Some(client) ->
-      if client == quoted then
+      if client == quoted do
         HttpServer.send_resp(conn2, 304, "")
       else conn2
       end
@@ -149,13 +149,13 @@ mod Cache do
       let result = generator(conn)
       let status = HttpServer.status(result)
       -- Only cache successful responses
-      if status >= 200 && status < 300 then do
+      if status >= 200 && status < 300 do
         let body    = HttpServer.resp_body(result)
         let headers = HttpServer.resp_headers(result)
         let entry   = (status, headers, body)
         let _       = Vault.put_ttl(table, key, entry, ttl_secs)
         result
-      end else
+      else
         result
       end
     end
@@ -181,7 +181,7 @@ mod Cache do
     let table = Vault.open(response_table)
     let keys  = Vault.keys(table)
     List.each(keys, fn k ->
-      if String.starts_with(k, prefix) then Vault.delete(table, k)
+      if String.starts_with(k, prefix) do Vault.delete(table, k)
       else ()
       end
     )

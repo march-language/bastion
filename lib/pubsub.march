@@ -121,7 +121,7 @@ mod Bastion.PubSub do
         None    -> false
         Some(x) -> x == id
       end
-      if !skip do send_fn(event, payload_json) end
+      if !skip do send_fn(event, payload_json) else () end
     )
   end
 
