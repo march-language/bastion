@@ -1,0 +1,26 @@
+-- lib/forge/depot_migrate.march — forge bastion.depot.migrate
+--
+-- Applies all pending Depot migrations found in priv/depot/migrations/
+-- in version-timestamp order.  Migration status is tracked in
+-- .march/depot/migrations.log.
+--
+-- Usage:
+--   forge bastion.depot.migrate
+--
+-- Delegates to CmdDepot.migrate() from the Depot library.
+
+mod Forge.DepotMigrate do
+
+  import CmdDepot
+
+  fn main() do
+    match CmdDepot.migrate() do
+    Ok(_)    -> ()
+    Err(msg) -> do
+      println("Error: " ++ msg)
+      Process.exit(1)
+    end
+    end
+  end
+
+end

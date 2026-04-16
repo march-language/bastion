@@ -1,0 +1,27 @@
+-- lib/forge/depot_reset.march — forge bastion.depot.reset
+--
+-- Rolls back all applied migrations then re-applies them from scratch.
+-- Equivalent to running rollback(all) followed by migrate().
+--
+-- Usage:
+--   forge bastion.depot.reset
+--
+-- WARNING: This drops and recreates all schema. Do not use in production.
+--
+-- Delegates to CmdDepot.reset() from the Depot library.
+
+mod Forge.DepotReset do
+
+  import CmdDepot
+
+  fn main() do
+    match CmdDepot.reset() do
+    Ok(_)    -> ()
+    Err(msg) -> do
+      println("Error: " ++ msg)
+      Process.exit(1)
+    end
+    end
+  end
+
+end

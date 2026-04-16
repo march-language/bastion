@@ -53,6 +53,22 @@ module  = "lib/forge/gen_migration.march"
 command = "bastion.lower"
 module  = "lib/forge/lower.march"
 
+[archive.task.bastion.depot.migrate]
+command = "bastion.depot.migrate"
+module  = "lib/forge/depot_migrate.march"
+
+[archive.task.bastion.depot.rollback]
+command = "bastion.depot.rollback"
+module  = "lib/forge/depot_rollback.march"
+
+[archive.task.bastion.depot.migrations]
+command = "bastion.depot.migrations"
+module  = "lib/forge/depot_migrations.march"
+
+[archive.task.bastion.depot.reset]
+command = "bastion.depot.reset"
+module  = "lib/forge/depot_reset.march"
+
 [preprocessors]
 ".march.html" = "bastion lower"
 
