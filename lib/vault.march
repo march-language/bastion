@@ -170,6 +170,49 @@ mod Vault do
     StdVault.all(table)
   end
 
+  doc """
+  Atomically read and remove a key in one step.
+  Returns `Some(value)` if the key existed, `None` if absent or expired.
+
+      match Vault.get_and_delete(table, "pending_job") do
+      Some(job) -> process(job)
+      None      -> :no_work
+      end
+  """
+  fn get_and_delete(table, key) do
+    match StdVault.get(table, key) do
+    None    -> None
+    Some(v) ->
+      StdVault.drop(table, key)
+      Some(v)
+    end
+  end
+
+  doc """
+  Filter all live entries by a predicate.  Returns a list of matching
+  `(key, value)` pairs.
+
+      -- Find all rate limit entries above a threshold
+      let heavy = Vault.select(rate_table, fn pair ->
+        let (_, count) = pair
+        count > 100
+      end)
+  """
+  fn select(table, pred) do
+    let entries = StdVault.all(table)
+    List.filter(entries, pred)
+  end
+
+  doc """
+  Remove all entries from the table, leaving it empty.
+
+      Vault.clear(rate_table)
+  """
+  fn clear(table) do
+    let ks = StdVault.keys(table)
+    List.each(ks, fn k -> StdVault.drop(table, k))
+  end
+
   -- ── Namespace helpers ─────────────────────────────────────────────────────
   --
   -- These helpers use a string namespace name instead of a table handle.
