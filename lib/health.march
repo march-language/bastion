@@ -1,0 +1,136 @@
+-- lib/health.march — Bastion.Health: built-in health check endpoint.
+--
+-- Serves GET /health → 200 {"status":"ok"} in normal operation.
+-- During a drain (SIGTERM received), returns 503 {"status":"draining"}.
+--
+-- The drain state is stored in a Vault table so it can be toggled without
+-- restarting the process.  Call Bastion.Health.start_drain() from a signal
+-- handler to transition to the draining state.
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   -- In your endpoint pipeline (before the router):
+--   let c = Bastion.Health.plug(conn)
+--
+--   -- Register custom checks:
+--   let checks = [
+--     Bastion.Health.check("depot", fn () -> Depot.ping(MyApp.Repo) end),
+--     Bastion.Health.check("vault", fn () -> Vault.has(my_table, "heartbeat") end)
+--   ]
+--   let c = Bastion.Health.plug_with_checks(conn, checks)
+
+mod Bastion.Health do
+
+  import HttpServer
+  import Vault
+
+  let health_table = "_bastion_health"
+  let drain_key    = "drain"
+
+  -- ── Drain state management ────────────────────────────────────────────────
+
+  doc """
+  Signal that a drain is beginning.  The health endpoint will return
+  503 {"status":"draining"} until the process exits.
+
+  Call this in a SIGTERM handler to give load balancers time to stop routing
+  before the drain timeout fires.
+  """
+  fn start_drain() do
+    let table = Vault.open(health_table)
+    Vault.put(table, drain_key, true)
+  end
+
+  doc """
+  Returns true when a drain is in progress (start_drain was called).
+  """
+  fn draining?() : Bool do
+    let table = Vault.open(health_table)
+    match Vault.get(table, drain_key) do
+    Some(true) -> true
+    _          -> false
+    end
+  end
+
+  -- ── Health check type ─────────────────────────────────────────────────────
+
+  -- A health check: a name and a probe function that returns Ok(()) or Err(String).
+  type Check = Check(String, () -> Result((), String))
+
+  doc """
+  Build a named health check from a probe function.
+
+      Bastion.Health.check("depot", fn () -> Depot.ping(MyApp.Repo) end)
+  """
+  fn check(name : String, probe : () -> Result((), String)) : Check do
+    Check(name, probe)
+  end
+
+  -- ── Plugs ─────────────────────────────────────────────────────────────────
+
+  doc """
+  Plug that serves GET /health.
+
+  Returns 200 {"status":"ok"} normally, or 503 {"status":"draining"} when
+  start_drain() has been called.  Passes all other paths through.
+  """
+  fn plug(conn) do
+    plug_with_checks(conn, [])
+  end
+
+  doc """
+  Plug that serves GET /health with custom probe functions.
+
+  Each check's probe is called.  If all pass and the server is not draining,
+  returns 200.  If any check fails, returns 503 {"status":"unhealthy"}.  If
+  draining, returns 503 {"status":"draining"} (checks are skipped).
+  """
+  fn plug_with_checks(conn, checks : List(Check)) do
+    if HttpServer.path(conn) == "/health" do
+      if draining?() do
+        respond(conn, 503, "draining", [])
+      else
+        let failures = run_checks(checks)
+        if List.is_empty(failures) do
+          respond(conn, 200, "ok", [])
+        else
+          respond(conn, 503, "unhealthy", failures)
+        end
+      end
+    else
+      conn
+    end
+  end
+
+  -- ── Internal ──────────────────────────────────────────────────────────────
+
+  pfn run_checks(checks : List(Check)) : List(String) do
+    List.filter_map(checks, fn c ->
+      match c do
+      Check(name, probe) ->
+        match probe() do
+        Ok(_)    -> None
+        Err(msg) -> Some(name ++ ": " ++ msg)
+        end
+      end
+    )
+  end
+
+  pfn respond(conn, status : Int, status_str : String, failures : List(String)) do
+    let body = if List.is_empty(failures) do
+      "{\"status\":\"" ++ status_str ++ "\"}"
+    else
+      let errs = String.join(List.map(failures, fn s -> "\"" ++ json_escape(s) ++ "\""), ",")
+      "{\"status\":\"" ++ status_str ++ "\",\"errors\":[" ++ errs ++ "]}"
+    end
+    HttpServer.put_resp_header(conn, "content-type", "application/json")
+    |> HttpServer.put_resp_header("cache-control", "no-store")
+    |> HttpServer.send_resp(status, body)
+  end
+
+  pfn json_escape(s : String) : String do
+    let s1 = String.replace_all(s, "\\", "\\\\")
+    String.replace_all(s1, "\"", "\\\"")
+  end
+
+end

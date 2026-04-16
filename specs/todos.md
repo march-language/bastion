@@ -86,9 +86,9 @@ Specced and queued. Roughly priority order within each group.
 - [ ] JS → WASM message protocol (JSON envelope) ([js-interop.md](js-interop.md))
 
 ### Developer Experience
-- [ ] `forge dev` live reload (file watcher + WebSocket notify) ([dev-experience.md](dev-experience.md))
-- [ ] Dev error overlay in-browser ([dev-experience.md](dev-experience.md), [error-handling.md](error-handling.md))
-- [ ] Hot deploy / connection draining on SIGTERM ([hot-deploy.md](hot-deploy.md))
+- [x] `forge dev` live reload — `lib/dev.march`: `Bastion.Dev.live_reload` plug serves `/_bastion/reload` WebSocket (drop on restart triggers browser reload) + `/_bastion/live-reload.js` client; `live_reload_tag()` returns script tag for layouts; `dev_env?()` detects MARCH_ENV
+- [ ] Dev error overlay in-browser ([dev-experience.md](dev-experience.md), [error-handling.md](error-handling.md)) — needs March try/catch or framework-level panic handler
+- [x] Hot deploy / connection draining — `lib/health.march`: `Bastion.Health.plug` serves `GET /health`; `start_drain()`/`draining?()` Vault-backed drain flag; `plug_with_checks/2` runs custom probes; 503 on drain
 - [ ] `forge dev` dashboard ([dev-experience.md](dev-experience.md))
 - [ ] Embedded asset size limits — determine threshold for `--embed-assets` ([open-questions.md](open-questions.md) §8)
 

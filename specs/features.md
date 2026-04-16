@@ -59,6 +59,8 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Channel connection | `channel.march` | `Bastion.Channel`: `ChannelConn` type; `assign`, `get_assign`, `push`, `broadcast_from`, `sub_id`; used by both server and test helpers |
 | Channel server | `channel_server.march` | `Bastion.ChannelServer`: `add_route`, `plug`, `plug_at`; multiplexed topic WS loop; join/leave/heartbeat/handle_in; PubSub integration |
 | Channel test helpers | `test_channel.march` | `Bastion.Test.Channel`: `join/3`, `push/4`, `intercept/1`, `assert_broadcast/3`, `refute_broadcast/3`, `captured_broadcasts/1` |
+| Live reload | `dev.march` | `Bastion.Dev`: `live_reload` plug (`/_bastion/reload` WS + `/_bastion/live-reload.js`); `live_reload_tag()`; `request_timer`, `server_timing`, `conn_inspector`; `dev_env?()` |
+| Health check | `health.march` | `Bastion.Health`: `plug`, `plug_with_checks`, `check/2`; Vault-backed drain state; `start_drain()`/`draining?()` |
 
 ---
 

@@ -1,0 +1,188 @@
+-- lib/dev.march — Bastion.Dev: development-only tools.
+--
+-- Provides live reload (browser refresh on server restart), dev timing
+-- middleware, and conn inspection logging.  These tools should only be
+-- activated when MARCH_ENV is "dev".
+--
+-- ── Live Reload ────────────────────────────────────────────────────────────────
+--
+-- When the dev server restarts (forge dev detects a .march change and kills the
+-- process), all browser WebSocket connections to /_bastion/reload are dropped.
+-- The injected client-side script detects the drop and reloads the page.
+--
+-- Setup (add to your endpoint in dev mode):
+--
+--   -- 1. Add the Dev plugs to your pipeline:
+--   let app = fn conn ->
+--     let c = Bastion.Dev.live_reload(conn)  -- handles /_bastion/reload and /_bastion/live-reload.js
+--     ...
+--
+--   -- 2. Add the script tag to your root layout:
+--   <script src="/_bastion/live-reload.js"></script>
+--
+-- Or use the combined helper that checks MARCH_ENV automatically:
+--
+--   let c = if Bastion.Dev.dev_env?() do Bastion.Dev.live_reload(conn) else conn end
+
+mod Bastion.Dev do
+
+  import HttpServer
+
+  -- ── Environment ───────────────────────────────────────────────────────────
+
+  doc """
+  Returns true when MARCH_ENV is "dev" or "development" (or unset, since dev
+  is the default when no environment is specified).
+  """
+  fn dev_env?() : Bool do
+    match Process.env("MARCH_ENV") do
+    None    -> true
+    Some(e) ->
+      let lower = String.to_lowercase(e)
+      lower == "dev" || lower == "development"
+    end
+  end
+
+  -- ── Live Reload ───────────────────────────────────────────────────────────
+
+  let reload_ws_path  = "/_bastion/reload"
+  let reload_js_path  = "/_bastion/live-reload.js"
+
+  doc """
+  Plug that handles both the live-reload WebSocket endpoint and the browser
+  JS client file.
+
+  - GET /_bastion/reload (Upgrade: websocket) — keep-alive WebSocket. When the
+    dev server restarts and drops the connection, the client reloads the page.
+  - GET /_bastion/live-reload.js — serves the client-side JavaScript.
+
+  Other paths pass through unchanged.
+
+      let c = Bastion.Dev.live_reload(conn)
+  """
+  fn live_reload(conn) do
+    let path = HttpServer.path(conn)
+    if path == reload_ws_path do
+      -- Upgrade to WebSocket and hold the connection alive.
+      -- The dev server restart kills this process, dropping all connections.
+      -- The browser JS detects the drop and reloads.
+      WebSocket.upgrade(conn, fn ws -> reload_ws_loop(ws))
+    else if path == reload_js_path do
+      serve_reload_js(conn)
+    else
+      conn
+    end
+  end
+
+  doc """
+  Return a <script> HTML tag pointing to the live-reload client JS.
+
+  Add this to your root layout when in dev mode:
+
+      if Bastion.Dev.dev_env?() do
+        Bastion.Dev.live_reload_tag()
+      end
+  """
+  fn live_reload_tag() : String do
+    "<script src=\"/_bastion/live-reload.js\"></script>"
+  end
+
+  -- WebSocket loop: stay alive, handle ping/close.
+  -- No data is sent to the client — the connection itself is the signal.
+  pfn reload_ws_loop(ws) do
+    match WebSocket.recv(ws) do
+    Ping         ->
+      WebSocket.send_frame(ws, Pong)
+      reload_ws_loop(ws)
+    Close(_, _)  -> ()
+    _            -> reload_ws_loop(ws)
+    end
+  end
+
+  -- Serve the live-reload.js client script inline (no file system lookup needed).
+  pfn serve_reload_js(conn) do
+    HttpServer.put_resp_header(conn, "content-type", "text/javascript; charset=utf-8")
+    |> HttpServer.put_resp_header("cache-control", "no-store")
+    |> HttpServer.send_resp(200, reload_js_source())
+  end
+
+  pfn reload_js_source() : String do
+    "(function(){" ++
+    "  function connect(){" ++
+    "    var proto=location.protocol==='https:'?'wss:':'ws:';" ++
+    "    var ws=new WebSocket(proto+'//'+location.host+'/_bastion/reload');" ++
+    "    ws.onopen=function(){" ++
+    "      if(window.__bastionReloadReconnected){" ++
+    "        console.log('[Bastion] Reconnected — reloading');" ++
+    "        location.reload();" ++
+    "      } else {" ++
+    "        console.log('[Bastion] Live reload connected');" ++
+    "      }" ++
+    "    };" ++
+    "    ws.onclose=function(){" ++
+    "      window.__bastionReloadReconnected=true;" ++
+    "      console.log('[Bastion] Connection dropped — reconnecting in 500ms...');" ++
+    "      setTimeout(connect,500);" ++
+    "    };" ++
+    "    ws.onerror=function(){" ++
+    "      ws.close();" ++
+    "    };" ++
+    "  }" ++
+    "  connect();" ++
+    "})();"
+  end
+
+  -- ── Dev Middleware ────────────────────────────────────────────────────────
+
+  doc """
+  Middleware that logs detailed timing for each request.
+
+  Adds an X-Request-Time header with the wall-clock time spent.
+
+      let app = fn conn ->
+        Bastion.Dev.request_timer(conn)
+        |> router_plug
+  """
+  fn request_timer(conn) do
+    let start    = Time.now_ms()
+    let result   = conn
+    let elapsed  = Time.now_ms() - start
+    HttpServer.put_resp_header(result, "x-request-time", String.from_int(elapsed) ++ "ms")
+  end
+
+  doc """
+  Middleware that adds a Server-Timing response header.
+
+  Useful for measuring time spent in the browser DevTools Network panel.
+
+      conn |> Bastion.Dev.server_timing
+  """
+  fn server_timing(conn) do
+    let start = Time.now_ms()
+    let result = conn
+    let elapsed = Time.now_ms() - start
+    let timing  = "total;dur=" ++ String.from_int(elapsed)
+    HttpServer.put_resp_header(result, "server-timing", timing)
+  end
+
+  doc """
+  Middleware that logs the full conn state to stdout.
+
+  Prints method, path, headers, assigns, and query params.
+  Useful for debugging request handling.
+
+      conn |> Bastion.Dev.conn_inspector
+  """
+  fn conn_inspector(conn) do
+    let method  = HttpServer.method(conn)
+    let path    = HttpServer.path(conn)
+    let headers = HttpServer.req_headers(conn)
+    println("[Bastion.Dev] " ++ method ++ " " ++ path)
+    List.each(headers, fn pair ->
+      let (k, v) = pair
+      println("  " ++ k ++ ": " ++ v)
+    )
+    conn
+  end
+
+end
