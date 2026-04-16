@@ -45,7 +45,7 @@ The most impactful unblocked work. These are preconditions for most other featur
 Specced and queued. Roughly priority order within each group.
 
 ### Compiler Integration
-- [ ] Route helpers + compile-time route verification ([route-verification.md](route-verification.md))
+- [x] Route helpers — `forge bastion.routes --gen` writes `lib/<app>_routes.march` with typed path helpers (`root_path`, `users_path`, `user_path(id)`, etc.); singularizes last literal segment before a param; deduplicates by path. Compile-time verification of helper calls requires compiler integration (still pending).
 - [ ] CSP nonce auto-injection via `~H` compiler pass ([csp.md](csp.md))
 - [ ] Island prop serialization — decide JSON vs binary fast-path for large datasets ([open-questions.md](open-questions.md) §3)
 - [ ] Island WASM hot-swap in dev without state loss ([open-questions.md](open-questions.md) §4)

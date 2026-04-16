@@ -371,6 +371,155 @@ pfn find_router_files(proj) do
   end
 end
 
+-- ── Route helper generator ───────────────────────────────────────────────────
+--
+-- Generates a `<AppPascalCase>.Routes` March module with typed path helpers.
+-- Invoked via `forge bastion.routes --gen`.
+
+-- Convert a snake_case string to PascalCase.
+pfn snake_to_pascal(s) do
+  let parts = String.split(s, "_")
+  String.concat(List.map(parts, fn p ->
+    if String.is_empty(p) do p
+    else
+      String.to_uppercase(String.slice_bytes(p, 0, 1))
+        ++ String.slice_bytes(p, 1, String.byte_size(p) - 1)
+    end
+  end))
+end
+
+-- Simple singularizer: remove trailing 's' unless word ends in 'ss'.
+pfn singularize(s) do
+  let n = String.byte_size(s)
+  if n > 2 && String.ends_with(s, "s") && !String.ends_with(s, "ss") do
+    String.slice_bytes(s, 0, n - 1)
+  else s end
+end
+
+-- Derive a March function name from a path:
+--   /              → "root_path"
+--   /users         → "users_path"
+--   /users/:id     → "user_path"     (singularize last literal before a param)
+--   /posts/:p/comments/:c  → "post_comment_path"
+pfn path_to_helper_name(path) do
+  let all  = String.split(path, "/")
+  let segs = List.filter(all, fn s -> !String.is_empty(s))
+  let literals = List.filter_map(segs, fn s ->
+    if String.starts_with(s, ":") do None else Some(s) end)
+  let params = List.filter(segs, fn s -> String.starts_with(s, ":"))
+  match literals do
+  Nil -> "root_path"
+  _   ->
+    let has_params = !List.is_empty(params)
+    let fn_segs = if has_params do
+      -- singularize the last literal segment (nearest to params)
+      match List.reverse(literals) do
+      Nil            -> literals
+      Cons(last, rest) -> List.reverse(Cons(singularize(last), rest))
+      end
+    else literals end
+    String.join(fn_segs, "_") ++ "_path"
+  end
+end
+
+-- Extract param names (without ':') from a path.
+pfn path_param_names(path) do
+  let all  = String.split(path, "/")
+  List.filter_map(all, fn s ->
+    if String.starts_with(s, ":") do
+      Some(String.slice_bytes(s, 1, String.byte_size(s) - 1))
+    else None end)
+end
+
+-- Build the March expression that constructs the path.
+--   /users      → "\"/users\""
+--   /users/:id  → "\"/users/\" ++ id"
+--   /posts/:p/comments/:c → "\"/posts/\" ++ p ++ \"/comments/\" ++ c"
+pfn path_to_expr(path) do
+  let all  = String.split(path, "/")
+  let segs = List.filter(all, fn s -> !String.is_empty(s))
+  match segs do
+  Nil -> "\"/\""
+  _   ->
+    let pieces = List.map(segs, fn s ->
+      if String.starts_with(s, ":") do
+        let param = String.slice_bytes(s, 1, String.byte_size(s) - 1)
+        "\"/\" ++ " ++ param
+      else
+        "\"/" ++ s ++ "\""
+      end)
+    String.join(pieces, " ++ ")
+  end
+end
+
+-- Build the full function signature and body for one route helper.
+pfn helper_fn(path) do
+  let name   = path_to_helper_name(path)
+  let params = path_param_names(path)
+  let body   = path_to_expr(path)
+  let sig = match params do
+    Nil -> "  fn " ++ name ++ "() : String do"
+    _   ->
+      let args = String.join(List.map(params, fn p -> p ++ " : String"), ", ")
+      "  fn " ++ name ++ "(" ++ args ++ ") : String do"
+    end
+  sig ++ "\n    " ++ body ++ "\n  end\n"
+end
+
+-- Deduplicate routes by path (method is irrelevant for URL generators).
+pfn dedup_by_path(routes) do
+  List.reverse(dedup_path_loop(routes, [], []))
+end
+
+pfn dedup_path_loop(routes, seen, acc) do
+  match routes do
+  Nil -> acc
+  Cons(r, rest) ->
+    if List.any(seen, fn p -> p == r.path) do
+      dedup_path_loop(rest, seen, acc)
+    else
+      dedup_path_loop(rest, Cons(r.path, seen), Cons(r, acc))
+    end
+  end
+end
+
+-- Sort routes: root first, then alphabetical by path.
+pfn sort_routes_for_gen(routes) do
+  let (roots, others) = List.partition(routes, fn r -> r.path == "/")
+  List.append(roots, others)
+end
+
+-- Emit the full generated module source.
+pfn gen_module(mod_name : String, routes : List(ParsedRoute)) : String do
+  let deduped = dedup_by_path(routes)
+  let sorted  = sort_routes_for_gen(deduped)
+  let fns     = List.map(sorted, fn r -> helper_fn(r.path))
+  let body    = String.concat(fns)
+  "-- AUTO-GENERATED — do not edit.\n" ++
+  "-- Re-run `forge bastion.routes --gen` to regenerate.\n\n" ++
+  "mod " ++ mod_name ++ ".Routes do\n\n" ++
+  body ++
+  "end\n"
+end
+
+pfn load_all_routes(proj) do
+  let files = find_router_files(proj)
+  List.flat_map(files, fn path -> do
+    match File.read(path) do
+    Err(_) -> []
+    Ok(src) ->
+      let lines = String.split(src, "\n")
+      let comment_routes = parse_comment_routes(lines)
+      let arm_routes     = parse_arm_routes(lines)
+      let known = List.map(comment_routes, fn r -> route_key(r))
+      let extra = List.filter(arm_routes, fn r ->
+        !List.any(known, fn k -> k == route_key(r))
+      )
+      List.append(comment_routes, extra)
+    end
+  end)
+end
+
 -- ── Run ──────────────────────────────────────────────────────────────────────
 
 doc "List all routes in the current Bastion project."
@@ -383,30 +532,79 @@ fn run() do
       println("No router file found (expected lib/" ++ proj.name ++ "/router.march).")
       Ok(())
     else
-      let all_routes = List.flat_map(files, fn path -> do
-        match File.read(path) do
-        Err(_) -> []
-        Ok(src) ->
-          let lines = String.split(src, "\n")
-          let comment_routes = parse_comment_routes(lines)
-          let arm_routes     = parse_arm_routes(lines)
-          -- comment routes take priority; arm routes fill in any extras
-          let known = List.map(comment_routes, fn r -> route_key(r))
-          let extra = List.filter(arm_routes, fn r ->
-            !List.any(known, fn k -> k == route_key(r))
-          )
-          List.append(comment_routes, extra)
-        end
-      end)
+      let all_routes = load_all_routes(proj)
       print_routes(dedup(all_routes))
       Ok(())
     end
   end
 end
 
+doc """
+Generate a Routes module with typed path helpers.
+
+Writes `lib/<app>_routes.march` with one helper function per unique path.
+
+    forge bastion.routes --gen
+"""
+fn run_gen() do
+  match Forge.Project.load() do
+  Err(msg) -> Err(msg)
+  Ok(proj) ->
+    let files = find_router_files(proj)
+    if List.is_empty(files) do
+      println("No router file found — cannot generate Routes module.")
+      Err("no router found")
+    else
+      let all_routes = load_all_routes(proj)
+      let routes     = dedup(all_routes)
+      if List.is_empty(routes) do
+        println("No routes found in " ++ String.join(files, ", "))
+        Ok(())
+      else
+        let mod_name  = snake_to_pascal(proj.name)
+        let src       = gen_module(mod_name, routes)
+        let out_path  = proj.root ++ "/lib/" ++ proj.name ++ "_routes.march"
+        match File.write(out_path, src) do
+        Err(msg) ->
+          println("Error writing " ++ out_path ++ ": " ++ msg)
+          Err(msg)
+        Ok(_) -> do
+          println("Generated " ++ out_path ++ " (" ++ String.from_int(List.length(routes)) ++ " routes)")
+          println("")
+          println("Add to your app's module imports:")
+          println("  import " ++ mod_name ++ ".Routes")
+          println("")
+          println("Then use helpers like:")
+          match routes do
+          Nil -> ()
+          Cons(r, _) ->
+            let name   = path_to_helper_name(r.path)
+            let params = path_param_names(r.path)
+            let call   = match params do
+              Nil -> name ++ "()"
+              _   -> name ++ "(" ++ String.join(params, ", ") ++ ")"
+              end
+            println("  " ++ mod_name ++ ".Routes." ++ call)
+          end
+          Ok(())
+        end
+        end
+      end
+    end
+  end
+end
+
 fn main() do
-  let _ = run()
-  ()
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  let gen  = List.any(args, fn a -> a == "--gen")
+  if gen do
+    let _ = run_gen()
+    ()
+  else
+    let _ = run()
+    ()
+  end
 end
 
 end

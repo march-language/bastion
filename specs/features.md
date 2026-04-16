@@ -85,7 +85,7 @@ Specced and designed but not yet fully implemented. These are the active build a
 | Islands data flow | [islands-data-flow.md](islands-data-flow.md) | **Complete** — `IslandServer.push/2` (PubSub fan-out), `IslandSocket` ↔ PubSub wiring (subscribe on init, unsubscribe on destroy/close), LWW `channel_push` forwarding, JS `init` carries channel field | None |
 | Channels / WebSocket | [channels.md](channels.md) | Server + PubSub + test helpers fully implemented | None — fully done |
 | CSP nonce injection | [csp.md](csp.md) | `bastion_csp.march` (`BastionCSP`): `assign_nonce`, `nonce`, `set_header`, `protect`, `protect_with_overrides`, `disable`, `report_only`; `wasm-unsafe-eval` in default script-src; `Islands.bootstrap_script_with_nonce/2` | Automatic `<script nonce={…}>` injection in `~H` templates requires March `desugar.ml` change (reads `@csp_nonce` assign and rewrites script/style tags) |
-| Route verification | [route-verification.md](route-verification.md) | Draft spec | Needs compiler integration for route helper generation |
+| Route helpers | [route-verification.md](route-verification.md) | `forge bastion.routes --gen` writes `lib/<app>_routes.march` with typed path helpers; singularizes trailing literal before params; deduplicates by path | Compile-time call-site verification of `Routes.xyz_path()` calls still needs March compiler integration |
 
 ---
 
