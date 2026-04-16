@@ -18,7 +18,7 @@ The most impactful unblocked work. These are preconditions for most other featur
 - [x] ~~**`IOList` runtime module**~~ — Implemented in `lib/io_list.march`.
 - [x] ~~**`Css.style/1` helper**~~ — Implemented in `lib/css.march`.
 - [ ] **Islands data flow implementation** — Implement the `Server` / `Client` dataflow modes, parent-child prop binding, and explicit event dispatch as specced in [islands-data-flow.md](islands-data-flow.md). Depends on `~H` for template rendering in islands.
-- [ ] **Kill `window.marchIslands.send` global bus** — Replace with the parent-child dispatch model from [islands-data-flow.md](islands-data-flow.md). See wasm-islands.md current design.
+- [x] **Kill `window.marchIslands.send` global bus** — The rewritten `march-islands.js` never exposed a global send bus; `window.__bastionIslands` is debug-only. Parent-child dispatch and channel push are the only send paths.
 - [x] **Channel server implementation** — `lib/pubsub.march` (`Bastion.PubSub`), `lib/channel.march` (`Bastion.Channel`), `lib/channel_server.march` (`Bastion.ChannelServer`), `lib/test_channel.march` (`Bastion.Test.Channel`); Vault-backed PubSub, multiplexed topic WS loop, join/leave/handle_in dispatch, test interception helpers.
 - [ ] **Auth/session/database stack** — See [auth-session-database.md](auth-session-database.md) for the full sequenced plan, API design, error handling, security checklist, and end-to-end example. Build in this order:
   - [x] Step 0: Conn prerequisites — `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `get_form_param` added to `lib/conn.march`
@@ -54,7 +54,7 @@ Specced and queued. Roughly priority order within each group.
 - [x] Deferred hydration strategies in `march-islands.js` — `data-march-hydrate="lazy|idle|interaction|on-visible"`; `_hydrateOne(el)` extracted from discoverIslands; `_scheduleHydration(el, strategy)` dispatches to: `lazy` (window load event or setTimeout), `idle` (requestIdleCallback + Safari fallback), `interaction` (once/capture on click/focus/keypress/touch/pointer), `on-visible` (shared IntersectionObserver with 10% threshold)
 - [x] Wire `march_island_msg_from_name` in `wasm-bridge.js` — `_buildMsgPtr()` uses `march_island_msg_from_name(ptr, len)` for zero-field enum messages (plain string or `{tag: "Name"}`); falls back to JSON string for payloaded messages or when export is absent
 - [ ] End-to-end island integration test — compile a simple island to WASM, serve it, verify hydration and state update round-trip in a browser
-- [ ] `forge gen.island` generator
+- [x] `forge gen.island` generator — `lib/forge/gen_island.march`; generates `@island` module stub in `lib/islands/<name>.march`; `--server` flag generates server-handler stub; `--compile` flag builds WASM immediately; updates `priv/static/islands/manifest.json`
 - [ ] WASM actor runtime — green threads / mailboxes in WASM target. Decide: per-island instance or shared cooperative scheduling ([open-questions.md](open-questions.md) §5) — post-v1
 
 ### Auth, Security & Storage
@@ -83,7 +83,7 @@ Specced and queued. Roughly priority order within each group.
 ### JS Interop
 - [ ] `Cmd` abstraction layer for WASM → JS calls ([js-interop.md](js-interop.md))
 - [ ] Built-in `Cmd` implementations: `window.*`, DOM manipulation, `fetch`, `localStorage` ([js-interop.md](js-interop.md))
-- [ ] JS → WASM message protocol (JSON envelope) ([js-interop.md](js-interop.md))
+- [x] JS → WASM message protocol (JSON envelope) — `window.Bastion.getIsland(name)` returns `IslandHandle` with `.send(msg)`, `.getState()`, `.all()`; `Bastion.onDispatch(name, cb)` observer; wired in `march-islands.js` `dispatch()` hook
 
 ### Developer Experience
 - [x] `forge dev` live reload — `lib/dev.march`: `Bastion.Dev.live_reload` plug serves `/_bastion/reload` WebSocket (drop on restart triggers browser reload) + `/_bastion/live-reload.js` client; `live_reload_tag()` returns script tag for layouts; `dev_env?()` detects MARCH_ENV

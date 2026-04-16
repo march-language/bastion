@@ -173,6 +173,18 @@
         type: 'msg',
         payload: msgPayload
       });
+
+      // Notify any Bastion.onDispatch() listeners registered for this island type
+      const listeners = this.manager._dispatchListeners &&
+        this.manager._dispatchListeners.get(this.moduleName);
+      if (listeners && listeners.length > 0) {
+        const snapshot = this.state;
+        listeners.forEach(cb => {
+          try { cb(this.instanceId, msgPayload, snapshot); } catch (e) {
+            console.warn('[bastion] onDispatch listener threw:', e);
+          }
+        });
+      }
     }
 
     /**
@@ -834,7 +846,144 @@
     manager.init();
   }
 
-  // Expose for debugging only. No global send API — use channels or parent-child dispatch.
+  // ── Public API ───────────────────────────────────────────────────
+  //
+  // window.Bastion.getIsland(moduleName) → IslandHandle
+  //
+  // Allows host-page JS (outside Bastion) to send messages into specific
+  // island instances and read their current state snapshots.
+  //
+  // This is different from the removed window.marchIslands.send global bus —
+  // each call targets a named island type, not a broadcast to all islands.
+  //
+  // Example:
+  //   const searchBar = Bastion.getIsland("MyApp.Islands.SearchBar");
+  //   searchBar.send({ tag: "SetQuery", value: "new search term" });
+  //   const state = searchBar.getState();
+  //   console.log(state.results.length);
+  //
+  //   // All instances of this island type (e.g. multiple on the page):
+  //   Bastion.getIsland("MyApp.Islands.Counter").all().forEach(h => {
+  //     h.send({ tag: "Reset" });
+  //   });
+
+  /**
+   * A handle for sending messages to a named island type.
+   * Wraps all currently-hydrated instances with that module name.
+   */
+  class IslandHandle {
+    /**
+     * @param {string} moduleName
+     * @param {IslandManager} mgr
+     */
+    constructor(moduleName, mgr) {
+      this._moduleName = moduleName;
+      this._mgr = mgr;
+    }
+
+    /** Collect all live instances of this island type. */
+    _instances() {
+      const result = [];
+      for (const [, inst] of this._mgr.instances) {
+        if (inst.moduleName === this._moduleName) result.push(inst);
+      }
+      return result;
+    }
+
+    /**
+     * Send a JSON-compatible message to all instances of this island type.
+     *
+     * msg can be:
+     *   a plain string         → zero-payload variant, e.g. "Increment"
+     *   { tag: "Name" }        → zero-payload variant (tag form)
+     *   { tag: "Name", ...kv } → payloaded variant
+     *
+     * Each instance calls its dispatch() — WASM update + server sync.
+     *
+     * @param {string|Object} msg
+     */
+    send(msg) {
+      const instances = this._instances();
+      if (instances.length === 0) {
+        console.warn(`[bastion] Bastion.getIsland("${this._moduleName}").send() — no hydrated instances found`);
+        return;
+      }
+      instances.forEach(inst => inst.dispatch(msg));
+    }
+
+    /**
+     * Return the current state snapshot of the first (or only) instance.
+     * Returns null if no instances are hydrated yet.
+     *
+     * @returns {Object|null}
+     */
+    getState() {
+      const instances = this._instances();
+      return instances.length > 0 ? instances[0].state : null;
+    }
+
+    /**
+     * Return per-instance handles when multiple instances of the same
+     * island type exist on the page.
+     *
+     * @returns {Array<{instanceId: string, send: Function, getState: Function}>}
+     */
+    all() {
+      return this._instances().map(inst => ({
+        instanceId: inst.instanceId,
+        el: inst.el,
+        send: (msg) => inst.dispatch(msg),
+        getState: () => inst.state,
+      }));
+    }
+
+    /** Number of currently-hydrated instances of this island type. */
+    get count() {
+      return this._instances().length;
+    }
+  }
+
+  window.Bastion = {
+    /**
+     * Get a handle to all instances of a named island type.
+     *
+     * @param {string} moduleName - PascalCase island module name,
+     *   e.g. "MyApp.Islands.SearchBar" or just "SearchBar"
+     * @returns {IslandHandle}
+     */
+    getIsland(moduleName) {
+      return new IslandHandle(moduleName, manager);
+    },
+
+    /**
+     * Register a callback that fires whenever an island of the named type
+     * dispatches a message. Useful for observing island activity from host JS.
+     *
+     * Returns an unsubscribe function.
+     *
+     * @param {string} moduleName
+     * @param {Function} cb - fn(instanceId, msg, state)
+     * @returns {Function} unsubscribe
+     */
+    onDispatch(moduleName, cb) {
+      // Store in a manager-level listener map
+      if (!manager._dispatchListeners) manager._dispatchListeners = new Map();
+      const key = moduleName;
+      const listeners = manager._dispatchListeners.get(key) || [];
+      listeners.push(cb);
+      manager._dispatchListeners.set(key, listeners);
+      // Return unsubscribe
+      return () => {
+        const current = manager._dispatchListeners.get(key) || [];
+        manager._dispatchListeners.set(key, current.filter(l => l !== cb));
+      };
+    },
+
+    /** Version string for runtime detection. */
+    version: '0.1.0',
+  };
+
+  // Internal debug handle — use window.Bastion for production use.
   window.__bastionIslands = manager;
 
 })();

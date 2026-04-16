@@ -66,6 +66,7 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Idempotency keys | `idempotency.march` | `Bastion.Idempotency`: `protect/2`, `protect_with/3`; Vault-cached POST/PUT responses (TTL, scope prefix); replay with `X-Idempotent-Replayed: true`; `cached?`, `invalidate` |
 | Telemetry | `telemetry.march` | `Bastion.Telemetry`: `attach/3`, `detach/1`, `execute/3`; `span/3` (start/stop events with duration); `request_start/1`, `request_stop/2`; Vault-backed handler registry; prefix-match subscriptions |
 | HTTP test conn builder | `test_conn.march` | `Bastion.Test.Conn`: `build_conn/2,3`; `put_req_header`, `put_req_body`, `put_req_cookie`, `put_query_params`; `authenticate_as`, `with_api_token`; `assert_status`, `assert_header`, `assert_html_contains`, `assert_redirected_to`, `assert_json`; `get_resp_header`, `resp_status`, `resp_body` |
+| JS → island public API | `priv/js/march-islands.js` | `window.Bastion.getIsland(name)` → `IslandHandle` with `.send(msg)`, `.getState()`, `.all()`, `.count`; `Bastion.onDispatch(name, cb)` dispatch observer; allows host-page JS to communicate with islands |
 
 ---
 
