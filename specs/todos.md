@@ -10,7 +10,13 @@ Derived from [open-questions.md](open-questions.md), the individual spec files, 
 
 The most impactful unblocked work. These are preconditions for most other features.
 
-- [ ] **`~H` sigil parser** — Design spike on March lexer changes needed to support `~H"""..."""` and `~CSS"""..."""`. This unblocks: templates, CSP nonce injection, scoped CSS, compile-time XSS prevention, and type-checked markup. See [open-questions.md](open-questions.md) §1.
+- [ ] **`~H` triple-quoted sigil** (March compiler) — Add the missing `SIGIL_PREFIX + triple_string` parser production in `lib/parser/parser.mly`. The lexer already tokenises `~H` and triple-quoted strings correctly; the parser just lacks the production that combines them. See [template-file-format.md](template-file-format.md) §Layer 1a.
+- [ ] **`.march.spans` sidecar support** (March compiler) — Accept a span-override sidecar file alongside a `.march` source so the lowering pass can map generated node positions back to `.march.html` line/col. Errors then report positions in the original template file. See [template-file-format.md](template-file-format.md) §Layer 1b.
+- [ ] **`[preprocessors]` hook in forge** — Add a `[preprocessors]` table to `forge.toml` that maps file extensions to commands. Forge runs matched commands before compilation and adds `.forge/generated/` to `MARCH_LIB_PATH`. Incremental: only re-run when source hash changes. See [template-file-format.md](template-file-format.md) §Layer 2.
+- [ ] **`bastion lower` CLI subcommand** (Bastion) — Implement the `.march.html` → `.march` lowering pass: frontmatter extraction, HTML parsing, component resolution, slot assembly, code generation, span table output. See [template-file-format.md](template-file-format.md) §Layer 3b.
+- [ ] **`Html` runtime module** — `Html.escape/1`, `Html.safe/1`, `Html.Safe` type, `html_auto_escape/1`. Called by `desugar.ml` already; needs a runtime implementation in `lib/html.march`.
+- [ ] **`IOList` runtime module** — Complete `IOList.from_strings/1`, `IOList.empty/0`, `IOList.to_string/1` in `lib/io_list.march`.
+- [ ] **`Css.style/1` helper** — New `lib/css.march` module. Builds a CSS string from a `List((String, Option(String)))`, filtering `None` values.
 - [ ] **Islands data flow implementation** — Implement the `Server` / `Client` dataflow modes, parent-child prop binding, and explicit event dispatch as specced in [islands-data-flow.md](islands-data-flow.md). Depends on `~H` for template rendering in islands.
 - [ ] **Kill `window.marchIslands.send` global bus** — Replace with the parent-child dispatch model from [islands-data-flow.md](islands-data-flow.md). See wasm-islands.md current design.
 - [ ] **Channel server implementation** — Spec is complete ([channels.md](channels.md)), implementation needed. Unblocks: island-to-server sync, real-time features, Presence.

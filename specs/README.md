@@ -32,6 +32,7 @@ Bastion occupies a similar space to Phoenix in the Elixir ecosystem — opiniona
 | [routing.md](routing.md) | Pattern-matched routing via function heads, route delegation, compile-time route optimization |
 | [middleware.md](middleware.md) | Typed middleware pipeline, conn type states, built-in middleware, scoped pipelines |
 | [templates.md](templates.md) | `~H` sigil, components as functions, compile-time type checking, XSS prevention |
+| [template-file-format.md](template-file-format.md) | `.march.html` file format — interpolation syntax, control flow, named slots, component calls, source maps |
 | [error-handling.md](error-handling.md) | HTTP error handling, custom error pages, WebSocket/island crash recovery, dev error overlay |
 
 ### Client-Side and Real-Time
