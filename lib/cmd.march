@@ -1,0 +1,261 @@
+-- lib/cmd.march — Bastion.Cmd: typed commands from island update functions.
+--
+-- Islands (WASM modules compiled from March) follow the Elm Architecture pattern:
+--
+--   update(state, msg) → (new_state, Cmd(Msg))
+--
+-- A Cmd represents a side-effect — an HTTP request, a timer, a navigation event,
+-- a channel message, or a direct JS call — that the runtime (wasm-bridge.js / the
+-- Bastion client runtime) executes on behalf of the island after each update.
+--
+-- ── Usage in an island ──────────────────────────────────────────────────────────
+--
+--   import Bastion.Cmd as Cmd
+--
+--   type Msg =
+--     | Increment
+--     | LoadUser(Int)
+--     | GotUser(String)
+--
+--   fn update(state, msg) do
+--     match msg do
+--     Increment ->
+--       ({ count = state.count + 1 }, Cmd.none())
+--
+--     LoadUser(id) ->
+--       (state, Cmd.http_get("/api/users/" ++ String.from_int(id), fn resp ->
+--         GotUser(resp.body)
+--       end))
+--
+--     GotUser(json) ->
+--       ({ state | user = json }, Cmd.none())
+--     end
+--   end
+--
+-- ── JS Runtime Support ──────────────────────────────────────────────────────────
+--
+-- The Bastion JS runtime (wasm-bridge.js + march-islands.js) interprets Cmd
+-- values returned by island update functions.  The WASM module must export
+-- march_island_update_cmd() alongside march_island_update() for the runtime
+-- to receive both the new state AND the command.
+--
+-- Commands are serialised to a JSON envelope by the March compiler's WASM
+-- target; the JS runtime dispatches based on the "tag" field.
+--
+-- JSON envelope schema:
+--   { "tag": "None" }
+--   { "tag": "Batch", "cmds": [...] }
+--   { "tag": "HttpGet", "url": "...", "ref": "<callback_id>" }
+--   { "tag": "HttpPost", "url": "...", "body": "...", "ref": "<callback_id>" }
+--   { "tag": "After", "ms": 500, "msg": <msg_json> }
+--   { "tag": "Every", "ms": 1000, "msg": <msg_json> }
+--   { "tag": "Focus", "id": "input-field" }
+--   { "tag": "Blur", "id": "input-field" }
+--   { "tag": "PushUrl", "path": "/new-page" }
+--   { "tag": "ReplaceUrl", "path": "/same-page" }
+--   { "tag": "StoreLocal", "key": "prefs", "value": "..." }
+--   { "tag": "LoadLocal", "key": "prefs", "ref": "<callback_id>" }
+--   { "tag": "RemoveLocal", "key": "prefs" }
+--   { "tag": "ChannelPush", "event": "msg", "payload": "..." }
+
+mod Bastion.Cmd do
+
+  -- ── Types ──────────────────────────────────────────────────────────────────
+
+  doc """
+  A `Cmd(msg)` represents a side-effect produced by an island's `update` function.
+
+  Islands return `(new_state, Cmd(Msg))` from `update`.  The runtime executes
+  the command and may deliver a new `Msg` back to the island when the command
+  completes (e.g. an HTTP response arrives or a timer fires).
+
+  Cmd is a value type — it does not execute until the runtime processes it.
+  """
+  type Cmd(msg) =
+    | CmdNone
+    | CmdBatch(List(Cmd(msg)))
+    | CmdHttpGet(String, String -> msg)         -- url, response_body -> Msg
+    | CmdHttpPost(String, String, String -> msg) -- url, body, response_body -> Msg
+    | CmdAfter(Int, msg)                         -- delay_ms, msg_to_send
+    | CmdEvery(Int, msg)                         -- interval_ms, msg_to_send
+    | CmdFocus(String)                           -- element_id
+    | CmdBlur(String)                            -- element_id
+    | CmdPushUrl(String)                         -- path
+    | CmdReplaceUrl(String)                      -- path
+    | CmdStoreLocal(String, String)              -- key, value
+    | CmdLoadLocal(String, Option(String) -> msg) -- key, handler
+    | CmdRemoveLocal(String)                     -- key
+    | CmdChannelPush(String, String)             -- event, payload_json
+
+  -- ── Constructors ──────────────────────────────────────────────────────────
+
+  doc "No-op command.  Use when update produces no side-effects."
+  fn none() : Cmd(a) do
+    CmdNone
+  end
+
+  doc """
+  Execute a list of commands in parallel.  All commands in the batch are
+  dispatched; their result messages are delivered back to the island.
+
+      Cmd.batch([http_cmd, timer_cmd])
+  """
+  fn batch(cmds : List(Cmd(a))) : Cmd(a) do
+    CmdBatch(cmds)
+  end
+
+  -- ── HTTP ──────────────────────────────────────────────────────────────────
+
+  doc """
+  Perform an HTTP GET request.  When the response arrives, `handler` is called
+  with the response body string and the returned message is dispatched.
+
+      Cmd.http_get("/api/users", fn body -> GotUsers(body) end)
+  """
+  fn http_get(url : String, handler : String -> a) : Cmd(a) do
+    CmdHttpGet(url, handler)
+  end
+
+  doc """
+  Perform an HTTP POST request with a body string.
+
+      Cmd.http_post("/api/items", "{\"name\":\"Alice\"}", fn body -> Created(body) end)
+  """
+  fn http_post(url : String, body : String, handler : String -> a) : Cmd(a) do
+    CmdHttpPost(url, body, handler)
+  end
+
+  -- ── Timers ────────────────────────────────────────────────────────────────
+
+  doc """
+  Deliver `msg` after `delay_ms` milliseconds (one-shot).
+
+      Cmd.after(500, HideNotification)
+  """
+  fn after(delay_ms : Int, msg : a) : Cmd(a) do
+    CmdAfter(delay_ms, msg)
+  end
+
+  doc """
+  Deliver `msg` every `interval_ms` milliseconds (repeating).
+  The timer fires until the island is destroyed.
+
+      Cmd.every(5000, RefreshData)
+  """
+  fn every(interval_ms : Int, msg : a) : Cmd(a) do
+    CmdEvery(interval_ms, msg)
+  end
+
+  -- ── DOM ───────────────────────────────────────────────────────────────────
+
+  doc """
+  Focus the DOM element with the given id.
+
+      Cmd.focus("search-input")
+  """
+  fn focus(element_id : String) : Cmd(a) do
+    CmdFocus(element_id)
+  end
+
+  doc """
+  Blur (unfocus) the DOM element with the given id.
+
+      Cmd.blur("dropdown-menu")
+  """
+  fn blur(element_id : String) : Cmd(a) do
+    CmdBlur(element_id)
+  end
+
+  -- ── Navigation ────────────────────────────────────────────────────────────
+
+  doc """
+  Push a new URL onto the browser history stack.  Does not trigger a page reload.
+
+      Cmd.push_url("/users/42")
+  """
+  fn push_url(path : String) : Cmd(a) do
+    CmdPushUrl(path)
+  end
+
+  doc """
+  Replace the current URL in the browser history stack (no new entry).
+
+      Cmd.replace_url("/search?q=alice")
+  """
+  fn replace_url(path : String) : Cmd(a) do
+    CmdReplaceUrl(path)
+  end
+
+  -- ── Local Storage ────────────────────────────────────────────────────────
+
+  doc """
+  Persist a string value to localStorage under the given key.
+
+      Cmd.store_local("theme", "dark")
+  """
+  fn store_local(key : String, value : String) : Cmd(a) do
+    CmdStoreLocal(key, value)
+  end
+
+  doc """
+  Read a value from localStorage.  `handler` receives `Some(value)` if present
+  or `None` if the key is absent; the returned message is dispatched.
+
+      Cmd.load_local("theme", fn opt -> LoadedTheme(Option.unwrap_or(opt, "light")) end)
+  """
+  fn load_local(key : String, handler : Option(String) -> a) : Cmd(a) do
+    CmdLoadLocal(key, handler)
+  end
+
+  doc """
+  Remove a key from localStorage.
+
+      Cmd.remove_local("session_draft")
+  """
+  fn remove_local(key : String) : Cmd(a) do
+    CmdRemoveLocal(key)
+  end
+
+  -- ── Channels ─────────────────────────────────────────────────────────────
+
+  doc """
+  Push a message to the island's wired channel topic (Client-mode islands only).
+  The `event` and `payload_json` are forwarded to the server-side channel handler.
+
+      Cmd.channel_push("new_message", "{\"text\":\"hello\"}")
+  """
+  fn channel_push(event : String, payload_json : String) : Cmd(a) do
+    CmdChannelPush(event, payload_json)
+  end
+
+  -- ── Introspection ─────────────────────────────────────────────────────────
+
+  doc "Return true if this Cmd is a no-op (CmdNone)."
+  fn is_none(cmd : Cmd(a)) : Bool do
+    match cmd do
+    CmdNone -> true
+    _       -> false
+    end
+  end
+
+  doc "Map over the message type of a Cmd."
+  fn map(cmd : Cmd(a), f : a -> b) : Cmd(b) do
+    match cmd do
+    CmdNone                       -> CmdNone
+    CmdBatch(cmds)                -> CmdBatch(List.map(cmds, fn c -> map(c, f)))
+    CmdHttpGet(url, handler)      -> CmdHttpGet(url, fn body -> f(handler(body)))
+    CmdHttpPost(url, body, h)     -> CmdHttpPost(url, body, fn resp -> f(h(resp)))
+    CmdAfter(ms, msg)             -> CmdAfter(ms, f(msg))
+    CmdEvery(ms, msg)             -> CmdEvery(ms, f(msg))
+    CmdFocus(id)                  -> CmdFocus(id)
+    CmdBlur(id)                   -> CmdBlur(id)
+    CmdPushUrl(path)              -> CmdPushUrl(path)
+    CmdReplaceUrl(path)           -> CmdReplaceUrl(path)
+    CmdStoreLocal(k, v)           -> CmdStoreLocal(k, v)
+    CmdLoadLocal(k, handler)      -> CmdLoadLocal(k, fn opt -> f(handler(opt)))
+    CmdRemoveLocal(k)             -> CmdRemoveLocal(k)
+    CmdChannelPush(ev, payload)   -> CmdChannelPush(ev, payload)
+    end
+  end
+
+end

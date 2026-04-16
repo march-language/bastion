@@ -144,26 +144,25 @@
       if (this.isServer()) return;  // defensive: Server islands have no events
 
       if (this.wasmModule) {
-        const result = this.wasmModule.update(msgPayload);
+        // Use updateWithCmd if available (islands that return (State, Cmd) tuples).
+        // Falls back to plain update() for islands that just return State.
+        const { updated, cmd } = this.wasmModule.updateWithCmd
+          ? this.wasmModule.updateWithCmd(msgPayload)
+          : { updated: this.wasmModule.update(msgPayload), cmd: null };
 
-        if (result) {
-          // Handle {state, dispatch} tuple from update (parent-child dispatch)
-          const newState = result.state !== undefined ? result.state : result;
-          const upstreamDispatch = result.dispatch || null;
-
-          this.state = newState;
+        if (updated) {
           const html = this.wasmModule.render();
           if (html !== null) this.morph(html);
 
           // Channel sync (last-write-wins, no CRDT)
           if (this.channelTopic) {
-            this.manager.channelPush(this.channelTopic, newState);
+            this.manager.channelPush(this.channelTopic, this.state);
           }
+        }
 
-          // Child-to-parent dispatch: walk up the tree
-          if (upstreamDispatch && this.parentId && this.onEvent) {
-            this.manager.dispatchToParent(this.parentId, this.onEvent, upstreamDispatch);
-          }
+        // Execute any Cmd produced by the island's update function
+        if (cmd) {
+          executeCmd(this, cmd);
         }
       }
 
@@ -833,6 +832,155 @@
         childList: true,
         subtree: true
       });
+    }
+  }
+
+  // ── Cmd Executor ────────────────────────────────────────────────
+  //
+  // Interprets the JSON Cmd envelope produced by island update functions
+  // (via march_island_update_cmd / march_island_last_cmd WASM exports).
+  //
+  // Cmd JSON schema — see lib/cmd.march for the canonical type definition.
+
+  /**
+   * Execute a single Cmd on behalf of the given IslandInstance.
+   * Non-recursive; Batch is handled by iterating the list.
+   *
+   * @param {IslandInstance} instance
+   * @param {Object} cmd        - Parsed cmd JSON, must have a "tag" field
+   */
+  function executeCmd(instance, cmd) {
+    if (!cmd || !cmd.tag) return;
+
+    switch (cmd.tag) {
+      // ── No-op ────────────────────────────────────────────────────────
+      case 'None':
+        break;
+
+      // ── Batch ────────────────────────────────────────────────────────
+      case 'Batch':
+        if (Array.isArray(cmd.cmds)) {
+          cmd.cmds.forEach(c => executeCmd(instance, c));
+        }
+        break;
+
+      // ── HTTP ─────────────────────────────────────────────────────────
+      case 'HttpGet':
+        if (cmd.url) {
+          fetch(cmd.url, { credentials: 'same-origin' })
+            .then(r => r.text())
+            .then(body => {
+              if (cmd.ref && instance.wasmModule &&
+                  typeof instance.wasmModule.exports.march_island_deliver_cmd === 'function') {
+                const m = instance.manager;
+                const result = { ref: cmd.ref, ok: true, body };
+                instance.dispatch(result);
+              }
+            })
+            .catch(err => {
+              if (cmd.ref) {
+                instance.dispatch({ ref: cmd.ref, ok: false, body: err.message });
+              }
+            });
+        }
+        break;
+
+      case 'HttpPost':
+        if (cmd.url) {
+          fetch(cmd.url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: cmd.body || '',
+          })
+            .then(r => r.text())
+            .then(body => {
+              if (cmd.ref) instance.dispatch({ ref: cmd.ref, ok: true, body });
+            })
+            .catch(err => {
+              if (cmd.ref) instance.dispatch({ ref: cmd.ref, ok: false, body: err.message });
+            });
+        }
+        break;
+
+      // ── Timers ───────────────────────────────────────────────────────
+      case 'After':
+        if (typeof cmd.ms === 'number' && cmd.msg != null) {
+          setTimeout(() => instance.dispatch(cmd.msg), cmd.ms);
+        }
+        break;
+
+      case 'Every':
+        if (typeof cmd.ms === 'number' && cmd.msg != null) {
+          setInterval(() => instance.dispatch(cmd.msg), cmd.ms);
+        }
+        break;
+
+      // ── DOM ──────────────────────────────────────────────────────────
+      case 'Focus':
+        if (cmd.id) {
+          const el = document.getElementById(cmd.id);
+          if (el && typeof el.focus === 'function') el.focus();
+        }
+        break;
+
+      case 'Blur':
+        if (cmd.id) {
+          const el = document.getElementById(cmd.id);
+          if (el && typeof el.blur === 'function') el.blur();
+        }
+        break;
+
+      // ── Navigation ───────────────────────────────────────────────────
+      case 'PushUrl':
+        if (cmd.path && typeof history.pushState === 'function') {
+          history.pushState({}, '', cmd.path);
+        }
+        break;
+
+      case 'ReplaceUrl':
+        if (cmd.path && typeof history.replaceState === 'function') {
+          history.replaceState({}, '', cmd.path);
+        }
+        break;
+
+      // ── localStorage ────────────────────────────────────────────────
+      case 'StoreLocal':
+        if (cmd.key != null && cmd.value != null) {
+          try { localStorage.setItem(cmd.key, cmd.value); } catch (_) {}
+        }
+        break;
+
+      case 'LoadLocal':
+        if (cmd.key != null) {
+          let value = null;
+          try { value = localStorage.getItem(cmd.key); } catch (_) {}
+          if (cmd.ref) {
+            instance.dispatch({ ref: cmd.ref, value: value !== null ? value : undefined });
+          }
+        }
+        break;
+
+      case 'RemoveLocal':
+        if (cmd.key != null) {
+          try { localStorage.removeItem(cmd.key); } catch (_) {}
+        }
+        break;
+
+      // ── Channel ──────────────────────────────────────────────────────
+      case 'ChannelPush':
+        if (cmd.event != null && cmd.payload != null && instance.channelTopic) {
+          instance.manager.send({
+            type: 'channel_push',
+            topic: instance.channelTopic,
+            event: cmd.event,
+            payload: cmd.payload,
+          });
+        }
+        break;
+
+      default:
+        console.warn(`[bastion/cmd] unknown Cmd tag: ${cmd.tag}`);
     }
   }
 

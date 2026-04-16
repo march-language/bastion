@@ -81,8 +81,8 @@ Specced and queued. Roughly priority order within each group.
 - [ ] CSS variables / theming conventions ([css-styling.md](css-styling.md))
 
 ### JS Interop
-- [ ] `Cmd` abstraction layer for WASM → JS calls ([js-interop.md](js-interop.md))
-- [ ] Built-in `Cmd` implementations: `window.*`, DOM manipulation, `fetch`, `localStorage` ([js-interop.md](js-interop.md))
+- [x] `Cmd` abstraction layer for WASM → JS calls — `lib/cmd.march`: `Bastion.Cmd` type + constructors (`none`, `batch`, `http_get`, `http_post`, `after`, `every`, `focus`, `blur`, `push_url`, `replace_url`, `store_local`, `load_local`, `remove_local`, `channel_push`, `map`); JSON envelope spec documented; requires `march_island_update_cmd`/`march_island_last_cmd` WASM exports from compiler
+- [x] Built-in `Cmd` implementations: `window.*`, DOM manipulation, `fetch`, `localStorage` — `executeCmd(instance, cmd)` in `march-islands.js` handles all built-in tags; wired into `IslandInstance.dispatch()` via `updateWithCmd()`; `wasm-bridge.js` `WasmIslandModule.updateWithCmd()` reads cmd JSON via `march_island_last_cmd` sidecar export
 - [x] JS → WASM message protocol (JSON envelope) — `window.Bastion.getIsland(name)` returns `IslandHandle` with `.send(msg)`, `.getState()`, `.all()`; `Bastion.onDispatch(name, cb)` observer; wired in `march-islands.js` `dispatch()` hook
 
 ### Developer Experience

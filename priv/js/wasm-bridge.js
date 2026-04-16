@@ -221,6 +221,58 @@
     }
 
     /**
+     * Apply a message to the state, returning both the success flag AND
+     * any Cmd produced by the island's update function.
+     *
+     * Requires the WASM module to export:
+     *   march_island_update_cmd(state_ptr, msg_ptr)  → new_state_ptr
+     *   march_island_last_cmd()                       → cmd_json_str_ptr | 0
+     *
+     * The compiler emits march_island_update_cmd instead of march_island_update
+     * when the island's update function returns (State, Cmd(Msg)) tuples.
+     * march_island_last_cmd() returns the Cmd portion of the last call's result.
+     *
+     * Falls back to the plain update() path if march_island_update_cmd is absent.
+     *
+     * @param {string|Object} msgPayload
+     * @returns {{ updated: boolean, cmd: Object|null }}
+     */
+    updateWithCmd(msgPayload) {
+      // Fast path: island doesn't produce Cmds
+      if (typeof this.exports.march_island_update_cmd !== 'function') {
+        const updated = this.update(msgPayload);
+        return { updated, cmd: null };
+      }
+      if (!this.statePtr) return { updated: false, cmd: null };
+
+      const msgPtr = this._buildMsgPtr(msgPayload);
+      if (msgPtr === null) return { updated: false, cmd: null };
+
+      try {
+        const newStatePtr = this.exports.march_island_update_cmd(this.statePtr, msgPtr);
+        if (!newStatePtr) return { updated: false, cmd: null };
+
+        this.statePtr = newStatePtr;
+
+        // Read the Cmd if march_island_last_cmd is exported
+        let cmd = null;
+        if (typeof this.exports.march_island_last_cmd === 'function') {
+          const cmdPtr = this.exports.march_island_last_cmd();
+          if (cmdPtr) {
+            const cmdStr = this._readString(cmdPtr);
+            if (cmdStr) {
+              try { cmd = JSON.parse(cmdStr); } catch (_) {}
+            }
+          }
+        }
+        return { updated: true, cmd };
+      } catch (e) {
+        console.warn(`[bastion/wasm] ${this.moduleName}.update_with_cmd() failed:`, e);
+        return { updated: false, cmd: null };
+      }
+    }
+
+    /**
      * Merge remote state into local state.
      * Phase 5: default is server-wins (discard local, use server HTML).
      * Custom merge functions are not yet wired through the WASM boundary.
