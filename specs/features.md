@@ -63,6 +63,7 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Live reload + dashboard | `dev.march` | `Bastion.Dev`: `live_reload` plug; `live_reload_tag()`; `dashboard` plug (`/_bastion` HTML page with metrics); `request_timer`, `server_timing`, `conn_inspector`; `dev_env?()` |
 | Health check | `health.march` | `Bastion.Health`: `plug`, `plug_with_checks`, `check/2`; Vault-backed drain state; `start_drain()`/`draining?()` |
 | Multipart uploads | `upload.march` | `Bastion.Upload`: `parse_conn/2`, `parse/3`; `UploadedFile`, `UploadOpts`, `UploadError` types; boundary extraction; part splitting; header parsing; `default_opts/0`, `error_message/1` |
+| Idempotency keys | `idempotency.march` | `Bastion.Idempotency`: `protect/2`, `protect_with/3`; Vault-cached POST/PUT responses (TTL, scope prefix); replay with `X-Idempotent-Replayed: true`; `cached?`, `invalidate` |
 
 ---
 
