@@ -1,0 +1,171 @@
+-- test/test_html_css.march
+-- Tests for Html (escape, Safe type, auto-escape) and Css (style builder).
+
+mod TestHtmlCss do
+
+-- ── Html.escape ──────────────────────────────────────────────────────────────
+
+describe "Html.escape" do
+  test "escapes ampersand" do
+    assert (Html.escape("a & b") == "a &amp; b")
+  end
+
+  test "escapes less-than" do
+    assert (Html.escape("<script>") == "&lt;script&gt;")
+  end
+
+  test "escapes double quote" do
+    assert (Html.escape("say \"hi\"") == "say &quot;hi&quot;")
+  end
+
+  test "escapes single quote" do
+    assert (Html.escape("it's") == "it&#39;s")
+  end
+
+  test "escapes all five characters together" do
+    let input  = "<div class=\"x\" data-v='a&b'>"
+    let result = Html.escape(input)
+    assert (string_contains(result, "&lt;"))
+    assert (string_contains(result, "&gt;"))
+    assert (string_contains(result, "&quot;"))
+    assert (string_contains(result, "&#39;"))
+    assert (string_contains(result, "&amp;"))
+  end
+
+  test "returns safe strings unchanged" do
+    assert (Html.escape("Hello World") == "Hello World")
+  end
+
+  test "handles empty string" do
+    assert (Html.escape("") == "")
+  end
+end
+
+-- ── Html.Safe type ───────────────────────────────────────────────────────────
+
+describe "Html.Safe" do
+  test "safe wraps a string" do
+    let s = Html.safe("<b>bold</b>")
+    assert (Html.to_string(s) == "<b>bold</b>")
+  end
+
+  test "is_empty returns true for empty safe" do
+    assert (Html.is_empty(Html.safe("")))
+  end
+
+  test "is_empty returns false for non-empty safe" do
+    assert (!Html.is_empty(Html.safe("x")))
+  end
+end
+
+-- ── Html.html_auto_escape_* ──────────────────────────────────────────────────
+
+describe "Html.html_auto_escape" do
+  test "auto_escape_string escapes HTML entities" do
+    assert (Html.html_auto_escape_string("<b>") == "&lt;b&gt;")
+  end
+
+  test "auto_escape_int converts to string" do
+    assert (Html.html_auto_escape_int(42) == "42")
+  end
+
+  test "auto_escape_bool converts true" do
+    assert (Html.html_auto_escape_bool(true) == "true")
+  end
+
+  test "auto_escape_bool converts false" do
+    assert (Html.html_auto_escape_bool(false) == "false")
+  end
+
+  test "auto_escape_safe returns raw content" do
+    let s = Html.safe("<em>trusted</em>")
+    assert (Html.html_auto_escape_safe(s) == "<em>trusted</em>")
+  end
+end
+
+-- ── Css.style ────────────────────────────────────────────────────────────────
+
+describe "Css.style" do
+  test "builds style string from Some values" do
+    let result = Css.style([("color", Some("red")), ("font-size", Some("14px"))])
+    assert (string_contains(result, "color: red;"))
+    assert (string_contains(result, "font-size: 14px;"))
+  end
+
+  test "filters out None values" do
+    let result = Css.style([("color", Some("red")), ("display", None)])
+    assert (string_contains(result, "color: red;"))
+    assert (!string_contains(result, "display"))
+  end
+
+  test "returns empty string for all None" do
+    let result = Css.style([("color", None), ("display", None)])
+    assert (result == "")
+  end
+
+  test "returns empty string for empty list" do
+    let result = Css.style([])
+    assert (result == "")
+  end
+
+  test "single property" do
+    let result = Css.style([("margin", Some("0"))])
+    assert (result == "margin: 0; ")
+  end
+end
+
+-- ── IOList ───────────────────────────────────────────────────────────────────
+
+describe "IOList.from_strings" do
+  test "builds IOList from list of strings" do
+    let iol = IOList.from_strings(["<h1>", "Hello", "</h1>"])
+    assert (IOList.to_string(iol) == "<h1>Hello</h1>")
+  end
+
+  test "handles empty list" do
+    let iol = IOList.from_strings([])
+    assert (IOList.to_string(iol) == "")
+  end
+
+  test "handles single-element list" do
+    let iol = IOList.from_strings(["hello"])
+    assert (IOList.to_string(iol) == "hello")
+  end
+end
+
+describe "IOList.append" do
+  test "concatenates two IOLists" do
+    let a = IOList.from_string("<div>")
+    let b = IOList.from_string("</div>")
+    let result = IOList.append(a, b)
+    assert (IOList.to_string(result) == "<div></div>")
+  end
+end
+
+describe "IOList.concat" do
+  test "concatenates a list of IOLists" do
+    let parts = [
+      IOList.from_string("<h1>"),
+      IOList.from_string("Hi"),
+      IOList.from_string("</h1>")
+    ]
+    let result = IOList.concat(parts)
+    assert (IOList.to_string(result) == "<h1>Hi</h1>")
+  end
+
+  test "handles empty list" do
+    let result = IOList.concat([])
+    assert (IOList.to_string(result) == "")
+  end
+end
+
+-- ── Helpers ──────────────────────────────────────────────────────────────────
+
+pfn string_contains(haystack : String, needle : String) : Bool do
+  match String.index_of(haystack, needle) do
+  Some(_) -> true
+  None -> false
+  end
+end
+
+end

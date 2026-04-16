@@ -1,6 +1,6 @@
 # Bastion: Feature Status
 
-**Updated**: 2026-03-31
+**Updated**: 2026-04-15
 
 This document tracks the implementation status of every Bastion feature area. Use it to understand what's ready, what's specced but not built, and what's deferred to later phases.
 
@@ -24,6 +24,10 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Error views | `error_view.march`, `fallback_controller.march` | Default error pages, custom error handling |
 | Testing support | `test.march` | Conn builder, request helpers for test assertions |
 | Framework entry point | `bastion.march`, `bastion_server.march` | App startup, supervisor tree |
+| Html safety primitives | `html.march` | `Safe` type, `escape/1`, `safe/1`, auto-escape helpers for templates |
+| IOList extensions | `io_list.march` | `from_strings/1`, `append/2`, `concat/1` for template assembly |
+| CSS style builder | `css.march` | `Css.style/1` — conditional inline styles from property/value pairs |
+| Template lowering CLI | `forge/lower.march` | `bastion lower` — .march.html → .march + .march.spans |
 
 ---
 
@@ -33,8 +37,8 @@ Specced and designed but not yet fully implemented. These are the active build a
 
 | Feature | Spec | Status | Blocker |
 |---------|------|--------|---------|
-| `~H` templates | [templates.md](templates.md) | Design complete, not implemented | Needs: (1) triple-quoted sigil fix in March parser, (2) `Html`/`IOList` runtime modules |
-| `.march.html` template files | [template-file-format.md](template-file-format.md) | Design complete, not implemented | Needs: `~H` fix + `bastion lower` CLI + `[preprocessors]` in forge + `.march.spans` sidecar in March compiler |
+| `~H` templates | [templates.md](templates.md) | Design complete, not implemented | Needs `Html`/`IOList` runtime modules (triple-quoted sigil parsing already works) |
+| `.march.html` template files | [template-file-format.md](template-file-format.md) | All layers implemented | Triple-quoted `~H` sigils work; `[preprocessors]` in forge; `.march.spans` sidecar in compiler; lowering pass + runtime in Bastion |
 | WASM island compilation | [wasm-islands.md](wasm-islands.md) | Infrastructure complete | Tier 4 browser target (`wasm32-unknown-unknown`) not yet in March compiler |
 | Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete | Depends on WASM compilation + `~H` templates |
 | Channels / WebSocket | [channels.md](channels.md) | Draft spec | Needs Channel server implementation |

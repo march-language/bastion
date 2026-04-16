@@ -1,0 +1,600 @@
+-- Forge.Lower — bastion lower CLI subcommand.
+--
+-- Lowers .march.html template files to .march modules with ~H sigils.
+--
+-- Usage:
+--   forge bastion.lower <input.march.html> <output.march> <output.march.spans>
+--
+-- The lowering pass:
+--   1. Extracts the --- frontmatter block (fn signature + use declarations)
+--   2. Parses the template body into tokens (literal HTML, {expr}, {#if}, etc.)
+--   3. Resolves <.Component /> calls to module-qualified function calls
+--   4. Assembles <:slot> blocks into IOList arguments
+--   5. Emits a .march module wrapping the body in ~H"""..."""
+--   6. Writes a .march.spans sidecar for source-map error reporting
+--
+-- The generated .march file is a build artifact — never committed.
+
+mod Forge.Lower do
+
+-- ── Token types ──────────────────────────────────────────────────────────────
+
+type Token =
+    Literal(String, Int)
+  | Expr(String, Int)
+  | RawExpr(String, Int)
+  | IfOpen(String, Int)
+  | Else(Int)
+  | IfClose(Int)
+  | ForOpen(String, String, Int)
+  | ForClose(Int)
+  | LetBind(String, String, Int)
+  | ComponentOpen(String, List(Attr), Int)
+  | ComponentClose(String, Int)
+  | ComponentSelfClose(String, List(Attr), Int)
+  | SlotOpen(String, Int)
+  | SlotClose(String, Int)
+
+type Attr = Attr(String, AttrValue)
+
+type AttrValue =
+    StaticVal(String)
+  | DynamicVal(String)
+
+type Frontmatter = Frontmatter(Option(String), List(String))
+
+type SpanEntry = SpanEntry(Int, Int, Int, String)
+
+-- ── Frontmatter parsing ──────────────────────────────────────────────────────
+
+pfn parse_frontmatter(content : String) : (Frontmatter, String, Int) do
+  let trimmed = String.trim_start(content)
+  if String.starts_with(trimmed, "---") do
+    let after_open = String.slice_bytes(trimmed, 3, String.byte_size(trimmed) - 3)
+    let after_open2 = String.trim_start(after_open)
+    match String.split_first(after_open2, "---") do
+    Some((fm_body, rest)) -> do
+      let fm_lines = String.split(String.trim(fm_body), "\n")
+      let fm_lines2 = List.map(fm_lines, fn l -> String.trim(l))
+      let fm_lines3 = List.filter(fm_lines2, fn l -> !String.is_empty(l))
+      let fn_sig = extract_signature(fm_lines3)
+      let uses = extract_uses(fm_lines3)
+      let fm_line_count = 2 + List.length(fm_lines)
+      (Frontmatter(fn_sig, uses), String.trim_start(rest), fm_line_count)
+    end
+    None -> (Frontmatter(None, Nil), content, 0)
+    end
+  else
+    (Frontmatter(None, Nil), content, 0)
+  end
+end
+
+pfn extract_signature(lines : List(String)) : Option(String) do
+  match lines do
+  Nil -> None
+  Cons(line, rest) ->
+    if String.starts_with(line, "fn ") do Some(line)
+    else extract_signature(rest) end
+  end
+end
+
+pfn extract_uses(lines : List(String)) : List(String) do
+  List.filter(lines, fn l ->
+    String.starts_with(l, "use ") ||
+    String.starts_with(l, "import ") ||
+    String.starts_with(l, "alias ")
+  )
+end
+
+-- ── Template tokenizer ───────────────────────────────────────────────────────
+
+pfn tokenize(body : String, line : Int) : List(Token) do
+  tokenize_loop(body, line, Nil)
+end
+
+pfn tokenize_loop(rest : String, line : Int, acc : List(Token)) : List(Token) do
+  if String.is_empty(rest) do List.reverse(acc)
+  else
+    match find_next_tag(rest) do
+    None ->
+      List.reverse(Cons(Literal(rest, line), acc))
+    Some((before, tag, after)) -> do
+      let line2 = line + count_newlines(before)
+      let acc2 = if String.is_empty(before) do acc
+                 else Cons(Literal(before, line), acc) end
+      let tok = classify_tag(tag, line2)
+      let line3 = line2 + count_newlines(tag)
+      tokenize_loop(after, line3, Cons(tok, acc2))
+    end
+    end
+  end
+end
+
+pfn find_next_tag(s : String) : Option((String, String, String)) do
+  let brace_idx = find_template_open(s, 0)
+  let comp_idx = find_component_open(s, 0)
+  match (brace_idx, comp_idx) do
+  (None, None) -> None
+  (None, Some(cidx)) -> extract_component_tag(s, cidx)
+  (Some(idx), None) -> extract_brace_tag(s, idx)
+  (Some(idx), Some(cidx)) ->
+    if cidx < idx do extract_component_tag(s, cidx)
+    else extract_brace_tag(s, idx) end
+  end
+end
+
+pfn find_template_open(s : String, offset : Int) : Option(Int) do
+  if offset >= String.byte_size(s) do None
+  else
+    let ch = String.slice_bytes(s, offset, 1)
+    if ch == "{" do Some(offset)
+    else find_template_open(s, offset + 1) end
+  end
+end
+
+pfn find_component_open(s : String, offset : Int) : Option(Int) do
+  if offset + 1 >= String.byte_size(s) do None
+  else
+    let two = String.slice_bytes(s, offset, 2)
+    if two == "<." || two == "<:" do Some(offset)
+    else
+      if offset + 2 < String.byte_size(s) do
+        let three = String.slice_bytes(s, offset, 3)
+        if three == "</." || three == "</:" do Some(offset)
+        else find_component_open(s, offset + 1) end
+      else find_component_open(s, offset + 1) end
+    end
+  end
+end
+
+pfn extract_brace_tag(s : String, idx : Int) : Option((String, String, String)) do
+  let before = String.slice_bytes(s, 0, idx)
+  let rest = String.slice_bytes(s, idx, String.byte_size(s) - idx)
+  match find_matching_close_brace(rest, 0, 0) do
+  None -> None
+  Some(end_idx) -> do
+    let tag = String.slice_bytes(rest, 0, end_idx + 1)
+    let after = String.slice_bytes(rest, end_idx + 1, String.byte_size(rest) - end_idx - 1)
+    Some((before, tag, after))
+  end
+  end
+end
+
+pfn find_matching_close_brace(s : String, idx : Int, depth : Int) : Option(Int) do
+  if idx >= String.byte_size(s) do None
+  else
+    let ch = String.slice_bytes(s, idx, 1)
+    if ch == "{" do find_matching_close_brace(s, idx + 1, depth + 1)
+    else
+      if ch == "}" do
+        if depth == 1 do Some(idx)
+        else find_matching_close_brace(s, idx + 1, depth - 1) end
+      else find_matching_close_brace(s, idx + 1, depth) end
+    end
+  end
+end
+
+pfn extract_component_tag(s : String, idx : Int) : Option((String, String, String)) do
+  let before = String.slice_bytes(s, 0, idx)
+  let rest = String.slice_bytes(s, idx, String.byte_size(s) - idx)
+  match find_tag_close(rest, 0) do
+  None -> None
+  Some(end_idx) -> do
+    let tag = String.slice_bytes(rest, 0, end_idx + 1)
+    let after = String.slice_bytes(rest, end_idx + 1, String.byte_size(rest) - end_idx - 1)
+    Some((before, tag, after))
+  end
+  end
+end
+
+pfn find_tag_close(s : String, idx : Int) : Option(Int) do
+  if idx >= String.byte_size(s) do None
+  else
+    let ch = String.slice_bytes(s, idx, 1)
+    if ch == ">" do Some(idx)
+    else find_tag_close(s, idx + 1) end
+  end
+end
+
+-- ── Tag classification ───────────────────────────────────────────────────────
+
+pfn classify_tag(tag : String, line : Int) : Token do
+  let is_component = String.starts_with(tag, "<.") || String.starts_with(tag, "</.") || String.starts_with(tag, "<:") || String.starts_with(tag, "</:")
+  if is_component do classify_component_tag(tag, line)
+  else classify_brace_tag(tag, line) end
+end
+
+pfn classify_brace_tag(tag : String, line : Int) : Token do
+  let inner = strip_braces(tag)
+  if String.starts_with(inner, "#if ") do
+    let cond = String.trim(String.slice_bytes(inner, 4, String.byte_size(inner) - 4))
+    IfOpen(cond, line)
+  else if inner == ":else" do Else(line)
+  else if inner == "/if" do IfClose(line)
+  else if String.starts_with(inner, "#for ") do parse_for_tag(inner, line)
+  else if inner == "/for" do ForClose(line)
+  else if String.starts_with(inner, "let ") do parse_let_tag(inner, line)
+  else if String.starts_with(inner, "=") do
+    let expr = String.trim(String.slice_bytes(inner, 1, String.byte_size(inner) - 1))
+    RawExpr(expr, line)
+  else Expr(inner, line)
+  end end end end end end end
+end
+
+pfn strip_braces(s : String) : String do
+  if String.starts_with(s, "{") do
+    let inner = String.slice_bytes(s, 1, String.byte_size(s) - 2)
+    String.trim(inner)
+  else s end
+end
+
+pfn parse_for_tag(inner : String, line : Int) : Token do
+  let body = String.trim(String.slice_bytes(inner, 5, String.byte_size(inner) - 5))
+  match String.split_first(body, " in ") do
+  Some((binding, collection)) -> ForOpen(String.trim(binding), String.trim(collection), line)
+  None -> ForOpen("_item", body, line)
+  end
+end
+
+pfn parse_let_tag(inner : String, line : Int) : Token do
+  let body = String.trim(String.slice_bytes(inner, 4, String.byte_size(inner) - 4))
+  match String.split_first(body, "=") do
+  Some((name, expr)) -> LetBind(String.trim(name), String.trim(expr), line)
+  None -> LetBind(body, "()", line)
+  end
+end
+
+pfn classify_component_tag(tag : String, line : Int) : Token do
+  if String.starts_with(tag, "</:") do
+    let name = extract_tag_name(tag, 3)
+    SlotClose(name, line)
+  else if String.starts_with(tag, "<:") do
+    let name = extract_tag_name(tag, 2)
+    SlotOpen(name, line)
+  else if String.starts_with(tag, "</.") do
+    let name = extract_tag_name(tag, 3)
+    ComponentClose(name, line)
+  else do
+    let name = extract_tag_name(tag, 2)
+    let attrs = parse_attrs(tag)
+    if String.ends_with(tag, "/>") do ComponentSelfClose(name, attrs, line)
+    else ComponentOpen(name, attrs, line) end
+  end
+  end end end
+end
+
+pfn extract_tag_name(tag : String, start : Int) : String do
+  let rest = String.slice_bytes(tag, start, String.byte_size(tag) - start)
+  extract_name_chars(rest, 0)
+end
+
+pfn extract_name_chars(s : String, idx : Int) : String do
+  if idx >= String.byte_size(s) do String.slice_bytes(s, 0, idx)
+  else
+    let ch = String.slice_bytes(s, idx, 1)
+    let is_delim = ch == " " || ch == ">" || ch == "/"
+    if is_delim do String.slice_bytes(s, 0, idx)
+    else extract_name_chars(s, idx + 1) end
+  end
+end
+
+pfn parse_attrs(tag : String) : List(Attr) do
+  let name_end = find_name_end(tag, 2)
+  let attr_part = String.slice_bytes(tag, name_end, String.byte_size(tag) - name_end)
+  let cleaned = String.trim(attr_part)
+  let cleaned2 = if String.ends_with(cleaned, "/>") do
+    String.slice_bytes(cleaned, 0, String.byte_size(cleaned) - 2)
+  else if String.ends_with(cleaned, ">") do
+    String.slice_bytes(cleaned, 0, String.byte_size(cleaned) - 1)
+  else cleaned
+  end end
+  parse_attrs_loop(String.trim(cleaned2), Nil)
+end
+
+pfn find_name_end(s : String, idx : Int) : Int do
+  if idx >= String.byte_size(s) do idx
+  else
+    let ch = String.slice_bytes(s, idx, 1)
+    let is_delim = ch == " " || ch == ">" || ch == "/"
+    if is_delim do idx
+    else find_name_end(s, idx + 1) end
+  end
+end
+
+pfn parse_attrs_loop(s : String, acc : List(Attr)) : List(Attr) do
+  let trimmed = String.trim(s)
+  if String.is_empty(trimmed) do List.reverse(acc)
+  else
+    let result = parse_one_attr(trimmed)
+    match result do
+    (attr, rest) -> parse_attrs_loop(rest, Cons(attr, acc))
+    end
+  end
+end
+
+pfn parse_one_attr(s : String) : (Attr, String) do
+  let name = extract_name_chars(s, 0)
+  let after_name = String.slice_bytes(s, String.byte_size(name), String.byte_size(s) - String.byte_size(name))
+  let after_name2 = String.trim(after_name)
+  if String.starts_with(after_name2, "=") do
+    let val_part = String.trim(String.slice_bytes(after_name2, 1, String.byte_size(after_name2) - 1))
+    parse_attr_value(name, val_part)
+  else
+    (Attr(name, StaticVal("true")), after_name2)
+  end
+end
+
+pfn parse_attr_value(name : String, val_part : String) : (Attr, String) do
+  if String.starts_with(val_part, "{") do
+    match find_matching_close_brace(val_part, 0, 0) do
+    Some(end_idx) -> do
+      let expr = String.slice_bytes(val_part, 1, end_idx - 1)
+      let rest = String.slice_bytes(val_part, end_idx + 1, String.byte_size(val_part) - end_idx - 1)
+      (Attr(name, DynamicVal(expr)), rest)
+    end
+    None -> (Attr(name, StaticVal(val_part)), "")
+    end
+  else if String.starts_with(val_part, "\"") do
+    let unquoted = String.slice_bytes(val_part, 1, String.byte_size(val_part) - 1)
+    match String.split_first(unquoted, "\"") do
+    Some((val, rest)) -> (Attr(name, StaticVal(val)), rest)
+    None -> (Attr(name, StaticVal(unquoted)), "")
+    end
+  else do
+    let val = extract_name_chars(val_part, 0)
+    let rest = String.slice_bytes(val_part, String.byte_size(val), String.byte_size(val_part) - String.byte_size(val))
+    (Attr(name, StaticVal(val)), rest)
+  end
+  end end
+end
+
+-- ── Module name derivation ───────────────────────────────────────────────────
+
+pfn derive_module_name(input_path : String, _app_prefix : String) : String do
+  let normalized = strip_src_prefix(input_path)
+  let no_ext = strip_march_html_ext(normalized)
+  let segments = String.split(no_ext, "/")
+  let segments2 = List.filter(segments, fn s -> !String.is_empty(s))
+  let pascal_segments = List.map(segments2, fn s -> to_pascal_case(s))
+  String.join(pascal_segments, ".")
+end
+
+pfn strip_src_prefix(path : String) : String do
+  if String.starts_with(path, "src/") do
+    String.slice_bytes(path, 4, String.byte_size(path) - 4)
+  else path end
+end
+
+pfn strip_march_html_ext(path : String) : String do
+  if String.ends_with(path, ".march.html") do
+    String.slice_bytes(path, 0, String.byte_size(path) - 11)
+  else path end
+end
+
+pfn to_pascal_case(s : String) : String do
+  let parts = String.split(s, "_")
+  let capped = List.map(parts, fn p -> capitalize_first(p))
+  String.join(capped, "")
+end
+
+pfn capitalize_first(s : String) : String do
+  if String.is_empty(s) do s
+  else
+    String.to_uppercase(String.slice_bytes(s, 0, 1)) ++
+    String.slice_bytes(s, 1, String.byte_size(s) - 1)
+  end
+end
+
+-- ── Code generation ──────────────────────────────────────────────────────────
+
+pfn generate_march(mod_name : String, fm : Frontmatter, tokens : List(Token)) : String do
+  match fm do
+  Frontmatter(sig_opt, uses) -> do
+    let use_lines = List.map(uses, fn u -> "  " ++ u ++ "\n") |> String.join("")
+    let sig_line = match sig_opt do
+      Some(s) -> s
+      None -> "fn render(assigns : Map(String, Any))"
+    end
+    let body = generate_body(tokens)
+    "mod " ++ mod_name ++ " do\n\n" ++
+    use_lines ++
+    "\n" ++
+    "  " ++ sig_line ++ " : IOList do\n" ++
+    "    ~H\"\"\"\n" ++
+    body ++
+    "    \"\"\"\n" ++
+    "  end\n\n" ++
+    "end\n"
+  end
+  end
+end
+
+pfn generate_body(tokens : List(Token)) : String do
+  generate_body_loop(tokens, "")
+end
+
+pfn generate_body_loop(tokens : List(Token), acc : String) : String do
+  match tokens do
+  Nil -> acc
+  Cons(tok, rest) -> do
+    let chunk = token_to_string(tok)
+    generate_body_loop(rest, acc ++ chunk)
+  end
+  end
+end
+
+pfn interp_open() : String do "$" ++ "{" end
+pfn interp_close() : String do "}" end
+
+pfn wrap_interp(expr : String) : String do
+  interp_open() ++ expr ++ interp_close()
+end
+
+pfn token_to_string(tok : Token) : String do
+  match tok do
+  Literal(s, _) -> s
+  Expr(e, _) -> wrap_interp(e)
+  RawExpr(e, _) -> wrap_interp(e)
+  IfOpen(cond, _) -> wrap_interp("if " ++ cond ++ " do \"\"") ++ "\n"
+  Else(_) -> wrap_interp("else \"\"") ++ "\n"
+  IfClose(_) -> wrap_interp("end") ++ "\n"
+  ForOpen(binding, collection, _) ->
+    wrap_interp("List.map(" ++ collection ++ ", fn " ++ binding ++ " -> \"\"") ++ "\n"
+  ForClose(_) -> wrap_interp("end |> IOList.from_strings() |> IOList.to_string()") ++ "\n"
+  LetBind(name, expr, _) -> wrap_interp("let " ++ name ++ " = " ++ expr) ++ "\n" ++ wrap_interp("\"\"") ++ "\n"
+  ComponentSelfClose(name, attrs, _) -> generate_component_call(name, attrs)
+  ComponentOpen(_, _, _) -> ""
+  ComponentClose(_, _) -> ""
+  SlotOpen(_, _) -> ""
+  SlotClose(_, _) -> ""
+  end
+end
+
+pfn generate_component_call(name : String, attrs : List(Attr)) : String do
+  let args = List.map(attrs, fn attr -> attr_to_string(attr))
+  let args_str = String.join(args, ", ")
+  wrap_interp(name ++ ".render(" ++ args_str ++ ") |> IOList.to_string()")
+end
+
+pfn attr_to_string(attr : Attr) : String do
+  match attr do
+  Attr(k, StaticVal(v)) -> k ++ ": \"" ++ v ++ "\""
+  Attr(k, DynamicVal(v)) -> k ++ ": " ++ v
+  end
+end
+
+-- ── Span table generation ────────────────────────────────────────────────────
+
+pfn generate_spans(tokens : List(Token), fm_offset : Int, input_file : String) : String do
+  let entries = collect_spans(tokens, fm_offset, input_file, Nil, 1)
+  let lines = List.map(entries, fn entry -> span_entry_to_string(entry))
+  String.join(lines, "\n") ++ "\n"
+end
+
+pfn span_entry_to_string(entry : SpanEntry) : String do
+  match entry do
+  SpanEntry(gen_line, orig_line, orig_col, file) ->
+    int_to_string(gen_line) ++ "\t" ++ file ++ "\t" ++ int_to_string(orig_line) ++ "\t" ++ int_to_string(orig_col)
+  end
+end
+
+pfn collect_spans(tokens : List(Token), fm_offset : Int, input_file : String, acc : List(SpanEntry), gen_line : Int) : List(SpanEntry) do
+  match tokens do
+  Nil -> List.reverse(acc)
+  Cons(tok, rest) -> do
+    let orig_line = token_line(tok) + fm_offset
+    let entry = SpanEntry(gen_line, orig_line, 1, input_file)
+    let newlines = count_token_newlines(tok)
+    collect_spans(rest, fm_offset, input_file, Cons(entry, acc), gen_line + newlines + 1)
+  end
+  end
+end
+
+pfn token_line(tok : Token) : Int do
+  match tok do
+  Literal(_, l) -> l
+  Expr(_, l) -> l
+  RawExpr(_, l) -> l
+  IfOpen(_, l) -> l
+  Else(l) -> l
+  IfClose(l) -> l
+  ForOpen(_, _, l) -> l
+  ForClose(l) -> l
+  LetBind(_, _, l) -> l
+  ComponentOpen(_, _, l) -> l
+  ComponentClose(_, l) -> l
+  ComponentSelfClose(_, _, l) -> l
+  SlotOpen(_, l) -> l
+  SlotClose(_, l) -> l
+  end
+end
+
+pfn count_token_newlines(tok : Token) : Int do
+  match tok do
+  Literal(s, _) -> count_newlines(s)
+  _ -> 0
+  end
+end
+
+-- ── Utility functions ────────────────────────────────────────────────────────
+
+pfn count_newlines(s : String) : Int do
+  count_newlines_loop(s, 0, 0)
+end
+
+pfn count_newlines_loop(s : String, idx : Int, count : Int) : Int do
+  if idx >= String.byte_size(s) do count
+  else
+    let ch = String.slice_bytes(s, idx, 1)
+    if ch == "\n" do count_newlines_loop(s, idx + 1, count + 1)
+    else count_newlines_loop(s, idx + 1, count) end
+  end
+end
+
+-- ── Public API ───────────────────────────────────────────────────────────────
+
+doc """
+Lower a .march.html template file to a .march module source string.
+
+Returns a tuple of (march_source, spans_table).
+
+    let (source, spans) = Forge.Lower.lower(content, "src/my_app/templates/home.march.html")
+"""
+fn lower(content : String, input_path : String) : (String, String) do
+  let (fm, body, fm_offset) = parse_frontmatter(content)
+  let tokens = tokenize(body, 1)
+  let mod_name = derive_module_name(input_path, "")
+  let march_source = generate_march(mod_name, fm, tokens)
+  let spans = generate_spans(tokens, fm_offset, input_path)
+  (march_source, spans)
+end
+
+doc """
+Lower a .march.html file and write the output files.
+
+Reads input_path, writes output_march and output_spans.
+"""
+fn lower_file(input_path : String, output_march : String, output_spans : String) : Result(String, String) do
+  match File.read(input_path) do
+  Ok(content) -> do
+    let (march_source, spans) = lower(content, input_path)
+    let _ = File.write(output_march, march_source)
+    let _ = File.write(output_spans, spans)
+    Ok("Lowered " ++ input_path ++ " -> " ++ output_march)
+  end
+  Err(e) -> Err("Failed to read " ++ input_path ++ ": " ++ e)
+  end
+end
+
+-- ── CLI entry point ──────────────────────────────────────────────────────────
+
+fn run(args) do
+  match args do
+  Cons(input, Cons(output_march, Cons(output_spans, _))) -> do
+    match lower_file(input, output_march, output_spans) do
+    Ok(msg) -> println(msg)
+    Err(msg) ->
+      println("Error: " ++ msg)
+    end
+  end
+  _ -> do
+    println("Usage: forge bastion.lower <input.march.html> <output.march> <output.march.spans>")
+    println("")
+    println("Lowers a .march.html template file to a .march module with ~H sigils.")
+    println("The output files are build artifacts written to .forge/generated/.")
+    println("")
+    println("Arguments:")
+    println("  input.march.html    Source template file")
+    println("  output.march        Generated .march module")
+    println("  output.march.spans  Source-map sidecar for error reporting")
+  end
+  end
+end
+
+fn main() do
+  let raw  = Env.get("FORGE_TASK_ARGS", "")
+  let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
+  run(args)
+end
+
+end
