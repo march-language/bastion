@@ -11,13 +11,13 @@ Derived from [open-questions.md](open-questions.md), the individual spec files, 
 The most impactful unblocked work. These are preconditions for most other features.
 
 - [x] ~~**`~H` triple-quoted sigil**~~ — **Not a blocker.** `read_triple_string` in the lexer returns the same `STRING` token as regular strings; the existing `SIGIL_PREFIX STRING` parser rule already handles `~H"""..."""`. No fix needed.
-- [ ] **`.march.spans` sidecar support** (March compiler) — Accept a span-override sidecar file alongside a `.march` source so the lowering pass can map generated node positions back to `.march.html` line/col. Errors then report positions in the original template file. See [template-file-format.md](template-file-format.md) §Layer 1b.
+- [x] **`.march.spans` sidecar support** (March compiler) — **Already in compiler.** `lib/ast/span_remap.ml` loads the `.march.spans` sidecar, parses tab-separated gen→orig mappings, and remaps all AST spans before error reporting. `main.ml` calls it automatically. No Bastion work needed.
 - [x] ~~**`[preprocessors]` hook in forge**~~ — Already in `forge.toml` as `[preprocessors] ".march.html" = "bastion lower"`.
 - [x] ~~**`bastion lower` CLI subcommand**~~ — Implemented in `lib/forge/lower.march`.
 - [x] ~~**`Html` runtime module**~~ — Implemented in `lib/html.march`.
 - [x] ~~**`IOList` runtime module**~~ — Implemented in `lib/io_list.march`.
 - [x] ~~**`Css.style/1` helper**~~ — Implemented in `lib/css.march`.
-- [ ] **Islands data flow implementation** — Implement the `Server` / `Client` dataflow modes, parent-child prop binding, and explicit event dispatch as specced in [islands-data-flow.md](islands-data-flow.md). Depends on `~H` for template rendering in islands.
+- [ ] **Islands data flow implementation** — Implement the `Server` / `Client` dataflow modes, parent-child prop binding, and explicit event dispatch as specced in [islands-data-flow.md](islands-data-flow.md). `~H` compiler lowering is now confirmed done (desugar pass in March); unblocked.
 - [x] **Kill `window.marchIslands.send` global bus** — The rewritten `march-islands.js` never exposed a global send bus; `window.__bastionIslands` is debug-only. Parent-child dispatch and channel push are the only send paths.
 - [x] **Channel server implementation** — `lib/pubsub.march` (`Bastion.PubSub`), `lib/channel.march` (`Bastion.Channel`), `lib/channel_server.march` (`Bastion.ChannelServer`), `lib/test_channel.march` (`Bastion.Test.Channel`); Vault-backed PubSub, multiplexed topic WS loop, join/leave/handle_in dispatch, test interception helpers.
 - [ ] **Auth/session/database stack** — See [auth-session-database.md](auth-session-database.md) for the full sequenced plan, API design, error handling, security checklist, and end-to-end example. Build in this order:

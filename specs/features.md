@@ -79,12 +79,12 @@ Specced and designed but not yet fully implemented. These are the active build a
 
 | Feature | Spec | Status | Blocker |
 |---------|------|--------|---------|
-| `~H` templates | [templates.md](templates.md) | Runtime modules done (`html.march`, `io_list.march`, `css.march`); template lowering pass + `bastion lower` CLI done; sigil parsing works | Needs compiler `~H` pass to lower templates at compile time; `.march.spans` sidecar for error reporting not yet in compiler |
-| `.march.html` template files | [template-file-format.md](template-file-format.md) | All Bastion layers implemented | `.march.spans` sidecar support needs March compiler change (span map for error line reporting); otherwise all done |
+| `~H` templates | [templates.md](templates.md) | Runtime modules done (`html.march`, `io_list.march`, `css.march`); template lowering pass + `bastion lower` CLI done | **Compiler pass confirmed done** — `desugar.ml` lowers `~H` sigils to `IOList.from_strings(...)`, handles `<island>` tags, injects CSRF tokens, XSS-escapes interpolations. No compiler work remaining. Bastion-side component system (`<.Component>`) still needs implementing. |
+| `.march.html` template files | [template-file-format.md](template-file-format.md) | All Bastion layers implemented | **Fully unblocked** — `span_remap.ml` loads `.march.spans` sidecar and remaps all AST spans before error reporting. Done. |
 | WASM island compilation | [wasm-islands.md](wasm-islands.md) | **JS runtime complete** | All JS-side work done (hydration strategies, `march_island_msg_from_name`, Cmd executor, FFI layer, public API); pending: end-to-end integration test |
-| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete; server-side (ChannelServer, PubSub, Channel) and JS client runtime done | Bastion.Cmd + islands-data-flow runtime path needs `~H` templates for server-driven rendering |
-| Channels / WebSocket | [channels.md](channels.md) | Server + PubSub + test helpers fully implemented | Client-side channel hook in islands depends on `~H` templates for Server-mode island rendering |
-| CSP nonce injection | [csp.md](csp.md) | Draft spec | Depends on `~H` compiler pass for automatic nonce injection |
+| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete; server-side (ChannelServer, PubSub, Channel) and JS client runtime done | **Unblocked** — `~H` compiler lowering confirmed done; Server-mode island rendering path can now be implemented |
+| Channels / WebSocket | [channels.md](channels.md) | Server + PubSub + test helpers fully implemented | **Unblocked** — Server-mode island rendering via `~H` now available |
+| CSP nonce injection | [csp.md](csp.md) | Draft spec | **Unblocked** — `~H` compiler pass confirmed done; nonce injection can be added to desugar pass or Bastion middleware |
 | Route verification | [route-verification.md](route-verification.md) | Draft spec | Needs compiler integration for route helper generation |
 
 ---
