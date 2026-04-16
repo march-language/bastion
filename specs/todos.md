@@ -62,6 +62,13 @@ Specced and queued. Roughly priority order within each group.
 - [ ] HTTP ETag + response caching ([caching.md](caching.md))
 - [ ] Fragment caching ([caching.md](caching.md))
 
+### Forms
+- [ ] `Bastion.Form` render helpers — `form_tag`, `input_tag`, `error_tag` (low-level, used by `~H` components)
+- [ ] `<.form>`, `<.input>`, `<.select>`, `<.textarea>`, `<.field>`, `<.error>` components ([form-handling.md](form-handling.md))
+- [ ] `<.flash_group>` component — reads and clears session flash ([form-handling.md](form-handling.md))
+- [ ] `put_flash/3`, `get_flash/2`, `clear_flash/1` in `lib/session.march` ([form-handling.md](form-handling.md))
+- [ ] Enhanced form JS — intercept `<form enhance>` submit, POST via fetch, swap fragment ([form-handling.md](form-handling.md))
+
 ### Templates & Styling
 - [ ] `~H` template component system — components as functions, XSS prevention ([templates.md](templates.md))
 - [ ] `~CSS` scoped island CSS ([css-styling.md](css-styling.md))

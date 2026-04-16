@@ -74,6 +74,12 @@ Full specs exist. Implementation is queued but not yet started.
 - Depot integration — pool middleware, `after_send` checkin, context modules, migrations ([auth-session-database.md](auth-session-database.md) Layer 2, [depot-integration.md](depot-integration.md))
 - Caching — ETags, response caching, fragment caching ([caching.md](caching.md))
 
+### Forms
+- Plain server-side forms with `Depot.Gate` validation and built-in `<.form>`, `<.input>` components ([form-handling.md](form-handling.md))
+- Enhanced fetch forms — progressive `enhance` attribute, fragment re-render without full-page reload ([form-handling.md](form-handling.md))
+- Island forms with shared WASM/server validation — same `validate/1` function compiles to both targets ([form-handling.md](form-handling.md))
+- Flash messages — session-backed, consumed on render, `<.flash_group>` component ([form-handling.md](form-handling.md))
+
 ### Templates & Styling
 - `~CSS` sigil — scoped island CSS with compile-time extraction ([css-styling.md](css-styling.md))
 - CSS variables for theming ([css-styling.md](css-styling.md))
