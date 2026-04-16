@@ -55,6 +55,10 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Structured logging | `logger.march` | `Logger.debug/info/warn/error(msg, meta)` + `*_conn/3` helpers; human format `HH:MM:SS.mmm [level] msg  k=v` (dev) or JSON one-liner (prod) via MARCH_ENV |
 | Request ID middleware | `middleware.march` | `Middleware.request_id` upgraded: `Crypto.generate_token(16)` for new IDs, echoes `x-request-id` response header; `Middleware.logger` uses `Logger.info` with request_id in meta |
 | Enhanced form JS | `priv/js/form-enhance.js` | `data-enhance` attribute intercepts POST → fetch; morphs response fragment; follows redirects as full-page nav |
+| PubSub | `pubsub.march` | `Bastion.PubSub`: `subscribe`, `unsubscribe`, `unsubscribe_all`, `broadcast`, `broadcast_from`; Vault-backed send_fn registry; inline delivery |
+| Channel connection | `channel.march` | `Bastion.Channel`: `ChannelConn` type; `assign`, `get_assign`, `push`, `broadcast_from`, `sub_id`; used by both server and test helpers |
+| Channel server | `channel_server.march` | `Bastion.ChannelServer`: `add_route`, `plug`, `plug_at`; multiplexed topic WS loop; join/leave/heartbeat/handle_in; PubSub integration |
+| Channel test helpers | `test_channel.march` | `Bastion.Test.Channel`: `join/3`, `push/4`, `intercept/1`, `assert_broadcast/3`, `refute_broadcast/3`, `captured_broadcasts/1` |
 
 ---
 
@@ -68,7 +72,7 @@ Specced and designed but not yet fully implemented. These are the active build a
 | `.march.html` template files | [template-file-format.md](template-file-format.md) | All layers implemented | Triple-quoted `~H` sigils work; `[preprocessors]` in forge; `.march.spans` sidecar in compiler; lowering pass + runtime in Bastion |
 | WASM island compilation | [wasm-islands.md](wasm-islands.md) | Near-complete | Compiler target done; JS runtime ~95% done. Remaining: deferred hydration strategies (lazy/idle/on-visible/on-interaction) + `march_island_msg_from_name` wiring |
 | Islands data flow | [islands-data-flow.md](islands-data-flow.md) | Design complete | Depends on `~H` templates; WASM compiler blocker resolved |
-| Channels / WebSocket | [channels.md](channels.md) | Draft spec | Needs Channel server implementation |
+| Channels / WebSocket | [channels.md](channels.md) | Server + PubSub implemented | Client-side island integration depends on `~H` templates |
 | CSP nonce injection | [csp.md](csp.md) | Draft spec | Depends on `~H` for automatic nonce injection |
 | Route verification | [route-verification.md](route-verification.md) | Draft spec | Needs compiler integration for route helper generation |
 

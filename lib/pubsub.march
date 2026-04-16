@@ -1,0 +1,141 @@
+-- lib/pubsub.march — In-process publish/subscribe for Bastion.
+--
+-- PubSub provides topic-based broadcast within a single node.  It is the
+-- delivery layer for Channel broadcasts and any other real-time fan-out the
+-- framework or user code needs.
+--
+-- Subscriptions are stored in a Vault table keyed by topic.  Each entry is a
+-- list of (subscriber_id, send_fn) pairs.  Broadcasting a message iterates
+-- the list and calls each send_fn inline.  This means broadcasts happen in
+-- the caller's execution context — there is no separate queue or thread.
+--
+-- ── Usage ─────────────────────────────────────────────────────────────────────
+--
+--   -- Subscribe to a topic (typically done inside a WebSocket loop):
+--   let sub_id = "conn:" ++ conn_id ++ ":" ++ topic
+--   Bastion.PubSub.subscribe(topic, sub_id, fn (event, payload_json) ->
+--     WebSocket.send_frame(ws, TextFrame(make_frame(topic, event, payload_json)))
+--   )
+--
+--   -- Broadcast from a channel handler:
+--   Bastion.PubSub.broadcast("room:42", "message:new", "{\"body\":\"hello\"}")
+--
+--   -- Broadcast excluding the sender:
+--   Bastion.PubSub.broadcast_from(conn_id, "room:42", "typing", "{}")
+
+mod Bastion.PubSub do
+
+  import Vault
+
+  -- Vault table: topic → List((sub_id, send_fn))
+  -- send_fn signature: (event : String, payload_json : String) -> ()
+  let table_name = "_bastion_pubsub"
+
+  -- ── Subscription management ───────────────────────────────────────────────
+
+  doc """
+  Subscribe to a topic with a delivery callback.
+
+  sub_id    — unique string identifying this subscription (e.g. "conn:abc123:room:42")
+  send_fn   — fn(event, payload_json) called on each broadcast to this topic
+
+  If sub_id is already subscribed, the old send_fn is replaced.
+  """
+  fn subscribe(topic : String, sub_id : String, send_fn) do
+    let table   = Vault.open(table_name)
+    let current = Vault.get_or(table, topic, [])
+    let pruned  = List.filter(current, fn pair ->
+      let (id, _) = pair
+      id != sub_id
+    )
+    Vault.put(table, topic, Cons((sub_id, send_fn), pruned))
+  end
+
+  doc """
+  Unsubscribe from a topic.  No-op if sub_id is not registered.
+  """
+  fn unsubscribe(topic : String, sub_id : String) do
+    let table   = Vault.open(table_name)
+    let current = Vault.get_or(table, topic, [])
+    let pruned  = List.filter(current, fn pair ->
+      let (id, _) = pair
+      id != sub_id
+    )
+    Vault.put(table, topic, pruned)
+  end
+
+  doc """
+  Remove all subscriptions held by a connection across every topic.
+  Call this when a WebSocket connection closes to avoid stale send_fns.
+
+  Iterates every topic in the PubSub table — O(topics).  Fine for typical
+  connection counts; revisit if topics grow into the millions.
+  """
+  fn unsubscribe_all(conn_id : String) do
+    let table  = Vault.open(table_name)
+    let topics = Vault.keys(table)
+    List.each(topics, fn topic ->
+      let current = Vault.get_or(table, topic, [])
+      let pruned  = List.filter(current, fn pair ->
+        let (id, _) = pair
+        !String.starts_with(id, "conn:" ++ conn_id ++ ":")
+      )
+      Vault.put(table, topic, pruned)
+    )
+  end
+
+  -- ── Broadcasting ──────────────────────────────────────────────────────────
+
+  doc """
+  Broadcast an event to all subscribers of a topic.
+
+  Calls each subscriber's send_fn inline.  If a send_fn raises, the
+  remaining subscribers still receive the broadcast (errors are isolated).
+
+      Bastion.PubSub.broadcast("room:42", "message:new", "{\"body\":\"hi\"}")
+  """
+  fn broadcast(topic : String, event : String, payload_json : String) do
+    deliver(topic, None, event, payload_json)
+  end
+
+  doc """
+  Broadcast an event to all subscribers of a topic, excluding one subscriber.
+
+  Use this from a channel handler to avoid echoing a message back to the
+  connection that originated it.
+
+      Bastion.PubSub.broadcast_from(sub_id, "room:42", "typing:start", "{}")
+  """
+  fn broadcast_from(exclude_sub_id : String, topic : String, event : String, payload_json : String) do
+    deliver(topic, Some(exclude_sub_id), event, payload_json)
+  end
+
+  -- ── Internal delivery ─────────────────────────────────────────────────────
+
+  pfn deliver(topic : String, exclude : Option(String), event : String, payload_json : String) do
+    let table = Vault.open(table_name)
+    let subs  = Vault.get_or(table, topic, [])
+    List.each(subs, fn pair ->
+      let (id, send_fn) = pair
+      let skip = match exclude do
+        None    -> false
+        Some(x) -> x == id
+      end
+      if !skip do send_fn(event, payload_json) end
+    )
+  end
+
+  -- ── Introspection (useful for tests) ─────────────────────────────────────
+
+  doc "Return the number of active subscribers for a topic."
+  fn subscriber_count(topic : String) : Int do
+    let table = Vault.open(table_name)
+    List.length(Vault.get_or(table, topic, []))
+  end
+
+  doc "Return true if any subscriber is registered for a topic."
+  fn has_subscribers(topic : String) : Bool do
+    subscriber_count(topic) > 0
+  end
+
+end

@@ -19,7 +19,7 @@ The most impactful unblocked work. These are preconditions for most other featur
 - [x] ~~**`Css.style/1` helper**~~ — Implemented in `lib/css.march`.
 - [ ] **Islands data flow implementation** — Implement the `Server` / `Client` dataflow modes, parent-child prop binding, and explicit event dispatch as specced in [islands-data-flow.md](islands-data-flow.md). Depends on `~H` for template rendering in islands.
 - [ ] **Kill `window.marchIslands.send` global bus** — Replace with the parent-child dispatch model from [islands-data-flow.md](islands-data-flow.md). See wasm-islands.md current design.
-- [ ] **Channel server implementation** — Spec is complete ([channels.md](channels.md)), implementation needed. Unblocks: island-to-server sync, real-time features, Presence.
+- [x] **Channel server implementation** — `lib/pubsub.march` (`Bastion.PubSub`), `lib/channel.march` (`Bastion.Channel`), `lib/channel_server.march` (`Bastion.ChannelServer`), `lib/test_channel.march` (`Bastion.Test.Channel`); Vault-backed PubSub, multiplexed topic WS loop, join/leave/handle_in dispatch, test interception helpers.
 - [ ] **Auth/session/database stack** — See [auth-session-database.md](auth-session-database.md) for the full sequenced plan, API design, error handling, security checklist, and end-to-end example. Build in this order:
   - [x] Step 0: Conn prerequisites — `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `get_form_param` added to `lib/conn.march`
   - [x] Step 0b: Wire `Conn.after_send_hooks` dispatch in `bastion_server.march`; call `Session.commit_from_conn` for "session_commit" hook
@@ -99,7 +99,7 @@ Specced and queued. Roughly priority order within each group.
 - [x] `forge gen.migration` — `lib/forge/gen_migration.march`; generates timestamped migration stub
 
 ### Testing
-- [ ] Channel testing helpers ([testing.md](testing.md))
+- [x] Channel testing helpers — `lib/test_channel.march`: `join/3`, `push/4`, `intercept/1`, `assert_broadcast/3`, `refute_broadcast/3`, `captured_broadcasts/1`, `assert_assign/3`
 - [ ] Island integration tests (SSR + update, no WASM) ([testing.md](testing.md))
 
 ### Operations

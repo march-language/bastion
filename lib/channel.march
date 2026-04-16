@@ -1,0 +1,148 @@
+-- lib/channel.march — Bastion.Channel: connection type and helpers for channel handlers.
+--
+-- Channel handlers are ordinary March modules that implement three functions:
+--
+--   fn join(conn, topic, params_json) : Result(ChannelConn, String)
+--   fn handle_in(conn, event, payload_json) : ChannelConn
+--   fn handle_out(conn, event, payload_json) : Result(ChannelConn, String)
+--
+-- A ChannelConn flows through every callback, carrying user-set assigns,
+-- the joined topic, the connection's unique ID, and a push function for
+-- sending server-initiated messages back to this client.
+--
+-- ── Minimal channel handler ───────────────────────────────────────────────────
+--
+--   mod MyApp.RoomChannel do
+--     import Bastion.Channel
+--
+--     fn join(conn, topic, _params) do
+--       let room_id = String.replace_prefix(topic, "room:", "")
+--       conn
+--       |> Channel.assign("room_id", room_id)
+--       |> Ok()
+--     end
+--
+--     fn handle_in(conn, "message:new", payload_json) do
+--       Bastion.PubSub.broadcast(Channel.topic(conn), "message:new", payload_json)
+--       conn
+--     end
+--     fn handle_in(conn, _event, _payload) do conn end
+--
+--     fn handle_out(conn, _event, _payload) do Ok(conn) end
+--   end
+
+mod Bastion.Channel do
+
+  -- ── ChannelConn ───────────────────────────────────────────────────────────
+  --
+  --   assigns    — user key/value string pairs; set with Channel.assign/3
+  --   topic      — the topic this conn is joined to (e.g. "room:42")
+  --   conn_id    — unique ID for the underlying WebSocket connection
+  --   push_fn    — delivers an event directly to this client's socket
+
+  type ChannelConn = {
+    assigns : List((String, String)),
+    topic   : String,
+    conn_id : String,
+    push_fn : (String, String) -> ()
+  }
+
+  -- ── Constructor (framework-internal) ─────────────────────────────────────
+
+  doc """
+  Build a new ChannelConn.  Called by Bastion.ChannelServer when a join is
+  accepted; user code does not normally need to call this directly.
+  """
+  fn new_conn(topic : String, conn_id : String, push_fn : (String, String) -> ()) : ChannelConn do
+    { assigns = [], topic = topic, conn_id = conn_id, push_fn = push_fn }
+  end
+
+  -- ── Assigns ───────────────────────────────────────────────────────────────
+
+  doc """
+  Store a string key/value in the channel connection assigns.
+
+  Replaces any existing value with the same key.
+
+      conn |> Channel.assign("room_id", "42")
+           |> Channel.assign("role", "moderator")
+  """
+  fn assign(cc : ChannelConn, key : String, value : String) : ChannelConn do
+    let pruned = List.filter(cc.assigns, fn pair ->
+      let (k, _) = pair
+      k != key
+    )
+    { cc with assigns = Cons((key, value), pruned) }
+  end
+
+  doc """
+  Look up an assign by key.  Returns Some(value) or None.
+
+      Channel.get_assign(conn, "room_id")   -- Some("42") or None
+  """
+  fn get_assign(cc : ChannelConn, key : String) : Option(String) do
+    find_assign(cc.assigns, key)
+  end
+
+  -- ── Accessors ─────────────────────────────────────────────────────────────
+
+  doc "Return the joined topic string (e.g. \"room:42\")."
+  fn topic(cc : ChannelConn) : String do cc.topic end
+
+  doc "Return the unique connection ID used to identify this socket in PubSub."
+  fn conn_id(cc : ChannelConn) : String do cc.conn_id end
+
+  -- ── Direct push ───────────────────────────────────────────────────────────
+
+  doc """
+  Push an event directly to this connection's client.
+
+  Use in handle_in to reply to only the sender, rather than broadcasting to
+  all topic subscribers.
+
+      conn |> Channel.push("error", "{\"code\":\"not_found\"}")
+  """
+  fn push(cc : ChannelConn, event : String, payload_json : String) do
+    cc.push_fn(event, payload_json)
+    cc
+  end
+
+  -- ── PubSub convenience ────────────────────────────────────────────────────
+
+  doc """
+  Broadcast an event to all subscribers of a topic, excluding this connection.
+
+  Shorthand for `Bastion.PubSub.broadcast_from/4` using this conn's ID.
+
+      conn |> Channel.broadcast_from("room:42", "typing:start", "{}")
+  """
+  fn broadcast_from(cc : ChannelConn, topic_ : String, event : String, payload_json : String) do
+    Bastion.PubSub.broadcast_from(sub_id_for(cc, topic_), topic_, event, payload_json)
+    cc
+  end
+
+  -- ── Subscription ID ───────────────────────────────────────────────────────
+
+  doc """
+  Return the subscription ID used when registering with PubSub for a topic.
+  Format: "conn:<conn_id>:<topic>"
+  """
+  fn sub_id(cc : ChannelConn, topic_ : String) : String do
+    sub_id_for(cc, topic_)
+  end
+
+  -- ── Private helpers ───────────────────────────────────────────────────────
+
+  pfn find_assign(assigns : List((String, String)), key : String) : Option(String) do
+    match assigns do
+    []                   -> None
+    Cons((k, v), rest)   ->
+      if k == key do Some(v) else find_assign(rest, key) end
+    end
+  end
+
+  pfn sub_id_for(cc : ChannelConn, topic_ : String) : String do
+    "conn:" ++ cc.conn_id ++ ":" ++ topic_
+  end
+
+end
