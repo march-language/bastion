@@ -47,9 +47,9 @@ Bastion occupies a similar space to Phoenix in the Elixir ecosystem — opiniona
 
 | Document | Description |
 |---|---|
-| [auth-session-database.md](auth-session-database.md) | **Implementation plan** — build sequence, dependency order, API design for the full auth/session/database stack |
-| [auth.md](auth.md) | Session system, auth generators (session/token/OAuth/magic_link), generated auth middleware |
-| [security.md](security.md) | CSRF protection, security headers, CSP, CORS, rate limiting, request size limits, HTTPS redirect |
+| [auth-session-database.md](auth-session-database.md) | **Canonical implementation plan** — 8-layer build sequence (conn prerequisites → crypto → depot → sessions → CSRF → auth → generators); API design with full March code; flash messages; remember-me tokens; password reset; rate limiting; error handling; configuration; testing strategy; end-to-end example; security checklist |
+| [auth.md](auth.md) | High-level auth overview — session config options, generator strategies; see auth-session-database.md for the full implementation plan |
+| [security.md](security.md) | Security defaults, CSRF overview, security headers, CSP, CORS, rate limiting overview, HTTPS redirect; see auth-session-database.md for implementation details |
 
 ### Storage and Caching
 

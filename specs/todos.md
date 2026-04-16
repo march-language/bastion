@@ -20,16 +20,19 @@ The most impactful unblocked work. These are preconditions for most other featur
 - [ ] **Islands data flow implementation** — Implement the `Server` / `Client` dataflow modes, parent-child prop binding, and explicit event dispatch as specced in [islands-data-flow.md](islands-data-flow.md). Depends on `~H` for template rendering in islands.
 - [ ] **Kill `window.marchIslands.send` global bus** — Replace with the parent-child dispatch model from [islands-data-flow.md](islands-data-flow.md). See wasm-islands.md current design.
 - [ ] **Channel server implementation** — Spec is complete ([channels.md](channels.md)), implementation needed. Unblocks: island-to-server sync, real-time features, Presence.
-- [ ] **Auth/session/database stack** — See [auth-session-database.md](auth-session-database.md) for the full sequenced plan. Build in this order:
-  - [ ] Step 1: `lib/crypto.march` — random bytes, HMAC, AES-256-GCM, Argon2id password hashing
-  - [ ] Step 2: `lib/depot_middleware.march` — `with_pool`, after-send pool checkin hook on conn
-  - [ ] Step 3: `lib/session.march` — cookie session: load, commit, get/put/delete/clear
-  - [ ] Step 4: `lib/csrf.march` — token generation, `tag_string` runtime (called by ~H desugarer), validation middleware
-  - [ ] Step 5: `lib/auth_middleware.march` — `load_current_user`, `require_auth`, `log_in`, `log_out`
-  - [ ] Step 6: `lib/vault.march` — in-memory KV actor, TTL sweeper (core API only: put/get/delete/put_new)
-  - [ ] Step 7: `forge gen.auth session` generator — User migration, Accounts context, AuthController, login/register templates
-  - [ ] Step 8: Depot migrations + `forge depot.migrate` / `forge depot.rollback`
-  - [ ] Step 9: `Bastion.Test.Depot.checkout` — per-test transaction rollback sandbox
+- [ ] **Auth/session/database stack** — See [auth-session-database.md](auth-session-database.md) for the full sequenced plan, API design, error handling, security checklist, and end-to-end example. Build in this order:
+  - [ ] Step 0: Conn prerequisites — add `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `run_after_send`, `get_form_param` to `lib/conn.march`; call `run_after_send` in `bastion_server.march`
+  - [ ] Step 1: `lib/crypto.march` — `random_bytes`, `secure_compare`, `sha256`, `hkdf`, AES-256-GCM encrypt/decrypt, HMAC-SHA256 sign/verify, Argon2id `hash_password`/`verify_password`
+  - [ ] Step 2: `lib/depot_middleware.march` — `with_pool`, `after_send` pool checkin (uses Step 0 `register_after_send`)
+  - [ ] Step 3: `lib/session.march` — cookie session with real AES-256-GCM + HMAC (replaces typed_middleware stubs); auto-commit in `send_resp`
+  - [ ] Step 4: `lib/flash.march` — `put`, `get`, `load_flash`, `clear`; one-time session messages
+  - [ ] Step 5: `lib/csrf.march` — token generation, `tag_string` runtime (called by ~H desugarer), validation middleware, `skip/1`
+  - [ ] Step 6: `lib/auth_middleware.march` — `load_current_user`, `require_auth`, `authenticated`, `log_in` (with remember-me), `log_out`
+  - [ ] Step 7: `lib/vault.march` — in-memory KV actor, TTL sweeper (core API only: `put/get/delete/put_new`)
+  - [ ] Step 8: `lib/rate_limit.march` — sliding window rate limiter backed by Vault; `x-ratelimit-*` headers; 429 response
+  - [ ] Step 9: Depot migrations — `forge depot.migrate` / `forge depot.rollback`; `schema_migrations` table
+  - [ ] Step 10: `forge gen.auth session` generator — `users` + `user_tokens` migrations; Accounts context (`authenticate`, `create_remember_token`, `create_reset_token`, `reset_password`); AuthController (login, logout, register, password reset); templates; router patch; rate limiting wired to login/register/reset routes
+  - [ ] Step 11: `Bastion.Test.Depot.checkout` test sandbox + `Bastion.Test.Auth.log_in_user` helper
 
 ---
 
@@ -53,9 +56,8 @@ Specced and queued. Roughly priority order within each group.
 ### Auth, Security & Storage
 - [ ] Security headers middleware — HSTS, X-Frame-Options, X-Content-Type-Options ([security.md](security.md))
 - [ ] CORS middleware ([security.md](security.md))
-- [ ] Rate limiting — uses Vault; implement after Step 6 above ([security.md](security.md))
 - [ ] `forge gen.auth token / oauth / magic_link` — post-v1 auth strategies ([auth.md](auth.md))
-- [ ] Vault full API — bags, ordered sets, bulk ops; after core Vault (Step 6) ships ([vault.md](vault.md))
+- [ ] Vault full API — bags, ordered sets, bulk ops; after core Vault (Step 7) ships ([vault.md](vault.md))
 - [ ] Vault/Depot session backends — alternative to cookie sessions ([auth-session-database.md](auth-session-database.md))
 - [ ] HTTP ETag + response caching ([caching.md](caching.md))
 - [ ] Fragment caching ([caching.md](caching.md))

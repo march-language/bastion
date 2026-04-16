@@ -2,6 +2,8 @@
 
 **Status**: Draft | **Version**: 0.1 | **Part of**: [Bastion Design Spec](README.md)
 
+> **CSRF and rate limiting implementation details are in [auth-session-database.md](auth-session-database.md)** (Layers 5 and 5b respectively). This file provides the high-level security overview and specifies the other security features (headers, CSP, CORS, HTTPS redirect, request size limits).
+
 ---
 
 ## Philosophy

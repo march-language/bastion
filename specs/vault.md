@@ -2,6 +2,8 @@
 
 **Status**: Draft | **Version**: 0.1 | **Part of**: [Bastion Design Spec](README.md)
 
+> **See [auth-session-database.md](auth-session-database.md) Layer 3b** for the v1 implementation scope and actor design. The full API below is this file's long-term target; v1 ships only `put/get/delete/put_new` plus the TTL sweeper. The rate limiting integration (Layer 5b) shows the primary v1 use case.
+
 ---
 
 ## Overview
