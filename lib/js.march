@@ -1,0 +1,303 @@
+-- lib/js.march — Bastion.JS: WASM → JavaScript FFI interface.
+--
+-- Provides typed wrappers for calling JavaScript from WASM island modules.
+-- Use this when the built-in Cmd system doesn't cover a specific browser API.
+--
+-- ── How it works ──────────────────────────────────────────────────────────────
+--
+-- March islands compile to wasm32-unknown-unknown.  JavaScript objects cannot
+-- be passed directly across the WASM boundary.  Bastion uses an opaque handle
+-- table: JS objects are stored in a JS-side registry and identified by integer
+-- handles (JsRef values).  WASM code passes handles back to JS for further
+-- operations.
+--
+-- The March compiler emits `import "bastion" "js_*"` declarations for these
+-- FFI functions, and wasm-bridge.js provides the corresponding imports.
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   import Bastion.JS as JS
+--   import Bastion.Cmd as Cmd
+--
+--   -- Read the clipboard using raw JS FFI
+--   fn update(state, CopyText) do
+--     let _ = JS.call("navigator.clipboard.writeText", [JS.string_val(state.text)])
+--     (state, Cmd.none())
+--   end
+--
+--   -- Query the DOM and read an attribute
+--   fn update(state, ReadInput) do
+--     let input = JS.query_selector("#search-input")
+--     let value = match input do
+--       Some(el) -> Option.unwrap_or(JS.get_attribute(el, "value"), "")
+--       None     -> ""
+--     end
+--     ({ state | query = value }, Cmd.none())
+--   end
+--
+-- ── Note on closures ──────────────────────────────────────────────────────────
+--
+-- JS.add_event_listener accepts a callback function.  The callback runs
+-- inside the JS event loop and must be a simple function (no captures from
+-- the island state) — the March compiler enforces this at the boundary.
+-- For reactive updates, prefer data-on-* HTML attributes or Cmd.after/every.
+
+mod Bastion.JS do
+
+  -- ── Types ──────────────────────────────────────────────────────────────────
+
+  doc """
+  An opaque handle to a JavaScript value held in the JS-side object table.
+  JsRef values are created by JS calls and must be passed back to JS for
+  further operations; they cannot be inspected from March code.
+
+  JsRef 0 is the null/undefined sentinel.
+  """
+  type JsRef = JsRef(Int)
+
+  doc "A typed variant of JsRef representing a DOM element."
+  type JsElement = JsElement(JsRef)
+
+  doc "A typed variant of JsRef representing a browser Event object."
+  type JsEvent = JsEvent(JsRef)
+
+  -- ── Value constructors ────────────────────────────────────────────────────
+
+  doc "The null JS value (JsRef 0)."
+  fn null_val() : JsRef do
+    JsRef(0)
+  end
+
+  doc "Wrap a March String as a JsRef argument for JS.call."
+  fn string_val(s : String) : JsRef do
+    _js_string_to_ref(s)
+  end
+
+  doc "Wrap a March Int as a JsRef argument."
+  fn int_val(n : Int) : JsRef do
+    _js_int_to_ref(n)
+  end
+
+  doc "Wrap a March Bool as a JsRef argument."
+  fn bool_val(b : Bool) : JsRef do
+    _js_bool_to_ref(b)
+  end
+
+  doc """
+  Wrap a March String as a JSON value for JS.call.
+  Serializes the string as a JSON object, useful for passing complex data.
+  """
+  fn json_val(json_str : String) : JsRef do
+    _js_json_to_ref(json_str)
+  end
+
+  -- ── Value extraction ──────────────────────────────────────────────────────
+
+  doc """
+  Extract a string from a JsRef.  Returns None if the JS value is not a string,
+  is null, or is undefined.
+  """
+  fn to_string(ref : JsRef) : Option(String) do
+    let JsRef(handle) = ref
+    if handle == 0 do None
+    else _js_ref_to_string(ref)
+    end
+  end
+
+  doc "Extract a number from a JsRef as an Int.  Returns None if not a number."
+  fn to_int(ref : JsRef) : Option(Int) do
+    let JsRef(handle) = ref
+    if handle == 0 do None
+    else _js_ref_to_int(ref)
+    end
+  end
+
+  doc "Return true if the JsRef is null or undefined."
+  fn is_null(ref : JsRef) : Bool do
+    let JsRef(handle) = ref
+    handle == 0
+  end
+
+  -- ── Calling JavaScript ────────────────────────────────────────────────────
+
+  doc """
+  Call a JavaScript function by dotted path and return the result as a JsRef.
+
+  func_path  — dotted path to the function, e.g. "navigator.clipboard.writeText"
+  args       — list of JsRef arguments
+
+  Returns JsRef(0) if the function does not exist or throws.
+
+      let _ = JS.call("console.log", [JS.string_val("hello from March")])
+      let result = JS.call("JSON.stringify", [JS.json_val(my_json)])
+  """
+  fn call(func_path : String, args : List(JsRef)) : JsRef do
+    _js_call(func_path, args)
+  end
+
+  doc """
+  Read a global JavaScript property by dotted path.
+
+      let href = JS.global("window.location.href")
+      let user_agent = JS.global("navigator.userAgent")
+  """
+  fn global(prop_path : String) : JsRef do
+    _js_global(prop_path)
+  end
+
+  doc """
+  Evaluate a raw JavaScript expression string and return the result.
+
+  Use sparingly.  Prefer JS.call or JS.global when possible.
+
+      let ts = JS.eval("Date.now()")
+  """
+  fn eval(js_code : String) : JsRef do
+    _js_eval(js_code)
+  end
+
+  -- ── DOM ───────────────────────────────────────────────────────────────────
+
+  doc """
+  Query the DOM for the first element matching `selector`.
+  Returns None if no element matches.
+
+      let input = JS.query_selector("#search-input")
+      let btn   = JS.query_selector("button[type=submit]")
+  """
+  fn query_selector(selector : String) : Option(JsElement) do
+    let ref = _js_query_selector(selector)
+    let JsRef(handle) = ref
+    if handle == 0 do None
+    else Some(JsElement(ref))
+    end
+  end
+
+  doc """
+  Get the value of an attribute on a DOM element.
+  Returns None if the attribute is absent.
+
+      let val = JS.get_attribute(el, "value")
+      let cls = JS.get_attribute(el, "class")
+  """
+  fn get_attribute(el : JsElement, attr : String) : Option(String) do
+    let JsElement(ref) = el
+    let result = _js_get_attribute(ref, attr)
+    let JsRef(handle) = result
+    if handle == 0 do None
+    else JS.to_string(result)
+    end
+  end
+
+  doc """
+  Set the value of an attribute on a DOM element.
+
+      JS.set_attribute(el, "class", "active")
+      JS.set_attribute(el, "disabled", "")
+  """
+  fn set_attribute(el : JsElement, attr : String, value : String) do
+    let JsElement(ref) = el
+    let _ = _js_set_attribute(ref, attr, value)
+    ()
+  end
+
+  doc """
+  Remove an attribute from a DOM element.
+
+      JS.remove_attribute(el, "disabled")
+  """
+  fn remove_attribute(el : JsElement, attr : String) do
+    let JsElement(ref) = el
+    let _ = _js_remove_attribute(ref, attr)
+    ()
+  end
+
+  doc """
+  Add an event listener to a DOM element.  The callback receives a JsEvent
+  and returns a message that is dispatched to the island's update function.
+
+  Note: the listener persists until the island is destroyed.  Use Cmd-based
+  patterns (data-on-* attributes) for most event handling.
+
+      JS.add_event_listener(el, "custom-event", fn ev ->
+        CustomEvent(JS.to_string(JS.event_detail(ev)) |> Option.unwrap_or(""))
+      end)
+  """
+  fn add_event_listener(el : JsElement, event_name : String, handler : JsEvent -> a) do
+    let JsElement(ref) = el
+    let _ = _js_add_event_listener(ref, event_name, handler)
+    ()
+  end
+
+  doc """
+  Get the `detail` property of a CustomEvent.
+
+      let detail_str = JS.event_detail(ev) |> JS.to_string()
+  """
+  fn event_detail(ev : JsEvent) : JsRef do
+    let JsEvent(ref) = ev
+    _js_get_attribute(ref, "detail")
+  end
+
+  -- ── Private FFI stubs ─────────────────────────────────────────────────────
+  --
+  -- These are wired to the WASM import table by wasm-bridge.js.
+  -- They are not part of the public API — use the typed wrappers above.
+
+  pfn _js_call(func_path : String, args : List(JsRef)) : JsRef do
+    extern "bastion" "js_call"
+  end
+
+  pfn _js_global(prop_path : String) : JsRef do
+    extern "bastion" "js_global"
+  end
+
+  pfn _js_eval(js_code : String) : JsRef do
+    extern "bastion" "js_eval"
+  end
+
+  pfn _js_query_selector(selector : String) : JsRef do
+    extern "bastion" "js_query_selector"
+  end
+
+  pfn _js_get_attribute(ref : JsRef, attr : String) : JsRef do
+    extern "bastion" "js_get_attribute"
+  end
+
+  pfn _js_set_attribute(ref : JsRef, attr : String, value : String) : JsRef do
+    extern "bastion" "js_set_attribute"
+  end
+
+  pfn _js_remove_attribute(ref : JsRef, attr : String) : JsRef do
+    extern "bastion" "js_remove_attribute"
+  end
+
+  pfn _js_add_event_listener(ref : JsRef, event_name : String, handler) : JsRef do
+    extern "bastion" "js_add_event_listener"
+  end
+
+  pfn _js_string_to_ref(s : String) : JsRef do
+    extern "bastion" "js_string_to_ref"
+  end
+
+  pfn _js_int_to_ref(n : Int) : JsRef do
+    extern "bastion" "js_int_to_ref"
+  end
+
+  pfn _js_bool_to_ref(b : Bool) : JsRef do
+    extern "bastion" "js_bool_to_ref"
+  end
+
+  pfn _js_json_to_ref(json_str : String) : JsRef do
+    extern "bastion" "js_json_to_ref"
+  end
+
+  pfn _js_ref_to_string(ref : JsRef) : Option(String) do
+    extern "bastion" "js_ref_to_string"
+  end
+
+  pfn _js_ref_to_int(ref : JsRef) : Option(Int) do
+    extern "bastion" "js_ref_to_int"
+  end
+
+end
