@@ -145,7 +145,7 @@ mod Bastion.Telemetry.Aggregator do
   -- ── Internal event handler ─────────────────────────────────────────────────
 
   pfn handle_event(event_name : List(String), measurements, metadata) do
-    let now_ms      = Time.unix_ms()
+    let now_ms      = Time.now_ms()
     let last_seg    = last_segment(event_name)
     let duration    = extract_duration(measurements)
     let is_error    = last_seg == "exception"

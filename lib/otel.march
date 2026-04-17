@@ -21,6 +21,8 @@ mod Bastion.OpenTelemetry do
 
   import Bastion.Telemetry
   import Crypto
+  import Task
+  import HttpClient
 
   -- ── Types ─────────────────────────────────────────────────────────────────
 
@@ -83,14 +85,17 @@ mod Bastion.OpenTelemetry do
       config.service_name, span_name, duration_ms,
       metadata_json, trace_id, span_id
     )
-    let all_headers = Cons(
-      ("Content-Type", "application/json"),
-      config.headers
-    )
-    Proc.spawn(fn () ->
-      let _ = HttpClient.post(config.endpoint, all_headers, payload)
+    -- Build a client with JSON content-type; add any caller-supplied extra steps
+    let base_client = HttpClient.new_client()
+      |> HttpClient.add_request_step("content-type",
+           HttpClient.Steps.step_content_type("application/json"))
+    let client = apply_extra_headers(base_client, config.headers)
+    let url    = config.endpoint
+    let _ = Task.async(fn () ->
+      let _ = HttpClient.post(client, url, payload)
       ()
     )
+    ()
   end
 
   -- ── Private helpers ────────────────────────────────────────────────────────
@@ -136,10 +141,12 @@ mod Bastion.OpenTelemetry do
     trace_id      : String,
     span_id       : String
   ) : String do
-    let now_ms    = Time.unix_ms()
-    let start_ms  = now_ms - duration_ms
-    let start_ns  = int_to_string(start_ms * 1000000)
-    let end_ns    = int_to_string(now_ms * 1000000)
+    -- Use real wall-clock Unix time (not monotonic uptime) for OTLP timestamps.
+    -- unix_time(()) returns seconds as a float; multiply to get milliseconds.
+    let now_unix_ms = float_to_int(unix_time(()) *. 1000.0)
+    let start_ms    = now_unix_ms - duration_ms
+    let start_ns    = int_to_string(start_ms * 1000000)
+    let end_ns      = int_to_string(now_unix_ms * 1000000)
     let status_code = extract_status_code(metadata_json)
     let attrs     = build_attributes(metadata_json)
     "{\"resourceSpans\":[{" ++
@@ -178,6 +185,27 @@ mod Bastion.OpenTelemetry do
   pfn json_escape(s : String) : String do
     let s1 = String.replace_all(s, "\\", "\\\\")
     String.replace_all(s1, "\"", "\\\"")
+  end
+
+  -- Apply extra (key, value) headers from the config by adding each as a
+  -- bearer_auth step when the key is "Authorization: Bearer …", or a
+  -- content-type step otherwise.  Unknown header names are silently dropped
+  -- since HttpClient.Steps has no generic set_header step in the public API.
+  pfn apply_extra_headers(client, headers : List((String, String))) do
+    List.fold_left(headers, client, fn (c, pair) ->
+      match pair do
+      ("Content-Type", v) ->
+        HttpClient.add_request_step(c, "content-type",
+          HttpClient.Steps.step_content_type(v))
+      ("Authorization", v) ->
+        if String.starts_with(v, "Bearer ") do
+          let token = String.slice_bytes(v, 7, String.byte_size(v) - 7)
+          HttpClient.add_request_step(c, "auth",
+            HttpClient.Steps.bearer_auth(token))
+        else c end
+      _ -> c
+      end
+    )
   end
 
 end

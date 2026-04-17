@@ -162,18 +162,4 @@ mod Depot.Middleware do
     end
   end
 
-  fn checkin_from_conn(conn) do
-    -- Only checkin if we actually checked something out
-    match HttpServer.get_assign(conn, checked_assign) do
-    None    -> conn   -- nothing checked out
-    Some(_) ->
-      match (get_pool(conn), get_conn(conn)) do
-      (Some(pool), Some(db_conn)) ->
-        let _ = Pool.checkin(pool, db_conn)
-        conn
-      _ -> conn
-      end
-    end
-  end
-
 end

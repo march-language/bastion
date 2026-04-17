@@ -16,10 +16,7 @@ import CounterIsland
 -- ── Shared helpers ────────────────────────────────────────────────────────
 
 pfn e2e_contains(haystack : String, needle : String) : Bool do
-  match String.index_of(haystack, needle) do
-  Some(_) -> true
-  None    -> false
-  end
+  String.contains(haystack, needle)
 end
 
 pfn assert_has(haystack : String, needle : String, label : String) : Unit do

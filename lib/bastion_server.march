@@ -95,7 +95,7 @@ mod BastionServer do
   -- can still send a response (callers may handle the raised exception).
   pfn safe_call_plug(plug : Conn -> Conn, conn : Conn) : Conn do
     let start_ms = Time.now_ms()
-    match HttpServer.try_call(conn, plug) do
+    match HttpServer.try_call(fn () -> plug(conn)) do
     Ok(result_conn) -> result_conn
     Err(reason)     ->
       let duration_ms = Time.now_ms() - start_ms
