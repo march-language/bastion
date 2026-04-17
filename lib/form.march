@@ -4,16 +4,21 @@
 -- higher-level component functions (Input.render, Select.render, etc.)
 -- for use from .march.html templates via the <.Form.Input /> syntax.
 --
--- Component calling convention:
---   <.Form.Input name="email" type="email" label="Email" gate={gate} />
+-- Component calling convention (self-closing):
+--   <.Form.Input name="email" type_="email" label="Email" gate={gate} />
 -- desugars to:
 --   Form.Input.render(name: "email", type_: "email", label: "Email", gate: gate)
 --
--- All components return IOList so they compose inside ~H templates.
+-- Wrapper component (with inner content):
+--   <.Form.Wrapper conn={conn} action="/login" method="post">
+--     <.Form.Input name="email" type_="email" label="Email" gate={gate} />
+--     <button type="submit">Log in</button>
+--   </.Form.Wrapper>
+-- desugars to (via lower.march):
+--   Form.Wrapper.render(conn: conn, action: "/login", method: "post",
+--     render_inner: fn -> ~H"""...""" end)
 --
--- Note: <.Form> with inner content requires slot support in the lowering pass
--- (not yet implemented).  Use a raw <form> tag with CSRF.tag(conn) until then.
--- The ~H desugarer auto-injects _csrf_token into any <form method="post"> tag.
+-- All component render functions return IOList so they compose inside ~H.
 
 mod Form do
 
@@ -23,7 +28,7 @@ mod Form do
   -- ── Low-level tag builders ────────────────────────────────────────────────
 
   doc """
-  Render an opening <form> tag with CSRF token injected.
+  Render a complete <form> tag with CSRF token and inner content.
 
   The ~H desugarer already auto-injects the CSRF token into plain
   <form method="post"> tags, so this is only needed when building
@@ -79,10 +84,13 @@ mod Form do
   fn select_tag(name : String, options : List((String, String)), selected : String, attrs : List((String, String))) : String do
     let escaped_name = Html.escape(name)
     let extra = render_attrs(attrs)
-    let option_html = String.join(List.map(options, fn (label, value) -> do
-      let sel = if value == selected do " selected" else "" end
-      "<option value=\"" ++ Html.escape(value) ++ "\"" ++ sel ++ ">" ++ Html.escape(label) ++ "</option>"
-    end), "")
+    let option_html = String.join(List.map(options, fn pair ->
+      match pair do
+      (label, value) ->
+        let sel = if value == selected do " selected" else "" end
+        "<option value=\"" ++ Html.escape(value) ++ "\"" ++ sel ++ ">" ++ Html.escape(label) ++ "</option>"
+      end
+    ), "")
     "<select name=\"" ++ escaped_name ++ "\" id=\"" ++ escaped_name ++ "\"" ++
     extra ++ ">" ++ option_html ++ "</select>"
   end
@@ -113,12 +121,10 @@ mod Form do
     let label_html = if String.is_empty(label_text) do ""
                      else "<label for=\"" ++ Html.escape(name) ++ "\">" ++ Html.escape(label_text) ++ "</label>"
                      end
-    let error_html  = error_tag(error)
     let aria_attrs  = match error do
       None    -> ""
       Some(_) -> " aria-describedby=\"" ++ Html.escape(name) ++ "-error\" aria-invalid=\"true\""
     end
-    -- re-inject aria attrs into the input HTML (naive: append before first `>`)
     let input_with_aria = inject_aria(input_html, aria_attrs, name)
     let error_span = match error do
       None    -> ""
@@ -140,6 +146,54 @@ mod Form do
   --
   -- Attribute key conventions match the HTML attribute names where possible.
   -- `type_` is used instead of `type` to avoid clashing with the March keyword.
+
+  mod Wrapper do
+    doc """
+    Render a <form> element with CSRF token and inner content.
+
+    The primary way to build forms in .march.html templates:
+
+        <.Form.Wrapper conn={conn} action="/login" method="post" class="login-form">
+          <.Form.Input name="email" type_="email" label="Email" gate={gate} />
+          <button type="submit">Log in</button>
+        </.Form.Wrapper>
+
+    Attributes:
+      conn    — required; used to read the CSRF token
+      action  — form action URL
+      method  — HTTP method (default "post")
+      class   — optional CSS class
+      id      — optional element id
+      enctype — optional enctype (e.g. "multipart/form-data" for file uploads)
+
+    Named slots:
+      None — use the default inner content slot.
+
+    The CSRF hidden input is automatically injected as the first child of the
+    <form> element.  Do not add it manually.
+    """
+    fn render(conn : Conn, action : String,
+              method  : String \\ "post",
+              class   : String \\ "",
+              id      : String \\ "",
+              enctype : String \\ "",
+              render_inner) : IOList do
+      let csrf_token = CSRF.tag_string(conn)
+      let method_str = if String.is_empty(method) do "post" else String.downcase(method) end
+      let class_attr  = if String.is_empty(class)   do "" else " class=\""   ++ Html.escape(class)   ++ "\"" end
+      let id_attr     = if String.is_empty(id)      do "" else " id=\""      ++ Html.escape(id)      ++ "\"" end
+      let enctype_attr = if String.is_empty(enctype) do "" else " enctype=\"" ++ Html.escape(enctype) ++ "\"" end
+      let inner = IOList.to_string(render_inner())
+      IOList.from_string(
+        "<form action=\""  ++ Html.escape(action) ++
+        "\" method=\""     ++ method_str           ++ "\"" ++
+        class_attr ++ id_attr ++ enctype_attr       ++ ">" ++
+        csrf_token ++
+        inner ++
+        "</form>"
+      )
+    end
+  end
 
   mod Input do
     doc """
@@ -282,15 +336,16 @@ mod Form do
   -- ── Internal helpers ──────────────────────────────────────────────────────
 
   pfn render_attrs(attrs : List((String, String))) : String do
-    String.join(List.map(attrs, fn (k, v) ->
-      " " ++ Html.escape(k) ++ "=\"" ++ Html.escape(v) ++ "\""
+    String.join(List.map(attrs, fn pair ->
+      match pair do
+      (k, v) -> " " ++ Html.escape(k) ++ "=\"" ++ Html.escape(v) ++ "\""
+      end
     ), "")
   end
 
   -- Inject aria-describedby and aria-invalid into the first tag of input_html.
-  -- Naive implementation: finds the first ">" and inserts attrs before it,
-  -- unless the tag is self-closing ("/>" ends it).
-  pfn inject_aria(input_html : String, aria_attrs : String, name : String) : String do
+  -- Finds the first "/>" or ">" and inserts attrs before it.
+  pfn inject_aria(input_html : String, aria_attrs : String, _name : String) : String do
     if String.is_empty(aria_attrs) do input_html
     else
       match String.index_of(input_html, "/>") do

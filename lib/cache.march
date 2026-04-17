@@ -110,7 +110,8 @@ mod Cache do
     Some(client) ->
       if client == quoted do
         HttpServer.send_resp(conn2, 304, "")
-      else conn2
+      else
+        conn2
       end
     end
   end
