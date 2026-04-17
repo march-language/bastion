@@ -260,36 +260,45 @@ mod Bastion.Telemetry.Aggregator do
     end
   end
 
+  -- Safe extraction helpers: use record_get so events that don't carry a
+  -- given field (e.g. channel messages have no request_id) get a safe default
+  -- instead of crashing the aggregator handler.
+
   pfn extract_duration(measurements) : Int do
-    match measurements.duration_ms do
-    n -> n
+    match record_get(measurements, "duration_ms") do
+    Some(n) -> n
+    None    -> 0
     end
   end
 
   -- Extract request_id from metadata — falls back to empty string.
   pfn extract_request_id(metadata) : String do
-    match metadata.request_id do
-    s -> s
+    match record_get(metadata, "request_id") do
+    Some(s) -> s
+    None    -> ""
     end
   end
 
   pfn extract_method(metadata) : String do
-    match metadata.method do
-    s -> s
+    match record_get(metadata, "method") do
+    Some(s) -> s
+    None    -> ""
     end
   end
 
   pfn extract_path(metadata) : String do
-    match metadata.path do
-    s -> s
+    match record_get(metadata, "path") do
+    Some(s) -> s
+    None    -> ""
     end
   end
 
-  -- Use status from measurements when non-zero, otherwise keep existing.
+  -- Use status from measurements when present and non-zero, otherwise keep existing.
   pfn pick_status(existing : Int, measurements) : Int do
-    match measurements.status do
-    0 -> existing
-    n -> n
+    match record_get(measurements, "status") do
+    Some(0) -> existing
+    Some(n) -> n
+    None    -> existing
     end
   end
 

@@ -179,7 +179,7 @@ mod Bastion.Dev do
     let method  = HttpServer.method(conn)
     let path    = HttpServer.path(conn)
     let headers = HttpServer.req_headers(conn)
-    println("[Bastion.Dev] " ++ method ++ " " ++ path)
+    println("[Bastion.Dev] " ++ HttpServer.method_to_string(method) ++ " " ++ path)
     List.each(headers, fn (k, v) ->
       println("  " ++ k ++ ": " ++ v)
     )

@@ -64,7 +64,7 @@ mod Bastion.Metrics do
       let result = plug_fn(conn)
       let elapsed = Time.now_ms() - start
       let status  = HttpServer.status(result)
-      let method  = HttpServer.method(conn)
+      let method  = HttpServer.method_to_string(HttpServer.method(conn))
       let path    = HttpServer.path(conn)
       let entry   = { method = method, path = path, status = status, duration = elapsed }
       do_record(entry, status)
@@ -82,7 +82,7 @@ mod Bastion.Metrics do
       Middleware.pipeline([Bastion.Metrics.record, router], conn)
   """
   fn record(conn) do
-    let method = HttpServer.method(conn)
+    let method = HttpServer.method_to_string(HttpServer.method(conn))
     let path   = HttpServer.path(conn)
     let entry  = { method = method, path = path, status = 0, duration = 0 }
     do_record(entry, 0)

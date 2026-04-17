@@ -1,6 +1,6 @@
 # Bastion: Feature Status
 
-**Updated**: 2026-04-15
+**Updated**: 2026-04-17
 
 This document tracks the implementation status of every Bastion feature area. Use it to understand what's ready, what's specced but not built, and what's deferred to later phases.
 
@@ -72,6 +72,11 @@ These features have corresponding code in `lib/` and are usable today (within th
 | Cmd abstraction (WASM → JS) | `lib/cmd.march`, `priv/js/march-islands.js`, `priv/js/wasm-bridge.js` | `Bastion.Cmd` type + constructors; `executeCmd` runtime for `HttpGet/Post`, `After/Every`, `Focus/Blur`, `PushUrl/ReplaceUrl`, `StoreLocal/LoadLocal/RemoveLocal`, `ChannelPush`, `Batch`; `WasmIslandModule.updateWithCmd()` reads cmd via `march_island_last_cmd` sidecar export |
 | JS FFI layer (WASM → browser) | `lib/js.march`, `priv/js/wasm-bridge.js` | `Bastion.JS`: `call`, `global`, `eval`, `query_selector`, `get/set/remove_attribute`, `add_event_listener`, `string_val/int_val/bool_val/json_val`, `to_string/to_int`; JS handle table in wasm-bridge.js; `extern "bastion" "js_*"` imports; late-bound memory reference |
 | Release builder | `forge/release.march`, `forge.toml` | `forge bastion.release`; compiles binary (release mode) + WASM islands + static assets → `_build/release/<name>/`; `--embed-assets` bakes statics into binary; `--dockerfile` generates Dockerfile with HEALTHCHECK; `--clean` wipes release dir |
+| Telemetry aggregator | `telemetry_aggregator.march` | `Bastion.Telemetry.Aggregator`: Vault ring buffer (default 100 requests); `start/1`, `recent_requests/1`, `request_waterfall/1` (per-request event waterfall), `counters/0`, `reset/0`; safe `record_get` field access for heterogeneous event shapes |
+| OpenTelemetry export | `otel.march` | `Bastion.OpenTelemetry`: OTLP HTTP/JSON exporter; `default_config/1`, `start/1`; async `Task.async` POSTs on "stop"/"exception" events; builds valid OTLP resourceSpans JSON with wall-clock timestamps; `apply_extra_headers` for bearer auth |
+| Island test helpers | `lib/test_island.march`, `test/counter_island.march`, `examples/counter_island.march` | `Bastion.Test.Island`: `render_island/3`, `update_island/3`, `assert_renders_contains/4`, `cmd_type/1`, `assert_no_server_event_attrs/1`; canonical `CounterIsland` example (init/update/render/encode/decode) |
+| Island e2e test suite | `test/test_island_e2e.march`, `e2e/` | Pure-March 5-section island pipeline tests (init/update, SSR attributes, msg round-trip, server validation, Test.Island helpers); Playwright suite with Node.js island server mock covering server-mode SSR, WASM handoff, parent-child, offline reconnect, lifecycle |
+| Telemetry event coverage | `lib/channel_server.march`, `lib/depot_middleware.march`, `lib/bastion_server.march` | `["bastion","channel","message"]` span in handle_in; `query_with_telemetry/3` wrapping `exec_sql`; `["bastion","endpoint","exception"]` on unhandled errors via `safe_call_plug` |
 
 ---
 
@@ -81,13 +86,16 @@ Specced and designed but not yet fully implemented. These are the active build a
 
 | Feature | Spec | Status | Blocker |
 |---------|------|--------|---------|
-| `~H` templates | [templates.md](templates.md) | Runtime modules done (`html.march`, `io_list.march`, `css.march`); template lowering pass + `bastion lower` CLI done | **Compiler pass confirmed done** — `desugar.ml` lowers `~H` sigils to `IOList.from_strings(...)`, handles `<island>` tags, injects CSRF tokens, XSS-escapes interpolations. No compiler work remaining. Bastion-side component system (`<.Component>`) still needs implementing. |
-| `.march.html` template files | [template-file-format.md](template-file-format.md) | All Bastion layers implemented | **Fully unblocked** — `span_remap.ml` loads `.march.spans` sidecar and remaps all AST spans before error reporting. Done. |
-| WASM island compilation | [wasm-islands.md](wasm-islands.md) | **JS runtime complete** | All JS-side work done (hydration strategies, `march_island_msg_from_name`, Cmd executor, FFI layer, public API); pending: end-to-end integration test |
-| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | **Complete** — `IslandServer.push/2` (PubSub fan-out), `IslandSocket` ↔ PubSub wiring (subscribe on init, unsubscribe on destroy/close), LWW `channel_push` forwarding, JS `init` carries channel field | None |
-| Channels / WebSocket | [channels.md](channels.md) | Server + PubSub + test helpers fully implemented | None — fully done |
-| CSP nonce injection | [csp.md](csp.md) | `bastion_csp.march` + `forge/lower.march` nonce injection; `BastionCSP`: `assign_nonce`, `nonce`, `set_header`, `protect`, `protect_with_overrides`, `disable`, `report_only`; `wasm-unsafe-eval` in default script-src; `Islands.bootstrap_script_with_nonce/2`; `inject_csp_nonces/1` in lowering pass rewrites `<script>`/`<style>` tags in `.march.html` templates | Inline `~H` in `.march` files: parallel `desugar.ml` change still pending (rare case) |
-| Route helpers | [route-verification.md](route-verification.md) | `forge bastion.routes --gen` writes `lib/<app>_routes.march` with typed path helpers; singularizes trailing literal before params; deduplicates by path | Compile-time call-site verification of `Routes.xyz_path()` calls still needs March compiler integration |
+| `~H` templates | [templates.md](templates.md) | **Done** — `desugar.ml` lowers `~H` sigils in any `.march` file; component system (`<.Component>`, named slots) implemented in `forge/lower.march` | None |
+| `.march.html` template files | [template-file-format.md](template-file-format.md) | **Done** — all Bastion layers implemented; `span_remap.ml` handles error line remapping | None |
+| WASM island compilation | [wasm-islands.md](wasm-islands.md) | **JS runtime complete**; pure-March island tests + Playwright e2e suite added | March compiler `wasm32-unknown-unknown` target (Tier 4) — not yet available for actual WASM binary output |
+| Islands data flow | [islands-data-flow.md](islands-data-flow.md) | **Done** | None |
+| Channels / WebSocket | [channels.md](channels.md) | **Done** | None |
+| CSP nonce injection | [csp.md](csp.md) | **Done** — `bastion_csp.march`, nonce injection in `forge/lower.march` | None |
+| Route helpers | [route-verification.md](route-verification.md) | **Done** — `forge bastion.routes --gen` generates typed path helpers | Compile-time call-site verification needs March compiler integration |
+| Telemetry aggregator | [telemetry.md](telemetry.md) | **Done** — `telemetry_aggregator.march`: Vault ring buffer, per-request waterfall, counters | None |
+| OpenTelemetry export | [telemetry.md](telemetry.md) | **Done** — `otel.march`: OTLP HTTP/JSON exporter, async Task.async POSTs | None |
+| Island e2e tests | [testing.md](testing.md) | **Done** — `test_island.march` helpers, `counter_island.march` example, `test_island_e2e.march`, Playwright suite in `e2e/` | None |
 
 ---
 
@@ -95,72 +103,16 @@ Specced and designed but not yet fully implemented. These are the active build a
 
 Full specs exist. Implementation is queued but not yet started.
 
-### Routing
-- Reversible routing / route helpers — typed path helpers, compile-time dead-link detection ([route-verification.md](route-verification.md))
-
-### Middleware & Security
-- CSRF protection — token lifecycle, `protect`, `tag_string`, `skip` ([auth-session-database.md](auth-session-database.md) Layer 5, [security.md](security.md))
-- Security headers middleware — HSTS, X-Frame-Options, etc. ([security.md](security.md))
-- CORS middleware ([security.md](security.md))
-- Rate limiting — sliding window, `x-ratelimit-*` headers, Vault-backed ([auth-session-database.md](auth-session-database.md) Layer 5b, [security.md](security.md))
-- CSP auto-generation from resource usage ([csp.md](csp.md), [open-questions.md](open-questions.md))
-
-### Auth & Sessions
-- Cookie helpers (`get_req_cookie`, `put_resp_cookie`, `after_send`) ([auth-session-database.md](auth-session-database.md) Layer 0)
-- Crypto module — AES-256-GCM, HMAC-SHA256, HKDF, Argon2id, SHA-256, CSPRNG ([auth-session-database.md](auth-session-database.md) Layer 1)
-- Session middleware — cookie-backed with real crypto, auto-commit, `_session_dirty` tracking ([auth-session-database.md](auth-session-database.md) Layer 3, [auth.md](auth.md))
-- Flash messages — one-time session values for UI feedback ([auth-session-database.md](auth-session-database.md) Layer 3)
-- Auth middleware — `load_current_user`, `require_auth` (Result gate), `authenticated` sugar, `log_in`, `log_out` ([auth-session-database.md](auth-session-database.md) Layer 6, [auth.md](auth.md))
-- Remember-me tokens — hashed, DB-backed, 60-day persistent login ([auth-session-database.md](auth-session-database.md) Layer 6)
-- Password reset — single-use tokens, 1-hour expiry, session invalidation on change ([auth-session-database.md](auth-session-database.md) Layer 6)
-- `forge gen.auth session` — full auth scaffold (users + user_tokens migrations, Accounts, AuthController, templates, router patch, rate limiting) ([auth-session-database.md](auth-session-database.md) Layer 7)
-- Depot session / Vault session backends — post-v1 ([auth-session-database.md](auth-session-database.md))
-- `forge gen.auth token / oauth / magic_link` — post-v1 ([auth.md](auth.md), [generators.md](generators.md))
-
-### Storage
-- Vault — in-memory KV actor, TTL sweeper (core: `put/get/delete/put_new`) ([auth-session-database.md](auth-session-database.md) Layer 3b, [vault.md](vault.md))
-- Depot integration — pool middleware, `after_send` checkin, context modules, migrations ([auth-session-database.md](auth-session-database.md) Layer 2, [depot-integration.md](depot-integration.md))
-- Caching — ETags, response caching, fragment caching ([caching.md](caching.md))
-
-### Forms
-- Plain server-side forms with `Depot.Gate` validation and built-in `<.form>`, `<.input>` components ([form-handling.md](form-handling.md))
-- Enhanced fetch forms — progressive `enhance` attribute, fragment re-render without full-page reload ([form-handling.md](form-handling.md))
-- Island forms with shared WASM/server validation — same `validate/1` function compiles to both targets ([form-handling.md](form-handling.md))
-- Flash messages — session-backed, consumed on render, `<.flash_group>` component ([form-handling.md](form-handling.md))
-
 ### Templates & Styling
 - `~CSS` sigil — scoped island CSS with compile-time extraction ([css-styling.md](css-styling.md))
-- CSS variables for theming ([css-styling.md](css-styling.md))
-
-### JS Interop
-- WASM → JS FFI layer — `Cmd` abstractions, `window.*`, DOM calls ([js-interop.md](js-interop.md))
-- JS → WASM message protocol ([js-interop.md](js-interop.md))
-
-### Developer Experience
-- `forge dev` live reload ([dev-experience.md](dev-experience.md))
-- Dev error overlay (shows stack traces in-browser) ([dev-experience.md](dev-experience.md), [error-handling.md](error-handling.md))
-- Hot deploy / connection draining on SIGTERM ([hot-deploy.md](hot-deploy.md))
-- `forge dev` dashboard (request log, WebSocket connections) ([dev-experience.md](dev-experience.md))
-
-### Generators
-- `forge gen.handler`, `forge gen.context`, `forge gen.channel`, `forge gen.island`, `forge gen.migration` ([generators.md](generators.md))
-
-### Testing
-- Depot test sandbox (per-test transaction rollback) ([testing.md](testing.md), [test-sandbox.md](test-sandbox.md))
-- Channel testing helpers ([testing.md](testing.md))
-- Island testing (SSR + update logic, no WASM needed) ([testing.md](testing.md))
-
-### Operations
-- Deployment — single binary, runtime config, health checks, graceful shutdown ([deployment.md](deployment.md))
-- Structured logging, request ID tracing ([logging-observability.md](logging-observability.md), [logging.md](logging.md))
-- OpenTelemetry integration ([telemetry.md](telemetry.md))
-- Uploads — streaming multipart, external storage ([uploads.md](uploads.md))
-- Configuration — compile-time vs runtime, `forge.toml` ([configuration.md](configuration.md))
+- CSS variables / theming system ([css-styling.md](css-styling.md))
 
 ### Performance
-- IO list rendering (zero-copy template output) ([performance.md](performance.md))
-- Compiled route dispatch ([performance.md](performance.md))
-- Benchmarking targets ([performance.md](performance.md))
+- Benchmarking targets and baseline measurements ([performance.md](performance.md))
+- Compiled route dispatch (trie-based, vs current linear scan) ([performance.md](performance.md))
+
+### Configuration
+- Runtime config — environment-variable binding, `forge.toml` schema ([configuration.md](configuration.md))
 
 ---
 
