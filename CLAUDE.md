@@ -16,7 +16,7 @@ forge search "ModuleName"       # search for a module
 forge search "type_name"        # search for a type
 ```
 
-Always use `forge search` before grepping or manually reading files when looking for modules, functions, or types in March code.
+**`forge search` is always the preferred way to search `.march` files.** Use it instead of Grep/grep whenever the target is March code — names, types, docstrings, or constructors.
 
 ---
 
@@ -42,7 +42,9 @@ Key March conventions used throughout this codebase:
 Bastion uses `forge` (the March build tool, defined in `forge.toml`):
 
 ```bash
+forge check          # fast typecheck (use after every .march edit)
 forge build          # compile the project
+forge lint --strict  # run the linter
 forge test           # run all tests
 forge dev            # start dev server with live reload
 forge gen.handler    # generate a new handler
@@ -50,6 +52,8 @@ forge gen.island     # generate a new WASM island
 forge gen.auth       # generate auth boilerplate
 forge gen.migration  # generate a Depot (Postgres) migration
 ```
+
+**After editing any `.march` file, run `forge check` to typecheck the whole project quickly before proceeding.**
 
 ---
 
