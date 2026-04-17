@@ -1,0 +1,325 @@
+-- test/test_island_e2e.march — End-to-end tests for the WASM island pipeline.
+--
+-- Covers:
+--   1. Island init/update/render (pure logic)
+--   2. SSR output and Islands.wrap attributes
+--   3. Msg decode round-trip
+--   4. Server-mode validation (Islands.validate_server_html)
+--   5. Bastion.Test.Island helpers (render_island, update_island, cmd_type)
+
+mod TestIslandE2e do
+
+import Islands
+import TestIsland
+import CounterIsland
+
+-- ── Shared helpers ────────────────────────────────────────────────────────
+
+pfn e2e_contains(haystack : String, needle : String) : Bool do
+  match String.index_of(haystack, needle) do
+  Some(_) -> true
+  None    -> false
+  end
+end
+
+pfn assert_has(haystack : String, needle : String, label : String) : Unit do
+  if not(e2e_contains(haystack, needle)) do
+    panic("assert_has [" ++ label ++ "]: expected to find \"" ++ needle ++ "\" in:\n" ++ haystack)
+  else
+    ()
+  end
+end
+
+pfn assert_lacks(haystack : String, needle : String, label : String) : Unit do
+  if e2e_contains(haystack, needle) do
+    panic("assert_lacks [" ++ label ++ "]: expected NOT to find \"" ++ needle ++ "\" in:\n" ++ haystack)
+  else
+    ()
+  end
+end
+
+-- Convenience: call CounterIsland.update and get the new state
+pfn apply_msg(state, msg) do
+  CounterIsland.update(state, msg)
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Section 1 — Island init / update / render
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "CounterIsland init/update" do
+
+  test "init returns count of 0" do
+    let state = CounterIsland.initial()
+    assert (CounterIsland.count_of(state) == 0)
+  end
+
+  test "Increment increases count by 1" do
+    let state  = CounterIsland.initial()
+    let state2 = apply_msg(state, Increment)
+    assert (CounterIsland.count_of(state2) == 1)
+  end
+
+  test "Decrement decreases count by 1" do
+    let state  = { count = 5 }
+    let state2 = apply_msg(state, Decrement)
+    assert (CounterIsland.count_of(state2) == 4)
+  end
+
+  test "Reset returns count to 0" do
+    let state  = { count = 99 }
+    let state2 = apply_msg(state, Reset)
+    assert (CounterIsland.count_of(state2) == 0)
+  end
+
+  test "SetValue sets count to the given value" do
+    let state  = CounterIsland.initial()
+    let state2 = apply_msg(state, SetValue(42))
+    assert (CounterIsland.count_of(state2) == 42)
+  end
+
+  test "multiple updates compose correctly — Increment 3x gives count=3" do
+    let s0 = CounterIsland.initial()
+    let s1 = apply_msg(s0, Increment)
+    let s2 = apply_msg(s1, Increment)
+    let s3 = apply_msg(s2, Increment)
+    assert (s3.count == 3)
+  end
+
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Section 2 — SSR output
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "CounterIsland SSR output" do
+
+  test "render contains data-on-click=Increment" do
+    let html = CounterIsland.render(CounterIsland.initial())
+    assert_has(html, "data-on-click=\"Increment\"", "Increment binding")
+  end
+
+  test "render contains data-on-click=Decrement" do
+    let html = CounterIsland.render(CounterIsland.initial())
+    assert_has(html, "data-on-click=\"Decrement\"", "Decrement binding")
+  end
+
+  test "render contains the count value in a span" do
+    let state = { count = 7 }
+    let html  = CounterIsland.render(state)
+    assert_has(html, "<span class=\"count\">7</span>", "count in span")
+  end
+
+  test "Islands.wrap output contains data-march-island=CounterIsland" do
+    let state = CounterIsland.initial()
+    let html  = CounterIsland.ssr(state)
+    assert_has(html, "data-march-island=\"CounterIsland\"", "island name attr")
+  end
+
+  test "Islands.wrap output contains data-march-hydrate=eager" do
+    let state = CounterIsland.initial()
+    let html  = CounterIsland.ssr(state)
+    assert_has(html, "data-march-hydrate=\"eager\"", "hydrate strategy attr")
+  end
+
+  test "Islands.wrap output contains the state JSON" do
+    let state      = CounterIsland.initial()
+    let state_json = CounterIsland.encode_state(state)
+    let html       = CounterIsland.ssr(state)
+    assert_has(html, "count", "state JSON key in wrapper")
+    assert_has(html, "data-march-state=", "state attr present")
+  end
+
+  test "ssr with non-zero count embeds the correct count in render" do
+    let state = { count = 3 }
+    let html  = CounterIsland.ssr(state)
+    assert_has(html, ">3<", "count 3 present in ssr output")
+  end
+
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Section 3 — Msg decode round-trip
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "CounterIsland decode_msg round-trip" do
+
+  test "Increment decodes from canonical JSON" do
+    let msg    = CounterIsland.decode_msg("{\"tag\":\"Increment\"}")
+    let base   = CounterIsland.initial()
+    let state  = apply_msg(base, msg)
+    assert (CounterIsland.count_of(state) == 1)
+  end
+
+  test "Decrement decodes from canonical JSON" do
+    let msg    = CounterIsland.decode_msg("{\"tag\":\"Decrement\"}")
+    let base   = apply_msg(CounterIsland.initial(), SetValue(5))
+    let state  = apply_msg(base, msg)
+    assert (CounterIsland.count_of(state) == 4)
+  end
+
+  test "Reset decodes from canonical JSON" do
+    let msg   = CounterIsland.decode_msg("{\"tag\":\"Reset\"}")
+    let base  = apply_msg(CounterIsland.initial(), SetValue(42))
+    let state = apply_msg(base, msg)
+    assert (CounterIsland.count_of(state) == 0)
+  end
+
+  test "SetValue decodes from canonical JSON" do
+    let msg   = CounterIsland.decode_msg("{\"tag\":\"SetValue\",\"value\":99}")
+    let base  = CounterIsland.initial()
+    let state = apply_msg(base, msg)
+    assert (CounterIsland.count_of(state) == 99)
+  end
+
+  test "unknown tag falls back gracefully — does not crash" do
+    -- Unknown tags fall back to Reset (count goes to 0 regardless of prior state)
+    let msg   = CounterIsland.decode_msg("{\"tag\":\"UnknownMsg\"}")
+    let base  = apply_msg(CounterIsland.initial(), SetValue(10))
+    let state = apply_msg(base, msg)
+    -- We just verify it doesn't crash and returns a valid state
+    assert (CounterIsland.count_of(state) == 0)
+  end
+
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Section 4 — Server-mode validation
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Islands.validate_server_html" do
+
+  test "rejects HTML containing data-on-click" do
+    let html   = "<button data-on-click=\"Inc\">+</button>"
+    let result = Islands.validate_server_html(html)
+    match result do
+    Ok(_)  -> panic("Expected validation to reject data-on-click")
+    Err(_) -> ()
+    end
+  end
+
+  test "rejects HTML containing data-on-input" do
+    let result = Islands.validate_server_html("<input data-on-input=\"Search\" />")
+    match result do
+    Ok(_)  -> panic("Expected validation to reject data-on-input")
+    Err(_) -> ()
+    end
+  end
+
+  test "rejects HTML containing data-on-change" do
+    let result = Islands.validate_server_html("<select data-on-change=\"Filter\"></select>")
+    match result do
+    Ok(_)  -> panic("Expected validation to reject data-on-change")
+    Err(_) -> ()
+    end
+  end
+
+  test "rejects HTML containing data-on-submit" do
+    let result = Islands.validate_server_html("<form data-on-submit=\"Save\"></form>")
+    match result do
+    Ok(_)  -> panic("Expected validation to reject data-on-submit")
+    Err(_) -> ()
+    end
+  end
+
+  test "rejects HTML containing data-msg" do
+    let result = Islands.validate_server_html("<button data-msg=\"Click\">go</button>")
+    match result do
+    Ok(_)  -> panic("Expected validation to reject data-msg")
+    Err(_) -> ()
+    end
+  end
+
+  test "accepts plain HTML without event bindings" do
+    let html   = "<div class=\"score\"><span>42</span></div>"
+    let result = Islands.validate_server_html(html)
+    match result do
+    Ok(_)  -> ()
+    Err(m) -> panic("Expected validation to accept clean HTML, got Err: " ++ m)
+    end
+  end
+
+  test "TestIsland.assert_no_server_event_attrs passes on clean HTML" do
+    let html = "<div><p>Hello, world!</p></div>"
+    TestIsland.assert_no_server_event_attrs(html)
+    -- If no panic, the test passes
+    assert true
+  end
+
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Section 5 — Bastion.Test.Island helpers
+-- ════════════════════════════════════════════════════════════════════════════
+
+describe "Bastion.Test.Island helpers" do
+
+  test "render_island returns HTML containing the count" do
+    let html = TestIsland.render_island(
+      "CounterIsland",
+      fn s -> CounterIsland.render(CounterIsland.decode_state(s)),
+      "{\"count\":5}"
+    )
+    assert_has(html, ">5<", "count 5 in rendered output")
+  end
+
+  test "render_island wraps with data-march-island attribute" do
+    let html = TestIsland.render_island(
+      "CounterIsland",
+      fn s -> CounterIsland.render(CounterIsland.decode_state(s)),
+      "{\"count\":0}"
+    )
+    assert_has(html, "data-march-island=\"CounterIsland\"", "island attr in wrapper")
+  end
+
+  test "update_island returns updated state JSON" do
+    let counter_update = fn pair ->
+      match pair do
+      (state_json, msg_json) ->
+        let state   = CounterIsland.decode_state(state_json)
+        let msg     = CounterIsland.decode_msg(msg_json)
+        let new_s   = CounterIsland.update(state, msg)
+        CounterIsland.encode_state(new_s)
+      end
+    let new_state_json = TestIsland.update_island(
+      counter_update,
+      "{\"count\":0}",
+      "{\"tag\":\"Increment\"}"
+    )
+    assert_has(new_state_json, "1", "incremented count in state JSON")
+  end
+
+  test "update_island with SetValue returns correct state JSON" do
+    let counter_update = fn pair ->
+      match pair do
+      (state_json, msg_json) ->
+        let state = CounterIsland.decode_state(state_json)
+        let msg   = CounterIsland.decode_msg(msg_json)
+        let new_s = CounterIsland.update(state, msg)
+        CounterIsland.encode_state(new_s)
+      end
+    let new_state_json = TestIsland.update_island(
+      counter_update,
+      "{\"count\":0}",
+      "{\"tag\":\"SetValue\",\"value\":77}"
+    )
+    assert_has(new_state_json, "77", "SetValue 77 reflected in state JSON")
+  end
+
+  test "cmd_type returns correct type string for HttpGet cmd JSON" do
+    let cmd_json = "{\"type\":\"HttpGet\",\"url\":\"/api/users\"}"
+    assert (TestIsland.cmd_type(cmd_json) == "HttpGet")
+  end
+
+  test "cmd_type returns None for a None cmd JSON" do
+    let cmd_json = "{\"type\":\"None\"}"
+    assert (TestIsland.cmd_type(cmd_json) == "None")
+  end
+
+  test "cmd_type returns Unknown for malformed JSON" do
+    assert (TestIsland.cmd_type("{}") == "Unknown")
+  end
+
+end
+
+end

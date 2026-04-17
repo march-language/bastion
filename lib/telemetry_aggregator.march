@@ -1,0 +1,307 @@
+-- lib/telemetry_aggregator.march — Bastion.Telemetry.Aggregator
+--
+-- A Vault-backed ring buffer that collects all telemetry events per request
+-- and provides a waterfall view.  Attaches to the ["bastion"] event prefix
+-- so it receives every framework event automatically.
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   -- At application startup:
+--   Bastion.Telemetry.Aggregator.start(100)
+--
+--   -- In a dashboard handler:
+--   let requests = Bastion.Telemetry.Aggregator.recent_requests(20)
+--   let waterfall = Bastion.Telemetry.Aggregator.request_waterfall(request_id)
+--   let stats = Bastion.Telemetry.Aggregator.counters()
+
+mod Bastion.Telemetry.Aggregator do
+
+  import Vault
+  import Bastion.Telemetry
+
+  -- Vault table names
+  let events_table   = "_bastion_agg_events"
+  let requests_table = "_bastion_agg_requests"
+  let config_table   = "_bastion_agg_config"
+  let max_key        = "_max_requests"
+
+  -- ── Types ─────────────────────────────────────────────────────────────────
+
+  type EventEntry = {
+    name         : List(String),
+    duration_ms  : Int,
+    timestamp_ms : Int,
+    metadata     : String,
+  }
+
+  type RequestSummary = {
+    request_id   : String,
+    method       : String,
+    path         : String,
+    status       : Int,
+    duration_ms  : Int,
+    event_count  : Int,
+    error        : Bool,
+    timestamp_ms : Int,
+  }
+
+  type WaterfallData = {
+    request_id : String,
+    events     : List(EventEntry),
+    total_ms   : Int,
+  }
+
+  -- ── Public API ────────────────────────────────────────────────────────────
+
+  doc """
+  Start the aggregator.  Attaches a telemetry handler to all bastion events
+  and initialises the Vault storage tables.
+
+  max_requests — how many RequestSummary entries to retain in the ring buffer.
+  Pass 0 to use the default (100).
+
+      Bastion.Telemetry.Aggregator.start(100)
+  """
+  fn start(max_requests : Int) do
+    let max = if max_requests == 0 do 100 else max_requests end
+    let cfg_table = Vault.open(config_table)
+    Vault.put(cfg_table, max_key, max)
+    Bastion.Telemetry.attach(
+      "_bastion_aggregator",
+      [["bastion"]],
+      fn event_name measurements metadata ->
+        handle_event(event_name, measurements, metadata)
+      end
+    )
+  end
+
+  doc """
+  Return the most recent `limit` RequestSummaries from the ring buffer,
+  newest first.
+
+      let requests = Bastion.Telemetry.Aggregator.recent_requests(20)
+  """
+  fn recent_requests(limit : Int) : List(RequestSummary) do
+    let table = Vault.open(requests_table)
+    let all   = Vault.get_or(table, "ring", [])
+    List.take(all, limit)
+  end
+
+  doc """
+  Look up all events recorded for a specific request and build a WaterfallData.
+
+  Returns `Some(WaterfallData)` if the request_id is known, `None` otherwise.
+
+      match Bastion.Telemetry.Aggregator.request_waterfall(id) do
+      Some(w) -> render_waterfall(w)
+      None    -> send_404(conn)
+      end
+  """
+  fn request_waterfall(request_id : String) : Option(WaterfallData) do
+    let table = Vault.open(events_table)
+    match Vault.get(table, request_id) do
+    None         -> None
+    Some(events) ->
+      let total = List.fold_left(events, 0, fn (acc, e) -> acc + e.duration_ms)
+      Some({
+        request_id = request_id,
+        events     = events,
+        total_ms   = total,
+      })
+    end
+  end
+
+  doc """
+  Compute aggregate counters from the ring buffer.
+
+  Returns a record with:
+    total           — total number of requests in the buffer
+    errors          — count of requests with error = true
+    avg_duration_ms — mean duration across all buffered requests
+
+      let c = Bastion.Telemetry.Aggregator.counters()
+      c.total           -- Int
+      c.errors          -- Int
+      c.avg_duration_ms -- Int
+  """
+  fn counters() : { total : Int, errors : Int, avg_duration_ms : Int } do
+    let table = Vault.open(requests_table)
+    let all   = Vault.get_or(table, "ring", [])
+    let total = List.length(all)
+    let errors = List.length(List.filter(all, fn r -> r.error))
+    let sum_ms = List.fold_left(all, 0, fn (acc, r) -> acc + r.duration_ms)
+    let avg    = if total > 0 do sum_ms / total else 0 end
+    { total = total, errors = errors, avg_duration_ms = avg }
+  end
+
+  doc "Clear all aggregator state — both event and request tables."
+  fn reset() do
+    let ev_table  = Vault.open(events_table)
+    let req_table = Vault.open(requests_table)
+    Vault.clear(ev_table)
+    Vault.clear(req_table)
+  end
+
+  -- ── Internal event handler ─────────────────────────────────────────────────
+
+  pfn handle_event(event_name : List(String), measurements, metadata) do
+    let now_ms      = Time.unix_ms()
+    let last_seg    = last_segment(event_name)
+    let duration    = extract_duration(measurements)
+    let is_error    = last_seg == "exception"
+    let meta_json   = metadata_to_json(metadata)
+    let request_id  = extract_request_id(metadata)
+
+    -- Always append the event to the per-request events list
+    let entry = {
+      name         = event_name,
+      duration_ms  = duration,
+      timestamp_ms = now_ms,
+      metadata     = meta_json,
+    }
+    append_event(request_id, entry)
+
+    -- On stop or exception events, materialise or update a RequestSummary
+    if last_seg == "stop" || is_error do
+      upsert_summary(request_id, event_name, duration, now_ms, measurements, metadata, is_error)
+    else ()
+    end
+  end
+
+  -- Append one EventEntry to the per-request list in the events table.
+  pfn append_event(request_id : String, entry : EventEntry) do
+    let table    = Vault.open(events_table)
+    let existing = Vault.get_or(table, request_id, [])
+    Vault.put(table, request_id, List.append(existing, [entry]))
+  end
+
+  -- Insert or update the RequestSummary for this request_id in the ring buffer.
+  pfn upsert_summary(
+    request_id : String,
+    event_name : List(String),
+    duration   : Int,
+    now_ms     : Int,
+    measurements,
+    metadata,
+    is_error   : Bool
+  ) do
+    let req_table = Vault.open(requests_table)
+    let ring      = Vault.get_or(req_table, "ring", [])
+    -- Check if there is already a summary for this request_id
+    match find_summary(ring, request_id) do
+    Some(existing) ->
+      -- Update: accumulate duration, bump event count, merge error flag
+      let updated = {
+        request_id   = existing.request_id,
+        method       = existing.method,
+        path         = existing.path,
+        status       = pick_status(existing.status, measurements),
+        duration_ms  = existing.duration_ms + duration,
+        event_count  = existing.event_count + 1,
+        error        = existing.error || is_error,
+        timestamp_ms = existing.timestamp_ms,
+      }
+      let new_ring = replace_summary(ring, request_id, updated)
+      Vault.put(req_table, "ring", new_ring)
+    None ->
+      -- First time we see this request_id: create a new summary
+      let method = extract_method(metadata)
+      let path   = extract_path(metadata)
+      let status = pick_status(0, measurements)
+      let summary = {
+        request_id   = request_id,
+        method       = method,
+        path         = path,
+        status       = status,
+        duration_ms  = duration,
+        event_count  = 1,
+        error        = is_error,
+        timestamp_ms = now_ms,
+      }
+      -- Prepend and trim to max
+      let max     = get_max()
+      let trimmed = List.take(ring, max - 1)
+      Vault.put(req_table, "ring", Cons(summary, trimmed))
+    end
+  end
+
+  pfn get_max() : Int do
+    let cfg = Vault.open(config_table)
+    Vault.get_or(cfg, max_key, 100)
+  end
+
+  pfn find_summary(ring : List(RequestSummary), request_id : String) : Option(RequestSummary) do
+    match ring do
+    []            -> None
+    Cons(s, rest) ->
+      if s.request_id == request_id do Some(s)
+      else find_summary(rest, request_id)
+      end
+    end
+  end
+
+  pfn replace_summary(
+    ring       : List(RequestSummary),
+    request_id : String,
+    updated    : RequestSummary
+  ) : List(RequestSummary) do
+    List.map(ring, fn s ->
+      if s.request_id == request_id do updated else s end
+    )
+  end
+
+  -- ── Extraction helpers ─────────────────────────────────────────────────────
+
+  pfn last_segment(name : List(String)) : String do
+    match name do
+    []          -> ""
+    Cons(s, []) -> s
+    Cons(_, t)  -> last_segment(t)
+    end
+  end
+
+  pfn extract_duration(measurements) : Int do
+    match measurements.duration_ms do
+    n -> n
+    end
+  end
+
+  -- Extract request_id from metadata — falls back to empty string.
+  pfn extract_request_id(metadata) : String do
+    match metadata.request_id do
+    s -> s
+    end
+  end
+
+  pfn extract_method(metadata) : String do
+    match metadata.method do
+    s -> s
+    end
+  end
+
+  pfn extract_path(metadata) : String do
+    match metadata.path do
+    s -> s
+    end
+  end
+
+  -- Use status from measurements when non-zero, otherwise keep existing.
+  pfn pick_status(existing : Int, measurements) : Int do
+    match measurements.status do
+    0 -> existing
+    n -> n
+    end
+  end
+
+  -- Serialize metadata to a JSON-ish string for storage.
+  -- For simplicity we store the string representation of the record.
+  pfn metadata_to_json(metadata) : String do
+    "{\"raw\":\"" ++ json_escape(to_string(metadata)) ++ "\"}"
+  end
+
+  pfn json_escape(s : String) : String do
+    let s1 = String.replace_all(s, "\\", "\\\\")
+    String.replace_all(s1, "\"", "\\\"")
+  end
+
+end

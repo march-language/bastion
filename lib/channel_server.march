@@ -37,6 +37,7 @@
 mod Bastion.ChannelServer do
 
   import HttpServer
+  import Bastion.Telemetry
   import Bastion.Channel
   alias Bastion.Channel as Channel
   import Bastion.PubSub
@@ -268,7 +269,11 @@ mod Bastion.ChannelServer do
       Some(route) ->
         match route do
         ChannelRoute(_, _, handle_in_fn) ->
-          let new_cc = handle_in_fn(cc, event, payload_json)
+          let new_cc = Bastion.Telemetry.span(
+            ["bastion", "channel", "message"],
+            { event = event, topic = topic },
+            fn () -> handle_in_fn(cc, event, payload_json)
+          )
           replace_active(active_conns, topic, new_cc)
         end
       end

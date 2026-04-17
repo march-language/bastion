@@ -1,0 +1,183 @@
+-- lib/otel.march — Bastion.OpenTelemetry: OTLP HTTP/JSON span exporter.
+--
+-- Attaches to all Bastion telemetry events and POSTs spans to an OpenTelemetry
+-- collector in OTLP protobuf-JSON format.
+--
+-- ── Usage ──────────────────────────────────────────────────────────────────────
+--
+--   -- At application startup:
+--   Bastion.OpenTelemetry.start(
+--     Bastion.OpenTelemetry.default_config("my_app")
+--   )
+--
+--   -- With a custom endpoint and auth header:
+--   Bastion.OpenTelemetry.start({
+--     endpoint     = "https://otel.example.com/v1/traces",
+--     service_name = "my_app",
+--     headers      = [("Authorization", "Bearer <token>")],
+--   })
+
+mod Bastion.OpenTelemetry do
+
+  import Bastion.Telemetry
+  import Crypto
+
+  -- ── Types ─────────────────────────────────────────────────────────────────
+
+  type Config = {
+    endpoint     : String,
+    service_name : String,
+    headers      : List((String, String)),
+  }
+
+  -- ── Public API ────────────────────────────────────────────────────────────
+
+  doc """
+  Build a default OTLP config pointing at a local collector.
+
+      let cfg = Bastion.OpenTelemetry.default_config("my_app")
+  """
+  fn default_config(service_name : String) : Config do
+    {
+      endpoint     = "http://localhost:4318/v1/traces",
+      service_name = service_name,
+      headers      = [],
+    }
+  end
+
+  doc """
+  Attach an OTLP exporter to all Bastion telemetry events.
+
+  On "stop" events a span is built and POSTed asynchronously to the collector.
+  On "exception" events a span with error status is POSTed.
+
+      Bastion.OpenTelemetry.start(config)
+  """
+  fn start(config : Config) do
+    Bastion.Telemetry.attach(
+      "_bastion_otel_exporter",
+      [["bastion"]],
+      fn event_name measurements metadata ->
+        handle_event(config, event_name, measurements, metadata)
+      end
+    )
+  end
+
+  doc """
+  Build an OTLP span payload and POST it to the collector asynchronously.
+
+  Errors from the HTTP call are silently ignored (fire-and-forget).
+
+      Bastion.OpenTelemetry.export_span(config, event_name, 42, meta_json)
+  """
+  fn export_span(
+    config       : Config,
+    event_name   : List(String),
+    duration_ms  : Int,
+    metadata_json : String
+  ) do
+    let trace_id  = Crypto.generate_token(16)
+    let span_id   = Crypto.generate_token(8)
+    let span_name = String.join(event_name, ".")
+    let payload   = build_otlp_payload(
+      config.service_name, span_name, duration_ms,
+      metadata_json, trace_id, span_id
+    )
+    let all_headers = Cons(
+      ("Content-Type", "application/json"),
+      config.headers
+    )
+    Proc.spawn(fn () ->
+      let _ = HttpClient.post(config.endpoint, all_headers, payload)
+      ()
+    )
+  end
+
+  -- ── Private helpers ────────────────────────────────────────────────────────
+
+  pfn handle_event(config : Config, event_name : List(String), measurements, metadata) do
+    let last_seg = last_segment(event_name)
+    if last_seg == "stop" || last_seg == "exception" do
+      let duration    = extract_duration(measurements)
+      let meta_json   = build_meta_json(metadata, last_seg == "exception")
+      export_span(config, event_name, duration, meta_json)
+    else ()
+    end
+  end
+
+  pfn last_segment(name : List(String)) : String do
+    match name do
+    []          -> ""
+    Cons(s, []) -> s
+    Cons(_, t)  -> last_segment(t)
+    end
+  end
+
+  pfn extract_duration(measurements) : Int do
+    measurements.duration_ms
+  end
+
+  -- Build a minimal JSON metadata object suitable for OTLP attributes.
+  pfn build_meta_json(metadata, is_error : Bool) : String do
+    let base = "{\"raw\":\"" ++ json_escape(to_string(metadata)) ++ "\""
+    if is_error do
+      base ++ ",\"error\":true}"
+    else
+      base ++ "}"
+    end
+  end
+
+  -- Build the OTLP protobuf-JSON payload for a single span.
+  pfn build_otlp_payload(
+    service_name  : String,
+    span_name     : String,
+    duration_ms   : Int,
+    metadata_json : String,
+    trace_id      : String,
+    span_id       : String
+  ) : String do
+    let now_ms    = Time.unix_ms()
+    let start_ms  = now_ms - duration_ms
+    let start_ns  = int_to_string(start_ms * 1000000)
+    let end_ns    = int_to_string(now_ms * 1000000)
+    let status_code = extract_status_code(metadata_json)
+    let attrs     = build_attributes(metadata_json)
+    "{\"resourceSpans\":[{" ++
+      "\"resource\":{\"attributes\":[{\"key\":\"service.name\",\"value\":{\"stringValue\":\"" ++
+        json_escape(service_name) ++
+      "\"}}]}," ++
+      "\"scopeSpans\":[{" ++
+        "\"scope\":{\"name\":\"bastion\"}," ++
+        "\"spans\":[{" ++
+          "\"traceId\":\"" ++ trace_id ++ "\"," ++
+          "\"spanId\":\"" ++ span_id ++ "\"," ++
+          "\"name\":\"" ++ json_escape(span_name) ++ "\"," ++
+          "\"kind\":2," ++
+          "\"startTimeUnixNano\":\"" ++ start_ns ++ "\"," ++
+          "\"endTimeUnixNano\":\"" ++ end_ns ++ "\"," ++
+          "\"attributes\":" ++ attrs ++ "," ++
+          "\"status\":{\"code\":" ++ int_to_string(status_code) ++ "}" ++
+        "}]" ++
+      "}]" ++
+    "}]}"
+  end
+
+  -- Return OTLP status code: 2 = ERROR, 1 = OK.
+  pfn extract_status_code(metadata_json : String) : Int do
+    if String.contains(metadata_json, "\"error\":true") do 2 else 1 end
+  end
+
+  -- Build a JSON array of OTLP string attributes from metadata JSON.
+  -- Emits a single "metadata" attribute carrying the raw JSON string.
+  pfn build_attributes(metadata_json : String) : String do
+    "[{\"key\":\"metadata\",\"value\":{\"stringValue\":\"" ++
+      json_escape(metadata_json) ++
+    "\"}}]"
+  end
+
+  pfn json_escape(s : String) : String do
+    let s1 = String.replace_all(s, "\\", "\\\\")
+    String.replace_all(s1, "\"", "\\\"")
+  end
+
+end
