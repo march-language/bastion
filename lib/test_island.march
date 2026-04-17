@@ -1,0 +1,152 @@
+-- lib/test_island.march — Bastion.Test.Island: helpers for testing WASM islands.
+--
+-- Use these helpers in test modules to drive island logic (init, update, render)
+-- and assert on SSR output without a running browser or WASM runtime.
+--
+-- Functions:
+--   render_island/2   — SSR the island wrapped with eager hydration metadata
+--   update_island/3   — apply one update step and return new state JSON
+--   assert_renders_contains/3 — render and assert substring is present
+--   cmd_type/1        — extract the "type" string from a Cmd JSON envelope
+--   assert_no_server_event_attrs/1 — assert HTML has no client event attributes
+
+mod TestIsland do
+
+import Islands
+import Html
+
+-- ── render_island ──────────────────────────────────────────────────────────
+
+doc """
+Render the island's SSR fragment and wrap it with eager hydration metadata.
+
+Calls render_fn(state_json) to produce inner HTML, then wraps it with
+Islands.wrap using the Eager strategy. Returns the full wrapper div HTML.
+
+Parameters:
+  name       — island module name string (e.g. "CounterIsland")
+  render_fn  — function from state JSON string to HTML string
+  state_json — initial state as a JSON string
+
+Use this in tests to assert on SSR output including hydration attributes.
+"""
+fn render_island(name : String, render_fn : String -> String, state_json : String) : String do
+  let ssr_html = render_fn(state_json)
+  Islands.wrap(name, Islands.eager(), state_json, ssr_html)
+end
+
+-- ── update_island ──────────────────────────────────────────────────────────
+
+doc """
+Apply one update step and return the new state JSON.
+
+Calls update_fn(state_json, msg_json) and returns the result.
+
+Parameters:
+  update_fn  — function from (state_json, msg_json) pair to new state JSON
+  state_json — current state as a JSON string
+  msg_json   — message as a JSON string (e.g. "{\"tag\":\"Increment\"}")
+
+Returns the new state JSON string.
+"""
+fn update_island(update_fn : (String, String) -> String, state_json : String, msg_json : String) : String do
+  update_fn((state_json, msg_json))
+end
+
+-- ── assert_renders_contains ────────────────────────────────────────────────
+
+doc """
+Render the island and assert the output contains the expected substring.
+
+On failure, panics with a descriptive message showing the actual output.
+
+Parameters:
+  name               — island module name string
+  render_fn          — function from state JSON string to HTML string
+  state_json         — initial state as a JSON string
+  expected_substring — the substring that must appear in the rendered HTML
+"""
+fn assert_renders_contains(name : String, render_fn : String -> String, state_json : String, expected_substring : String) : Unit do
+  let html = render_island(name, render_fn, state_json)
+  let found = match String.index_of(html, expected_substring) do
+    Some(_) -> true
+    None    -> false
+    end
+  if not(found) do
+    panic("assert_renders_contains failed for island \"" ++ name ++ "\": expected to find \"" ++ expected_substring ++ "\" in:\n" ++ html)
+  else
+    ()
+  end
+end
+
+-- ── cmd_type ───────────────────────────────────────────────────────────────
+
+doc """
+Extract the \"type\" field from a Cmd JSON envelope.
+
+The Bastion Cmd system serialises commands as JSON objects with a top-level
+\"type\" field (e.g. {\"type\":\"HttpGet\", ...}).  This helper parses that
+field and returns the type string so tests can assert on side-effects
+produced by update functions without executing them.
+
+Examples:
+  cmd_type("{\"type\":\"HttpGet\",\"url\":\"/api/users\"}") == "HttpGet"
+  cmd_type("{\"type\":\"None\"}")                           == "None"
+
+Returns the type string, or \"Unknown\" if the field cannot be found.
+"""
+fn cmd_type(cmd_json : String) : String do
+  ti_extract_json_string_field(cmd_json, "type")
+end
+
+-- ── assert_no_server_event_attrs ───────────────────────────────────────────
+
+doc """
+Assert the HTML string contains none of the client event data attributes.
+
+Forbidden attributes (enforced by Islands.validate_server_html):
+  data-on-click, data-on-input, data-on-change, data-on-submit, data-msg
+
+Panics with a descriptive message if any forbidden attribute is found.
+Use this in tests for Server-mode island render functions.
+"""
+fn assert_no_server_event_attrs(html : String) : Unit do
+  let result = Islands.validate_server_html(html)
+  match result do
+  Ok(_)    -> ()
+  Err(msg) -> panic("assert_no_server_event_attrs failed: " ++ msg ++ "\nHTML: " ++ html)
+  end
+end
+
+-- ── Private helpers ────────────────────────────────────────────────────────
+
+-- Extract a string-valued field from a flat JSON object.
+-- Scans for `"key":"value"` patterns.  This is a simple heuristic scanner,
+-- not a full JSON parser — sufficient for the structured Cmd envelopes that
+-- the Bastion runtime produces.
+-- Extract a string-valued field from a flat JSON object using String.split_first.
+-- Avoids String.index_of which has an int-tag bug (make_some_i64 stores a raw
+-- i64 but the compiler emits asr #1 to untag, halving the byte index).
+pfn ti_extract_json_string_field(json : String, key : String) : String do
+  let search = "\"" ++ key ++ "\":\""
+  match String.split_first(json, search) do
+  None           -> "Unknown"
+  Some((_, tail)) -> ti_extract_until_quote(tail, "")
+  end
+end
+
+pfn ti_extract_until_quote(s : String, acc : String) : String do
+  if String.is_empty(s) do
+    acc
+  else
+    let first = String.slice_bytes(s, 0, 1)
+    if first == "\"" do
+      acc
+    else
+      let rest = String.slice_bytes(s, 1, String.byte_size(s) - 1)
+      ti_extract_until_quote(rest, acc ++ first)
+    end
+  end
+end
+
+end

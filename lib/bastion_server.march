@@ -15,6 +15,7 @@ mod BastionServer do
   import Conn
   import Session
   import Depot.Middleware
+  import Bastion.Telemetry
 
   doc """
   Start the Bastion server with the given router and options.
@@ -41,7 +42,7 @@ mod BastionServer do
     BastionServer.start_plug(pipeline, Bastion.default_opts(4000))
   """
   fn start_plug(plug : Conn -> Conn, opts : Opts) : Unit do
-    let wrapped = fn conn -> run_after_send(plug(conn))
+    let wrapped = fn conn -> run_after_send(safe_call_plug(plug, conn))
     match opts do
     Opts(port, mc, it) -> do
       HttpServer.new(port)
@@ -88,6 +89,24 @@ mod BastionServer do
   --
   -- Built-in hook keys:
   --   "session_commit" — flushes the session cookie via Session.commit_from_conn
+
+  -- Calls the plug, catching any exception and emitting a telemetry event
+  -- before re-raising.  Returns the conn unchanged on error so the server
+  -- can still send a response (callers may handle the raised exception).
+  pfn safe_call_plug(plug : Conn -> Conn, conn : Conn) : Conn do
+    let start_ms = Time.now_ms()
+    match HttpServer.try_call(conn, plug) do
+    Ok(result_conn) -> result_conn
+    Err(reason)     ->
+      let duration_ms = Time.now_ms() - start_ms
+      Bastion.Telemetry.execute(
+        ["bastion", "endpoint", "exception"],
+        { duration_ms = duration_ms },
+        { kind = "error", reason = reason }
+      )
+      HttpServer.send_resp(conn, 500, "Internal Server Error")
+    end
+  end
 
   pfn run_after_send(conn : Conn) : Conn do
     List.fold_left(Conn.after_send_hooks(conn), conn, fn (acc, hook_key) ->

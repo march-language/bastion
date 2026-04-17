@@ -30,6 +30,7 @@ mod Depot.Middleware do
 
   import Pool
   import Conn
+  import Bastion.Telemetry
 
   -- Assign keys used internally
   let pool_assign    = "_db_pool"
@@ -112,6 +113,55 @@ mod Depot.Middleware do
   You should not need to call this directly — it is invoked by the server
   after every response when `with_pool/2` was used.
   """
+  fn checkin_from_conn(conn) do
+    -- Only checkin if we actually checked something out
+    match HttpServer.get_assign(conn, checked_assign) do
+    None    -> conn   -- nothing checked out
+    Some(_) ->
+      match (get_pool(conn), get_conn(conn)) do
+      (Some(pool), Some(db_conn)) ->
+        let _ = Pool.checkin(pool, db_conn)
+        conn
+      _ -> conn
+      end
+    end
+  end
+
+  doc """
+  Execute a raw SQL query wrapped in a telemetry span.
+
+  Emits `["bastion", "depot", "query", "start"]` and
+  `["bastion", "depot", "query", "stop"]` around the query, including
+  the SQL string in metadata.  On error, also emits
+  `["bastion", "depot", "query", "exception"]`.
+
+      match Depot.Middleware.query_with_telemetry(conn, "SELECT 1", []) do
+      Ok(rows) -> ...
+      Err(msg) -> ...
+      end
+  """
+  fn query_with_telemetry(conn, sql : String, params) do
+    match get_conn(conn) do
+    None ->
+      Err("no db connection")
+    Some(db_conn) ->
+      let meta = { sql = sql }
+      let result = Bastion.Telemetry.span(["bastion", "depot", "query"], meta, fn () ->
+        Depot.Query.exec_sql(db_conn, sql, params)
+      )
+      match result do
+      Err(reason) ->
+        Bastion.Telemetry.execute(
+          ["bastion", "depot", "query", "exception"],
+          { duration_ms = 0 },
+          { sql = sql, reason = reason }
+        )
+        Err(reason)
+      Ok(_) -> result
+      end
+    end
+  end
+
   fn checkin_from_conn(conn) do
     -- Only checkin if we actually checked something out
     match HttpServer.get_assign(conn, checked_assign) do
