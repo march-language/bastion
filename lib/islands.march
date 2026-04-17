@@ -44,6 +44,10 @@ mod Islands do
   -- from the stdlib.
   type DataflowMode = ServerOwned | ClientOwned
 
+  -- DataFlow is an alias type for use with the dataflow spec helpers below.
+  -- Server and Client map to the same semantics as ServerOwned and ClientOwned.
+  type DataFlow = Server | Client
+
   -- Event — a named event with a JSON payload, dispatched from a child island upward.
   type Event = Event(String, String)
   -- Event(event_name, payload_json)
@@ -117,11 +121,75 @@ mod Islands do
     end
   end
 
-  doc "Convert a DataflowMode to the data-march-dataflow attribute string."
-  fn dataflow_str(mode) : String do
+  -- strategy_str is an alias for hydrate_attr for compatibility.
+  pfn strategy_str(strat : HydrateOn) : String do
+    hydrate_attr(strat)
+  end
+
+  doc """
+  Convert a dataflow mode value to the data-march-dataflow attribute string.
+
+  Accepts either DataflowMode (ServerOwned/ClientOwned) or DataFlow (Server/Client).
+  """
+  fn dataflow_str(mode : DataflowMode) : String do
     match mode do
     ServerOwned -> "server"
     ClientOwned -> "client"
+    end
+  end
+
+  doc "Convert a DataFlow value to the data-march-dataflow attribute string."
+  fn dataflow_mode_str(df : DataFlow) : String do
+    match df do
+    Server -> "server"
+    Client -> "client"
+    end
+  end
+
+  -- ── DataFlow helpers (spec-aligned) ────────────────────────────────────
+
+  doc "Get the event name from an Event."
+  fn event_name(evt : Event) : String do
+    match evt do
+    Event(name, _payload) -> name
+    end
+  end
+
+  doc "Get the JSON payload from an Event."
+  fn event_payload(evt : Event) : String do
+    match evt do
+    Event(_name, payload) -> payload
+    end
+  end
+
+  doc "Encode an Event as a JSON string."
+  fn event_to_json(evt : Event) : String do
+    match evt do
+    Event(name, payload) ->
+      "{\"event\":\"" ++ json_esc(name) ++ "\",\"payload\":" ++ payload ++ "}"
+    end
+  end
+
+  doc "Build a dispatch JSON message with source island info."
+  fn dispatch_json(source_id : String, event : String, payload : String) : String do
+    "{\"source\":\"" ++ json_esc(source_id)
+    ++ "\",\"event\":\"" ++ json_esc(event)
+    ++ "\",\"payload\":" ++ payload ++ "}"
+  end
+
+  -- ── FormConfig helpers ─────────────────────────────────────────────────
+
+  doc "Return the channel topic from a FormConfig."
+  fn form_channel(cfg : FormConfig) : String do
+    match cfg do
+    FormConfig(channel, _) -> channel
+    end
+  end
+
+  doc "Return the redirect path from a FormConfig."
+  fn form_redirect(cfg : FormConfig) : String do
+    match cfg do
+    FormConfig(_, redirect) -> redirect
     end
   end
 
@@ -160,7 +228,7 @@ mod Islands do
   Parameters:
     name       — island module name
     strat      — hydration strategy
-    mode       — Client or Server dataflow mode
+    mode       — Client or Server dataflow mode (DataflowMode or DataFlow)
     state_json — initial state as JSON string
     css        — scoped CSS string (empty string = omit the attribute)
     ssr_html   — server-rendered inner HTML
@@ -323,56 +391,6 @@ mod Islands do
     "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"client\" data-march-hydrate=\"" ++ hydrate_attr(strat) ++ "\" data-march-state='" ++ escape_sq(state_json) ++ "' data-march-form=\"true\" data-march-channel=\"" ++ escape_dq(channel_topic) ++ "\" data-march-redirect=\"" ++ escape_dq(redirect) ++ "\">" ++ form_html ++ "</div>"
   end
 
-  doc "Return the channel topic from a FormConfig."
-  fn form_channel(cfg) : String do
-    match cfg do
-    FormConfig(channel, _) -> channel
-    end
-  end
-
-  doc "Return the redirect path from a FormConfig."
-  fn form_redirect(cfg) : String do
-    match cfg do
-    FormConfig(_, redirect) -> redirect
-    end
-  end
-
-  -- ── Event helpers ─────────────────────────────────────────────────────────
-
-  doc "Return the event name from an Event."
-  fn event_name(evt) : String do
-    match evt do
-    Event(name, _) -> name
-    end
-  end
-
-  doc "Return the payload JSON from an Event."
-  fn event_payload(evt) : String do
-    match evt do
-    Event(_, payload) -> payload
-    end
-  end
-
-  doc "Encode an Event as a JSON object string."
-  fn event_to_json(evt) : String do
-    match evt do
-    Event(name, payload) ->
-      "{\"event\":\"" ++ escape_dq(name) ++ "\",\"payload\":" ++ payload ++ "}"
-    end
-  end
-
-  doc """
-  Build a dispatch JSON object for an upward child-to-parent event.
-
-  Parameters:
-    source  — source child island instance ID
-    event   — event name
-    payload — payload JSON string
-  """
-  fn dispatch_json(source : String, event : String, payload : String) : String do
-    "{\"source\":\"" ++ escape_dq(source) ++ "\",\"event\":\"" ++ escape_dq(event) ++ "\",\"payload\":" ++ payload ++ "}"
-  end
-
   -- ── Server-mode validation ────────────────────────────────────────────────
 
   doc """
@@ -384,10 +402,10 @@ mod Islands do
 
   Returns Ok(html) if the HTML is clean, Err(message) if a forbidden attribute
   is found. Forbidden attributes: data-on-click, data-on-input, data-on-change,
-  data-on-submit, data-msg.
+  data-on-submit, data-on-keydown, data-msg.
   """
   fn validate_server_html(html : String) : Result(String, String) do
-    let forbidden = ["data-on-click", "data-on-input", "data-on-change", "data-on-submit", "data-msg"]
+    let forbidden = ["data-on-click", "data-on-input", "data-on-change", "data-on-submit", "data-on-keydown", "data-msg"]
     find_forbidden_attr(html, forbidden)
   end
 
@@ -590,6 +608,12 @@ mod Islands do
   -- escape_attr is the legacy alias used in older call sites (double-quote escaping).
   pfn escape_attr(s : String) : String do
     escape_dq(s)
+  end
+
+  -- json_esc: escape a string for embedding in JSON string values.
+  pfn json_esc(s : String) : String do
+    let s1 = String.replace_all(s, "\\", "\\\\")
+    String.replace_all(s1, "\"", "\\\"")
   end
 
 end

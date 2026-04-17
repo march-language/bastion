@@ -110,7 +110,7 @@ mod IslandSocket do
   --
   -- The registry maps module names to handler functions:
   --
-  --   dataflow      : Islands.DataflowMode (Client | Server)
+  --   dataflow      : String ("client" | "server")
   --   update_fn     : (state_json, msg_json) -> state_json
   --   render_fn     : state_json -> html_string
   --   merge_fn_opt  : Option((local_json, remote_json) -> state_json)
@@ -120,6 +120,13 @@ mod IslandSocket do
   -- dispatches an event upward to this parent module. Returns the new
   -- parent state JSON.
 
+  -- IslandHandler fields:
+  --   name          : String
+  --   dataflow      : String  ("client" | "server")
+  --   update_fn     : (String, String) -> String
+  --   render_fn     : String -> String
+  --   merge_opt     : Option((String, String) -> String)
+  --   event_handler : Option((String, String, String) -> String)
   type IslandHandler = IslandHandler(
     String,                                    -- module name
     String,                                    -- dataflow mode string ("client" | "server")
@@ -155,12 +162,12 @@ mod IslandSocket do
   end
 
   doc """
-  Register an island module with an explicit DataflowMode.
+  Register an island module with an explicit dataflow mode string.
 
-  Use Islands.Server for display-only islands that receive state exclusively
+  Use "server" for display-only islands that receive state exclusively
   via the channel. Use "client" (the default) for interactive islands.
   """
-  fn register_with_dataflow(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, mode) : Registry do
+  fn register_with_dataflow(reg : Registry, name : String, update_fn : (String, String) -> String, render_fn : String -> String, mode : String) : Registry do
     match reg do
     Registry(handlers) ->
       Registry(Cons(IslandHandler(name, mode, update_fn, render_fn, None, None), handlers))
@@ -223,8 +230,8 @@ mod IslandSocket do
     end
   end
 
-  doc "Return the DataflowMode from an island handler."
-  fn handler_dataflow(h : IslandHandler) do
+  doc "Return the dataflow mode string from an island handler."
+  fn handler_dataflow(h : IslandHandler) : String do
     match h do
     IslandHandler(_, mode, _, _, _, _) -> mode
     end
@@ -565,6 +572,7 @@ mod IslandSocket do
         Some(handler) -> do
           match handler do
           IslandHandler(_, _, update_fn, render_fn, _, _) -> do
+            -- Run update: (current_state_json, msg_json) -> new_state_json
             let new_state = update_fn((current_state, msg_payload))
             let new_store = put_island(store, island_id, IslandEntry(module_name, new_state))
             let html = render_fn(new_state)
@@ -624,6 +632,7 @@ mod IslandSocket do
         Some(handler) -> do
           match handler do
           IslandHandler(_, _, _, render_fn, merge_opt, _) -> do
+            -- Apply merge: use custom merge fn if registered, else server-wins
             let merged_state = match merge_opt do
               Some(merge_fn) -> merge_fn((client_state, server_state))
               None           -> server_state

@@ -237,6 +237,31 @@ mod IslandView do
     "<script src=\"" ++ base_url ++ "/islands-ws.js\"></script>"
   end
 
+  -- ── DataFlow-aware helpers ────────────────────────────────────────────
+
+  doc """
+  Render an island placeholder with a dataflow mode attribute.
+
+  dataflow is "server" or "client".
+  """
+  fn island_with_dataflow(name : String, state_json : String, dataflow : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"" ++ dataflow ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'></div>"
+  end
+
+  doc """
+  Render an island placeholder with SSR content and dataflow mode.
+  """
+  fn island_ssr_with_dataflow(name : String, state_json : String, dataflow : String, inner_html : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"" ++ dataflow ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'>" ++ inner_html ++ "</div>"
+  end
+
+  doc """
+  Render a child island with a parent reference.
+  """
+  fn child_island(name : String, parent_id : String, state_json : String, inner_html : String) : String do
+    "<div data-march-island=\"" ++ name ++ "\" data-march-parent=\"" ++ parent_id ++ "\" data-march-state='" ++ escape_attr(state_json) ++ "'>" ++ inner_html ++ "</div>"
+  end
+
   -- ── Internal helpers ────────────────────────────────────────────────────
 
   -- Escape characters that would break a single-quoted HTML attribute.
