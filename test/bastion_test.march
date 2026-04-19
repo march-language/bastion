@@ -42,7 +42,7 @@ ptype Conn = Conn(
 )
 
 pfn make_conn(meth, path_, qs, req_hdrs, req_body) do
-  let parts = List.filter(string_split(path_, "/"), fn s -> not(string_is_empty(s)))
+  let parts = List.filter(String.split(path_, "/"), fn s -> !(String.is_empty(s)))
   Conn(0, meth, path_, parts, qs, req_hdrs, req_body, 0, Nil, "", false, Nil, NoUpgrade)
 end
 
@@ -553,9 +553,9 @@ describe "ErrorView.render" do
     assert (String.contains(html, "Not Found"))
   end
   test "default_message is non-empty for all common codes" do
-    assert (not (string_is_empty(ErrorView.default_message(404))))
-    assert (not (string_is_empty(ErrorView.default_message(500))))
-    assert (not (string_is_empty(ErrorView.default_message(999))))
+    assert (!(String.is_empty(ErrorView.default_message(404))))
+    assert (!(String.is_empty(ErrorView.default_message(500))))
+    assert (!(String.is_empty(ErrorView.default_message(999))))
   end
 end
 
@@ -967,7 +967,7 @@ describe "Middleware.cors" do
     let ok   = List.any(hdrs, fn h ->
       match h do
       Header(n, v) ->
-        string_to_lowercase(n) == "access-control-allow-origin" && v == "https://app.example.com"
+        String.to_lowercase(n) == "access-control-allow-origin" && v == "https://app.example.com"
       end)
     assert (ok)
   end
@@ -979,9 +979,9 @@ describe "Middleware.cors" do
     let hdrs = HttpServer.resp_headers(out)
     let has_ao = List.any(hdrs, fn h ->
       match h do
-      Header(n, _) -> string_to_lowercase(n) == "access-control-allow-origin"
+      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
       end)
-    assert (not(has_ao))
+    assert (!(has_ao))
   end
   test "never emits wildcard Access-Control-Allow-Origin" do
     let plug = cors(["https://a.example.com"])
@@ -992,9 +992,9 @@ describe "Middleware.cors" do
     let has_star = List.any(hdrs, fn h ->
       match h do
       Header(n, v) ->
-        string_to_lowercase(n) == "access-control-allow-origin" && v == "*"
+        String.to_lowercase(n) == "access-control-allow-origin" && v == "*"
       end)
-    assert (not(has_star))
+    assert (!(has_star))
   end
   test "adds Access-Control-Allow-Methods header" do
     let plug = cors(["https://app.example.com"])
@@ -1003,7 +1003,7 @@ describe "Middleware.cors" do
     let hdrs = HttpServer.resp_headers(out)
     let ok   = List.any(hdrs, fn h ->
       match h do
-      Header(n, _) -> string_to_lowercase(n) == "access-control-allow-methods"
+      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-methods"
       end)
     assert (ok)
   end
@@ -1015,7 +1015,7 @@ describe "Middleware.cors" do
     let ok   = List.any(hdrs, fn h ->
       match h do
       Header(n, v) ->
-        string_to_lowercase(n) == "vary" && v == "Origin"
+        String.to_lowercase(n) == "vary" && v == "Origin"
       end)
     assert (ok)
   end

@@ -60,9 +60,9 @@ mod Bastion.Metrics do
   """
   fn instrument(plug_fn) do
     fn conn -> do
-      let start  = Time.now_ms()
+      let start  = float_to_int(unix_time(()) *. 1000.0)
       let result = plug_fn(conn)
-      let elapsed = Time.now_ms() - start
+      let elapsed = float_to_int(unix_time(()) *. 1000.0) - start
       let status  = HttpServer.status(result)
       let method  = HttpServer.method_to_string(HttpServer.method(conn))
       let path    = HttpServer.path(conn)

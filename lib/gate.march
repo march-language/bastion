@@ -129,11 +129,11 @@ mod Gate do
       let len = String.byte_size(v)
       List.fold_left(constraints, gate, fn (g, c) ->
         match c do
-        LenMin(n) ->
+        LenConstraint.LenMin(n) ->
           if len >= n do g
           else add_error(g, field, "is too short (minimum is " ++ int_to_string(n) ++ " characters)")
           end
-        LenMax(n) ->
+        LenConstraint.LenMax(n) ->
           if len <= n do g
           else add_error(g, field, "is too long (maximum is " ++ int_to_string(n) ++ " characters)")
           end
@@ -159,11 +159,11 @@ mod Gate do
       Some(n) ->
         List.fold_left(constraints, gate, fn (g, c) ->
           match c do
-          NumMin(min) ->
+          NumConstraint.NumMin(min) ->
             if n >= min do g
             else add_error(g, field, "must be greater than or equal to " ++ int_to_string(min))
             end
-          NumMax(max) ->
+          NumConstraint.NumMax(max) ->
             if n <= max do g
             else add_error(g, field, "must be less than or equal to " ++ int_to_string(max))
             end
@@ -182,7 +182,7 @@ mod Gate do
     match get_change(gate, field) do
     None    -> gate
     Some(v) ->
-      if List.member(v, values) do gate
+      if List.member(values, v) do gate
       else add_error(gate, field, "is not included in the list")
       end
     end
@@ -336,7 +336,7 @@ mod Gate do
   end
 
   pfn filter_permitted(params : List((String, String)), permitted : List(String)) : List((String, String)) do
-    List.filter(params, fn (k, _) -> List.member(k, permitted))
+    List.filter(params, fn pair -> match pair do (k, _) -> List.member(permitted, k) end)
   end
 
   pfn lookup_pair(pairs : List((String, String)), key : String) : Option(String) do
@@ -360,7 +360,7 @@ mod Gate do
   end
 
   pfn remove_pair(pairs : List((String, String)), key : String) : List((String, String)) do
-    List.filter(pairs, fn (k, _) -> k != key)
+    List.filter(pairs, fn pair -> match pair do (k, _) -> k != key end)
   end
 
   pfn find_constraint_message(opts : List(ConstraintOpt), default : String) : String do

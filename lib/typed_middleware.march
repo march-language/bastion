@@ -165,14 +165,14 @@ mod TypedMiddleware do
   """
   fn load_current_user(tc : TypedConn(WithSession), loader) : TypedConn(WithSession) do
     let conn = unwrap(tc)
-    let user = match HttpServer.get_assign(conn, "current_user_id") do
-      None     -> None
+    let conn2 = match HttpServer.get_assign(conn, "current_user_id") do
+      None     -> conn
       Some(id) -> match loader(conn, id) do
-        Ok(u)  -> Some(u)
-        Err(_) -> None
+        Ok(_)  -> HttpServer.assign(conn, "current_user", "loaded")
+        Err(_) -> conn
         end
     end
-    TypedConn(HttpServer.assign(conn, "current_user", user))
+    TypedConn(conn2)
   end
 
   doc """
@@ -328,10 +328,9 @@ mod TypedMiddleware do
 
   pfn cookie_pair_match(pair, name, eq_idx) do
     let k   = String.trim(String.slice_bytes(pair, 0, eq_idx))
-    let len = string_byte_length(pair)
-    if k == name
-    then String.slice_bytes(pair, eq_idx + 1, len - eq_idx - 1)
-    else ""
+    let len = String.byte_size(pair)
+    if k == name do String.slice_bytes(pair, eq_idx + 1, len - eq_idx - 1)
+    else "" end
   end
 
   pfn find_cookie_value(pairs, name) do
@@ -342,7 +341,7 @@ mod TypedMiddleware do
       None    -> find_cookie_value(rest, name)
       Some(i) -> do
         let v = cookie_pair_match(pair, name, i)
-        if string_is_empty(v) then find_cookie_value(rest, name) else v
+        if String.is_empty(v) do find_cookie_value(rest, name) else v end
       end
       end
     end
@@ -354,16 +353,15 @@ mod TypedMiddleware do
   pfn verify_and_decode(raw, _secret) do
     match String.index_of(raw, ".") do
     None    -> ""
-    Some(i) -> String.slice_bytes(raw, i + 1, string_byte_length(raw) - i - 1)
+    Some(i) -> String.slice_bytes(raw, i + 1, String.byte_size(raw) - i - 1)
     end
   end
 
   pfn session_pair_match(part, key, eq_idx) do
     let k   = String.slice_bytes(part, 0, eq_idx)
-    let len = string_byte_length(part)
-    if k == key
-    then Some(String.slice_bytes(part, eq_idx + 1, len - eq_idx - 1))
-    else None
+    let len = String.byte_size(part)
+    if k == key do Some(String.slice_bytes(part, eq_idx + 1, len - eq_idx - 1))
+    else None end
   end
 
   pfn find_session_key(parts, key) do

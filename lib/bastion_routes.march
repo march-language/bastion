@@ -22,6 +22,8 @@
 
 mod BastionRoutes do
 
+  import Vault
+
 -- ---------------------------------------------------------------------------
 -- Route registry (Vault-backed)
 -- ---------------------------------------------------------------------------
@@ -30,10 +32,7 @@ mod BastionRoutes do
 -- pattern: "/users/:id" with :param placeholders
 
 pfn registry_table() do
-  match Vault.whereis("bastion_routes") do
-  Some(t) -> t
-  None    -> Vault.new("bastion_routes")
-  end
+  Vault.open("bastion_routes")
 end
 
 doc """
@@ -49,7 +48,7 @@ Register a named route in the global registry.
 fn register(name, method, pattern, arity) do
   let tbl   = registry_table()
   let entry = (name, method, pattern, arity)
-  Vault.set(tbl, name, entry)
+  Vault.put(tbl, name, entry)
 end
 
 doc """
@@ -108,7 +107,7 @@ end
 -- loudly during development.  Extra trailing segments are ignored so that
 -- callers can pass optional tail arguments without juggling.
 pfn fill_pattern(pattern, segments) do
-  let parts = List.filter(String.split(pattern, "/"), fn s -> not(string_is_empty(s)))
+  let parts = List.filter(String.split(pattern, "/"), fn s -> !(String.is_empty(s)))
   fn go(ps, segs, acc) do
     match ps do
     Nil -> acc

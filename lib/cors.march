@@ -136,9 +136,9 @@ mod Cors do
       if is_origin_allowed(origin, cfg.origins) do
         let conn2 = set_origin_header(conn, origin, cfg.origins, cfg.credentials)
         let conn3 = set_expose_headers(conn2, cfg.expose)
-        let conn4 = match HttpServer.get_method(conn3) do
-          "OPTIONS" -> set_preflight_headers(conn3, cfg)
-          _         -> conn3
+        let conn4 = match HttpServer.method(conn3) do
+          :options -> set_preflight_headers(conn3, cfg)
+          _        -> conn3
           end
         conn4
       else

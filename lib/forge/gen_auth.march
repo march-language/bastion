@@ -905,20 +905,20 @@ mod """ ++ pascal ++ """.AccountsFixtures do
 
 alias """ ++ pascal ++ """.Accounts as Accounts
 
-let user_counter = Vault.new()
+let user_counter = Vault.open("_auth_fixtures_counter")
 
 pfn unique_email() do
   let n = match Vault.get(user_counter, "count") do
     Some(c) -> c + 1
     None -> 1
   end
-  Vault.set(user_counter, "count", n)
+  Vault.put(user_counter, "count", n)
   "user" ++ String.from_int(n) ++ "@example.com"
 end
 
 fn user_fixture_attrs(overrides) do
   let defaults = [("email", unique_email()), ("password", "ValidPassword123!")]
-  List.fold_left(defaults, overrides, fn acc -> fn pair -> do
+  List.fold_left(defaults, overrides, fn (acc, pair) -> do
     let (k, v) = pair
     List.filter(acc, fn entry -> do
       let (ek, _) = entry

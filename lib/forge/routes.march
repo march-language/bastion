@@ -379,13 +379,13 @@ end
 -- Convert a snake_case string to PascalCase.
 pfn snake_to_pascal(s) do
   let parts = String.split(s, "_")
-  String.concat(List.map(parts, fn p ->
+  String.join(List.map(parts, fn p ->
     if String.is_empty(p) do p
     else
       String.to_uppercase(String.slice_bytes(p, 0, 1))
         ++ String.slice_bytes(p, 1, String.byte_size(p) - 1)
     end
-  ))
+  ), "")
 end
 
 -- Simple singularizer: remove trailing 's' unless word ends in 'ss'.
@@ -494,7 +494,7 @@ pfn gen_module(mod_name : String, routes : List(ParsedRoute)) : String do
   let deduped = dedup_by_path(routes)
   let sorted  = sort_routes_for_gen(deduped)
   let fns     = List.map(sorted, fn r -> helper_fn(r.path))
-  let body    = String.concat(fns)
+  let body    = String.join(fns, "")
   "-- AUTO-GENERATED — do not edit.\n" ++
   "-- Re-run `forge bastion.routes --gen` to regenerate.\n\n" ++
   "mod " ++ mod_name ++ ".Routes do\n\n" ++

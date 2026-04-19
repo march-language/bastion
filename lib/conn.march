@@ -240,9 +240,11 @@ mod Conn do
 
   pfn build_cookie(name : String, value : String, opts : List((String, String))) : String do
     let base = name ++ "=" ++ value
-    let attrs = String.join(List.map(opts, fn (k, v) ->
-      if String.is_empty(v) do "; " ++ k
-      else "; " ++ k ++ "=" ++ v
+    let attrs = String.join(List.map(opts, fn pair ->
+      match pair do (k, v) ->
+        if String.is_empty(v) do "; " ++ k
+        else "; " ++ k ++ "=" ++ v
+        end
       end
     ), "")
     base ++ attrs

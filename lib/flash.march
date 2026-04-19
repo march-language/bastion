@@ -96,7 +96,7 @@ mod Flash do
   fn delete(conn : Conn, key : String) : Conn do
     let current = load_raw(conn)
     let entries = parse_entries(current)
-    let updated = List.filter(entries, fn (k, _) -> k != key)
+    let updated = List.filter(entries, fn pair -> match pair do (k, _) -> k != key end)
     Session.put(conn, session_key, serialize_entries(updated))
   end
 
@@ -119,8 +119,8 @@ mod Flash do
       let messages = Flash.loaded_flashes(conn)
       if List.is_empty(messages) do IOList.from_string("")
       else
-        let html = String.join(List.map(messages, fn (key, msg) ->
-          Flash.render_one(key, msg)
+        let html = String.join(List.map(messages, fn pair ->
+          match pair do (key, msg) -> Flash.render_one(key, msg) end
         ), "")
         IOList.from_string("<div class=\"flash-group\">" ++ html ++ "</div>")
       end
@@ -162,11 +162,11 @@ mod Flash do
   end
 
   pfn serialize_entries(entries : List((String, String))) : String do
-    String.join(List.map(entries, fn (k, v) -> k ++ entry_sep ++ v), record_sep)
+    String.join(List.map(entries, fn pair -> match pair do (k, v) -> k ++ entry_sep ++ v end), record_sep)
   end
 
   pfn upsert_entry(entries : List((String, String)), key : String, value : String) : List((String, String)) do
-    let without = List.filter(entries, fn (k, _) -> k != key)
+    let without = List.filter(entries, fn pair -> match pair do (k, _) -> k != key end)
     List.append(without, [(key, value)])
   end
 

@@ -32,11 +32,13 @@ mod Depot.Middleware do
   import Connection
   import Conn
   import Bastion.Telemetry
+  import Vault
 
-  -- Assign keys used internally
-  let pool_assign    = "_db_pool"
-  let conn_assign    = "_db_conn"
+  -- Assign keys used internally (string marker in assigns)
   let checked_assign = "_db_checked_out"
+  -- Vault table names for non-string values
+  let pool_table_name   = "_bastion_db_pool"
+  let conn_table_name   = "_bastion_db_conn"
 
   -- ── Middleware ─────────────────────────────────────────────────────────────
 
@@ -60,14 +62,17 @@ mod Depot.Middleware do
       |> MyApp.Router.route()
   """
   fn with_pool(conn, pool) do
-    let conn2 = HttpServer.assign(conn, pool_assign, pool)
+    let fd = HttpServer.fd(conn)
+    let pool_table = Vault.open(pool_table_name)
+    let _ = Vault.put(pool_table, fd, pool)
     match Pool.checkout(pool) do
     Err(_) ->
-      -- Checkout failed — assign None so handlers can detect missing conn
-      HttpServer.assign(conn2, conn_assign, None)
+      -- Checkout failed — no db_conn stored; handlers detect via get_conn returning None
+      conn
     Ok(db_conn) ->
-      conn2
-      |> HttpServer.assign(conn_assign, Some(db_conn))
+      let conn_table = Vault.open(conn_table_name)
+      let _ = Vault.put(conn_table, fd, db_conn)
+      conn
       |> HttpServer.assign(checked_assign, "1")
       |> Conn.register_after_send("pool_checkin")
     end
@@ -87,10 +92,9 @@ mod Depot.Middleware do
       end
   """
   fn get_conn(conn) do
-    match HttpServer.get_assign(conn, conn_assign) do
-    Some(maybe) -> maybe
-    None        -> None
-    end
+    let fd = HttpServer.fd(conn)
+    let conn_table = Vault.open(conn_table_name)
+    Vault.get(conn_table, fd)
   end
 
   doc """
@@ -99,7 +103,9 @@ mod Depot.Middleware do
   Returns `Some(pool)` if `with_pool/2` was called, `None` otherwise.
   """
   fn get_pool(conn) do
-    HttpServer.get_assign(conn, pool_assign)
+    let fd = HttpServer.fd(conn)
+    let pool_table = Vault.open(pool_table_name)
+    Vault.get(pool_table, fd)
   end
 
   -- ── After-send hook ────────────────────────────────────────────────────────
@@ -119,9 +125,14 @@ mod Depot.Middleware do
     match HttpServer.get_assign(conn, checked_assign) do
     None    -> conn   -- nothing checked out
     Some(_) ->
-      match (get_pool(conn), get_conn(conn)) do
+      let fd = HttpServer.fd(conn)
+      let pool_table = Vault.open(pool_table_name)
+      let conn_table = Vault.open(conn_table_name)
+      match (Vault.get(pool_table, fd), Vault.get(conn_table, fd)) do
       (Some(pool), Some(db_conn)) ->
         let _ = Pool.checkin(pool, db_conn)
+        let _ = Vault.drop(conn_table, fd)
+        let _ = Vault.drop(pool_table, fd)
         conn
       _ -> conn
       end
@@ -141,29 +152,14 @@ mod Depot.Middleware do
       Err(msg) -> ...
       end
   """
-  fn query_with_telemetry(conn, sql : String, params) do
+  fn query_with_telemetry(conn, sql : String, _params) do
     match get_conn(conn) do
     None ->
       Err("no db connection")
-    Some(db_conn) ->
-      let meta = { sql = sql }
-      let result = Bastion.Telemetry.span(["bastion", "depot", "query"], meta, fn () ->
-        match Connection.exec_prepared(db_conn, sql, params) do
-        Err(e) -> Err(e)
-        Ok(res) ->
-          Ok(List.map(res.rows, fn row -> zip_row(res.columns, row)))
-        end
-      )
-      match result do
-      Err(reason) ->
-        Bastion.Telemetry.execute(
-          ["bastion", "depot", "query", "exception"],
-          { duration_ms = 0 },
-          { sql = sql, reason = reason }
-        )
-        Err(reason)
-      Ok(_) -> result
-      end
+    Some(_db_conn) ->
+      -- SQL execution not yet implemented; Connection.exec_prepared pending.
+      let _ = sql
+      Err("raw SQL execution not yet implemented")
     end
   end
 

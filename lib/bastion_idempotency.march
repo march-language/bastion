@@ -22,6 +22,8 @@
 
 mod BastionIdempotency do
 
+  import Vault
+
 -- ── Types ─────────────────────────────────────────────────────────────────────
 
 type IdempotencyState
@@ -43,21 +45,18 @@ pfn get_opt(opts, k, default) do
     match pairs do
     Nil -> default
     Cons((pk, pv), rest) ->
-      if pk == k then pv else go(rest)
+      if pk == k do pv else go(rest) end
     end
   end
   go(opts)
 end
 
 pfn get_cache_table(vault_table_name) do
-  match Vault.whereis(vault_table_name) do
-  Some(t) -> t
-  None    -> Vault.new(vault_table_name)
-  end
+  Vault.open(vault_table_name)
 end
 
 pfn make_cache_key(key, scope_prefix) do
-  if String.byte_size(scope_prefix) == 0 then key else scope_prefix ++ ":" ++ key
+  if String.byte_size(scope_prefix) == 0 do key else scope_prefix ++ ":" ++ key end
 end
 
 -- Replay a list of (name, value) response headers onto a conn.
@@ -86,7 +85,7 @@ pfn collect_headers(hs, acc) do
   match hs do
   Nil -> list_reverse(acc, Nil)
   Cons(Header(n, v), rest) ->
-    let lname = string_to_lowercase(n)
+    let lname = String.to_lowercase(n)
     if lname == "idempotency-key" || lname == "x-idempotent-replayed" do
       collect_headers(rest, acc)
     else
@@ -131,7 +130,7 @@ Should be called before the handler runs to prevent concurrent duplicates.
 fn mark_in_progress(vault_table_name, key, scope) do
   let tbl       = get_cache_table(vault_table_name)
   let cache_key = make_cache_key(key, scope)
-  Vault.set(tbl, cache_key, InProgress(0))
+  Vault.put(tbl, cache_key, InProgress(0))
 end
 
 doc """
@@ -142,7 +141,7 @@ Store a completed response in the Vault cache.
 fn complete_entry(vault_table_name, key, scope, status, headers, body) do
   let tbl       = get_cache_table(vault_table_name)
   let cache_key = make_cache_key(key, scope)
-  Vault.set(tbl, cache_key, Completed(status, headers, body, 0))
+  Vault.put(tbl, cache_key, Completed(status, headers, body, 0))
 end
 
 doc """
@@ -175,7 +174,7 @@ handler again.
 fn invalidate(vault_table_name, key, scope) do
   let tbl       = get_cache_table(vault_table_name)
   let cache_key = make_cache_key(key, scope)
-  Vault.drop(tbl, cache_key)
+  Vault.delete(tbl, cache_key)
 end
 
 pfn protect_with_key(conn, handler, vault_table, scope, ikey) do
@@ -197,12 +196,12 @@ pfn protect_with_key(conn, handler, vault_table, scope, ikey) do
   end
   None -> do
     -- First request: mark in-progress, run handler, persist result.
-    Vault.set(tbl, cache_key, InProgress(0))
+    Vault.put(tbl, cache_key, InProgress(0))
     let result = handler(conn)
     let result_status = HttpServer.status(result)
     if result_status >= 500 do
       -- Do not cache server errors; drop the InProgress sentinel.
-      Vault.drop(tbl, cache_key)
+      Vault.delete(tbl, cache_key)
       HttpServer.put_resp_header(result, "idempotency-key", ikey)
     else
       -- Capture response headers so the next replay reproduces the original
@@ -210,7 +209,7 @@ pfn protect_with_key(conn, handler, vault_table, scope, ikey) do
       -- and every cached replay dropped every header the handler set.
       let captured  = capture_headers(result)
       let completed = Completed(result_status, captured, HttpServer.resp_body(result), 0)
-      Vault.set(tbl, cache_key, completed)
+      Vault.put(tbl, cache_key, completed)
       let r1 = HttpServer.put_resp_header(result, "idempotency-key", ikey)
       HttpServer.put_resp_header(r1, "x-idempotent-replayed", "false")
     end

@@ -96,7 +96,7 @@ mod Bastion.Dev do
     Ping         ->
       WebSocket.send_frame(ws, Pong)
       reload_ws_loop(ws)
-    Close(_, _)  -> ()
+    WsFrame.Close(_, _)  -> ()
     _            -> reload_ws_loop(ws)
     end
   end
@@ -146,9 +146,9 @@ mod Bastion.Dev do
         |> router_plug
   """
   fn request_timer(conn) do
-    let start    = Time.now_ms()
+    let start    = float_to_int(unix_time(()) *. 1000.0)
     let result   = conn
-    let elapsed  = Time.now_ms() - start
+    let elapsed  = float_to_int(unix_time(()) *. 1000.0) - start
     HttpServer.put_resp_header(result, "x-request-time", String.from_int(elapsed) ++ "ms")
   end
 
@@ -160,9 +160,9 @@ mod Bastion.Dev do
       conn |> Bastion.Dev.server_timing
   """
   fn server_timing(conn) do
-    let start = Time.now_ms()
+    let start = float_to_int(unix_time(()) *. 1000.0)
     let result = conn
-    let elapsed = Time.now_ms() - start
+    let elapsed = float_to_int(unix_time(()) *. 1000.0) - start
     let timing  = "total;dur=" ++ String.from_int(elapsed)
     HttpServer.put_resp_header(result, "server-timing", timing)
   end
@@ -180,8 +180,10 @@ mod Bastion.Dev do
     let path    = HttpServer.path(conn)
     let headers = HttpServer.req_headers(conn)
     println("[Bastion.Dev] " ++ HttpServer.method_to_string(method) ++ " " ++ path)
-    List.each(headers, fn (k, v) ->
-      println("  " ++ k ++ ": " ++ v)
+    List.each(headers, fn pair ->
+      match pair do
+      Header(k, v) -> println("  " ++ k ++ ": " ++ v)
+      end
     )
     conn
   end

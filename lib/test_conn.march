@@ -68,7 +68,7 @@ mod Bastion.Test.Conn do
       conn |> put_req_header("Authorization", "Bearer abc123")
   """
   fn put_req_header(conn, key : String, value : String) do
-    HttpServer.put_req_header(conn, String.downcase(key), value)
+    HttpServer.put_req_header(conn, String.to_lowercase(key), value)
   end
 
   doc """
@@ -140,13 +140,13 @@ mod Bastion.Test.Conn do
       assert_header(conn, "location", "/users/1")
   """
   fn assert_header(conn, key : String, value : String) do
-    let lower_key = String.downcase(key)
+    let lower_key = String.to_lowercase(key)
     let headers   = HttpServer.resp_headers(conn)
     let found = List.any(headers, fn pair -> do
       let (hk, hv) = pair
-      String.downcase(hk) == lower_key && hv == value
+      String.to_lowercase(hk) == lower_key && hv == value
     end)
-    if not(found) do
+    if !(found) do
       panic(
         "assert_header failed: expected header \""
         ++ key ++ ": " ++ value ++ "\" not found in response"
@@ -163,7 +163,7 @@ mod Bastion.Test.Conn do
   """
   fn assert_html_contains(conn, text : String) do
     let body = HttpServer.resp_body(conn)
-    if not(String.contains(body, text)) do
+    if !(String.contains(body, text)) do
       panic("assert_html_contains failed: response body does not contain \"" ++ text ++ "\"")
     else conn end
   end
@@ -180,7 +180,7 @@ mod Bastion.Test.Conn do
     let is_redirect =
       status == 301 || status == 302 || status == 303
       || status == 307 || status == 308
-    if not(is_redirect) do
+    if !(is_redirect) do
       panic(
         "assert_redirected_to failed: expected redirect status (3xx) but got "
         ++ String.from_int(status)
@@ -215,7 +215,7 @@ mod Bastion.Test.Conn do
       None ->
         panic("assert_json failed: no content-type header in response")
       Some(v) ->
-        if not(String.contains(v, "application/json")) do
+        if !(String.contains(v, "application/json")) do
           panic("assert_json failed: content-type is \"" ++ v ++ "\", not application/json")
         else () end
     end
@@ -232,11 +232,11 @@ mod Bastion.Test.Conn do
 
   doc "Return the value of a response header, or None if absent."
   fn get_resp_header(conn, key : String) : Option(String) do
-    let lower_key = String.downcase(key)
+    let lower_key = String.to_lowercase(key)
     let headers   = HttpServer.resp_headers(conn)
     List.find_map(headers, fn pair -> do
       let (hk, hv) = pair
-      if String.downcase(hk) == lower_key do Some(hv) else None end
+      if String.to_lowercase(hk) == lower_key do Some(hv) else None end
     end)
   end
 

@@ -69,7 +69,7 @@ Parameters:
 fn assert_renders_contains(name : String, render_fn : String -> String, state_json : String, expected_substring : String) : Unit do
   let html = render_island(name, render_fn, state_json)
   let found = String.contains(html, expected_substring)
-  if not(found) do
+  if !(found) do
     panic("assert_renders_contains failed for island \"" ++ name ++ "\": expected to find \"" ++ expected_substring ++ "\" in:\n" ++ html)
   else
     ()

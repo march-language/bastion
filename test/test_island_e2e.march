@@ -20,7 +20,7 @@ pfn e2e_contains(haystack : String, needle : String) : Bool do
 end
 
 pfn assert_has(haystack : String, needle : String, label : String) : Unit do
-  if not(e2e_contains(haystack, needle)) do
+  if !(e2e_contains(haystack, needle)) do
     panic("assert_has [" ++ label ++ "]: expected to find \"" ++ needle ++ "\" in:\n" ++ haystack)
   else
     ()

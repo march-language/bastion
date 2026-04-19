@@ -56,9 +56,9 @@ mod Bastion.ChannelServer do
   -- match wins.
 
   type ChannelRoute = ChannelRoute(
-    String,                                                           -- topic prefix
-    (Channel.ChannelConn, String, String) -> Result(Channel.ChannelConn, String),  -- join_fn
-    (Channel.ChannelConn, String, String) -> Channel.ChannelConn     -- handle_in_fn
+    String,                                                                    -- topic prefix
+    Bastion.Channel.ChannelConn -> String -> String -> Result(Bastion.Channel.ChannelConn, String),  -- join_fn
+    Bastion.Channel.ChannelConn -> String -> String -> Bastion.Channel.ChannelConn   -- handle_in_fn
   )
 
   type ChannelRoutes = ChannelRoutes(List(ChannelRoute))
@@ -87,8 +87,8 @@ mod Bastion.ChannelServer do
   fn add_route(
     routes : ChannelRoutes,
     prefix : String,
-    join_fn : (Channel.ChannelConn, String, String) -> Result(Channel.ChannelConn, String),
-    handle_in_fn : (Channel.ChannelConn, String, String) -> Channel.ChannelConn
+    join_fn : Bastion.Channel.ChannelConn -> String -> String -> Result(Bastion.Channel.ChannelConn, String),
+    handle_in_fn : Bastion.Channel.ChannelConn -> String -> String -> Bastion.Channel.ChannelConn
   ) : ChannelRoutes do
     match routes do
     ChannelRoutes(rs) ->
@@ -104,7 +104,7 @@ mod Bastion.ChannelServer do
 
   Requests to any other path pass through unchanged.
   """
-  fn plug(routes : ChannelRoutes) : Channel.ChannelConn -> Channel.ChannelConn do
+  fn plug(routes : ChannelRoutes) do
     plug_at("/_bastion/channel", routes)
   end
 
@@ -134,7 +134,7 @@ mod Bastion.ChannelServer do
 
   pfn channel_loop(
     ws_sock,
-    active_conns : List((String, Channel.ChannelConn)),
+    active_conns : List((String, Bastion.Channel.ChannelConn)),
     routes : ChannelRoutes,
     conn_id : String
   ) do
@@ -145,7 +145,7 @@ mod Bastion.ChannelServer do
     Ping ->
       WebSocket.send_frame(ws_sock, Pong)
       channel_loop(ws_sock, active_conns, routes, conn_id)
-    Close(_, _) ->
+    WsFrame.Close(_, _) ->
       PubSub.unsubscribe_all(conn_id)
     _ ->
       channel_loop(ws_sock, active_conns, routes, conn_id)
@@ -157,10 +157,10 @@ mod Bastion.ChannelServer do
   pfn handle_frame(
     ws_sock,
     text : String,
-    active_conns : List((String, Channel.ChannelConn)),
+    active_conns : List((String, Bastion.Channel.ChannelConn)),
     routes : ChannelRoutes,
     conn_id : String
-  ) : List((String, Channel.ChannelConn)) do
+  ) : List((String, Bastion.Channel.ChannelConn)) do
     match Json.parse(text) do
     Err(_) -> active_conns
     Ok(msg) ->
@@ -187,10 +187,10 @@ mod Bastion.ChannelServer do
     topic : String,
     params_json : String,
     ref : String,
-    active_conns : List((String, Channel.ChannelConn)),
+    active_conns : List((String, Bastion.Channel.ChannelConn)),
     routes : ChannelRoutes,
     conn_id : String
-  ) : List((String, Channel.ChannelConn)) do
+  ) : List((String, Bastion.Channel.ChannelConn)) do
     -- Already joined — idempotent OK
     match find_active(active_conns, topic) do
     Some(_) ->
@@ -233,9 +233,9 @@ mod Bastion.ChannelServer do
     ws_sock,
     topic : String,
     ref : String,
-    active_conns : List((String, Channel.ChannelConn)),
+    active_conns : List((String, Bastion.Channel.ChannelConn)),
     conn_id : String
-  ) : List((String, Channel.ChannelConn)) do
+  ) : List((String, Bastion.Channel.ChannelConn)) do
     -- Use a synthetic ChannelConn just to build the sub_id
     let dummy_push = fn (_, _) -> ()
     let dummy_cc   = Channel.new_conn(topic, conn_id, dummy_push)
@@ -255,9 +255,9 @@ mod Bastion.ChannelServer do
     event : String,
     payload_json : String,
     ref : String,
-    active_conns : List((String, Channel.ChannelConn)),
+    active_conns : List((String, Bastion.Channel.ChannelConn)),
     routes : ChannelRoutes
-  ) : List((String, Channel.ChannelConn)) do
+  ) : List((String, Bastion.Channel.ChannelConn)) do
     match find_active(active_conns, topic) do
     None ->
       -- Not joined; send error reply and leave conn unchanged
@@ -304,9 +304,9 @@ mod Bastion.ChannelServer do
   -- ── Active-conn helpers ───────────────────────────────────────────────────
 
   pfn find_active(
-    active_conns : List((String, Channel.ChannelConn)),
+    active_conns : List((String, Bastion.Channel.ChannelConn)),
     topic : String
-  ) : Option(Channel.ChannelConn) do
+  ) : Option(Bastion.Channel.ChannelConn) do
     match active_conns do
     []                    -> None
     Cons((t, cc), rest)   ->
@@ -315,10 +315,10 @@ mod Bastion.ChannelServer do
   end
 
   pfn replace_active(
-    active_conns : List((String, Channel.ChannelConn)),
+    active_conns : List((String, Bastion.Channel.ChannelConn)),
     topic : String,
-    new_cc : Channel.ChannelConn
-  ) : List((String, Channel.ChannelConn)) do
+    new_cc : Bastion.Channel.ChannelConn
+  ) : List((String, Bastion.Channel.ChannelConn)) do
     List.map(active_conns, fn pair ->
       let (t, cc) = pair
       if t == topic do (topic, new_cc) else (t, cc) end

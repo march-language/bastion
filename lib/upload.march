@@ -100,7 +100,7 @@ mod Bastion.Upload do
     match ct_opt do
     None      -> Err(NoContentType)
     Some(ct)  ->
-      let body = HttpServer.body(conn)
+      let body = HttpServer.req_body(conn)
       parse(body, ct, opts)
     end
   end
@@ -267,7 +267,8 @@ mod Bastion.Upload do
     let headers   = parse_headers(header_block)
     let disp      = find_header(headers, "content-disposition")
     let part_ct   = find_header_or(headers, "content-type", "application/octet-stream")
-    let name      = extract_disp_param(disp, "name")
+    let name_opt  = extract_disp_param(disp, "name")
+    let name      = match name_opt do Some(n) -> n | None -> "" end
     let filename  = extract_disp_param(disp, "filename")
     match filename do
     Some(fname) ->
@@ -317,7 +318,7 @@ mod Bastion.Upload do
   end
 
   pfn find_header(headers : List((String, String)), name : String) : String do
-    match List.filter(headers, fn (k, _) -> k == name) do
+    match List.filter(headers, fn pair -> match pair do (k, _) -> k == name end) do
     Cons((_, v), _) -> v
     []              -> ""
     end

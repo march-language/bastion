@@ -20,40 +20,12 @@
 
 mod BastionCache do
 
-  -- ── Private helpers ───────────────────────────────────────────────────────
+  import Vault
 
-  pfn get_table(name) do
-    match Vault.whereis(name) do
-    Some(tbl) -> tbl
-    None      -> Vault.new(name)
-    end
-  end
+  -- ── Private helpers ───────────────────────────────────────────────────────
 
   pfn format_etag(hash) do
     "\"" ++ hash ++ "\""
-  end
-
-  pfn store_response(tbl, key, st, body, ttl_secs) do
-    let entry = (st, body)
-    if ttl_secs == 0 do
-      Vault.set(tbl, key, entry)
-    else
-      Vault.set_ttl(tbl, key, entry, ttl_secs)
-    end
-  end
-
-  pfn restore_cached_response(conn, entry) do
-    match entry do
-    (st, body) -> HttpServer.send_resp(conn, st, body)
-    end
-  end
-
-  pfn store_fragment(tbl, key, frag, ttl_secs) do
-    if ttl_secs == 0 do
-      Vault.set(tbl, key, frag)
-    else
-      Vault.set_ttl(tbl, key, frag, ttl_secs)
-    end
   end
 
   -- ── ETag middleware ───────────────────────────────────────────────────────
@@ -102,12 +74,20 @@ mod BastionCache do
       end)
   """
   fn cached(conn, key, ttl_secs, generator) do
-    let tbl = get_table("response_cache")
+    let tbl = Vault.open("response_cache")
     match Vault.get(tbl, key) do
-    Some(entry) -> restore_cached_response(conn, entry)
+    Some(entry) ->
+      let (st, body) = entry
+      HttpServer.send_resp(conn, st, body)
     None -> do
       let result = generator(conn)
-      store_response(tbl, key, HttpServer.status(result), HttpServer.resp_body(result), ttl_secs)
+      let entry = (HttpServer.status(result), HttpServer.resp_body(result))
+      if ttl_secs == 0 do
+        Vault.put(tbl, key, entry)
+      else
+        let _ = Vault.put_ttl(tbl, key, entry, ttl_secs)
+        ()
+      end
       result
     end
     end
@@ -128,12 +108,17 @@ mod BastionCache do
       end)
   """
   fn fragment(key, ttl_secs, generator) do
-    let tbl = get_table("fragment_cache")
+    let tbl = Vault.open("fragment_cache")
     match Vault.get(tbl, key) do
     Some(cached_frag) -> cached_frag
     None -> do
       let frag = generator()
-      store_fragment(tbl, key, frag, ttl_secs)
+      if ttl_secs == 0 do
+        Vault.put(tbl, key, frag)
+      else
+        let _ = Vault.put_ttl(tbl, key, frag, ttl_secs)
+        ()
+      end
       frag
     end
     end
@@ -143,15 +128,13 @@ mod BastionCache do
 
   doc """
   Delete a single entry from the named Vault table by key.
-  No-op if the table or key does not exist.
+  No-op if the key does not exist.
 
       BastionCache.invalidate("response_cache", "posts:index")
   """
   fn invalidate(table_name, key) do
-    match Vault.whereis(table_name) do
-    Some(tbl) -> Vault.drop(tbl, key)
-    None      -> :ok
-    end
+    let tbl = Vault.open(table_name)
+    Vault.delete(tbl, key)
   end
 
   doc """
@@ -161,22 +144,16 @@ mod BastionCache do
       BastionCache.invalidate_prefix("fragment_cache", "user:42:")
   """
   fn invalidate_prefix(table_name, prefix) do
-    let prefix_len = string_byte_length(prefix)
-    fn drop_matching(tbl, keys) do
-      match keys do
-      Nil -> :ok
-      Cons(k, rest) -> do
-        let key_len = string_byte_length(k)
-        let matches = key_len >= prefix_len && string_slice(k, 0, prefix_len) == prefix
-        if matches do Vault.drop(tbl, k) else :ok end
-        drop_matching(tbl, rest)
+    let prefix_len = String.byte_size(prefix)
+    let tbl  = Vault.open(table_name)
+    let keys = Vault.keys(tbl)
+    List.each(keys, fn k ->
+      let key_len = String.byte_size(k)
+      if key_len >= prefix_len && String.slice_bytes(k, 0, prefix_len) == prefix do
+        Vault.delete(tbl, k)
+      else ()
       end
-      end
-    end
-    match Vault.whereis(table_name) do
-    Some(tbl) -> drop_matching(tbl, Vault.keys(tbl))
-    None      -> :ok
-    end
+    )
   end
 
   -- ── Cache-Control helpers ─────────────────────────────────────────────────

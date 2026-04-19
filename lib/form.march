@@ -179,7 +179,7 @@ mod Form do
               enctype : String \\ "",
               render_inner) : IOList do
       let csrf_token = CSRF.tag_string(conn)
-      let method_str = if String.is_empty(method) do "post" else String.downcase(method) end
+      let method_str = if String.is_empty(method) do "post" else String.to_lowercase(method) end
       let class_attr  = if String.is_empty(class)   do "" else " class=\""   ++ Html.escape(class)   ++ "\"" end
       let id_attr     = if String.is_empty(id)      do "" else " id=\""      ++ Html.escape(id)      ++ "\"" end
       let enctype_attr = if String.is_empty(enctype) do "" else " enctype=\"" ++ Html.escape(enctype) ++ "\"" end

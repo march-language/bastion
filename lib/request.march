@@ -123,7 +123,7 @@ mod Request do
     None    -> parse_pair_no_eq(pair)
     Some(i) -> do
       let k = String.slice_bytes(pair, 0, i)
-      let v = String.slice_bytes(pair, i + 1, string_byte_length(pair) - i - 1)
+      let v = String.slice_bytes(pair, i + 1, String.byte_size(pair) - i - 1)
       Some((k, v))
     end
     end
