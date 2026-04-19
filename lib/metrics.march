@@ -22,7 +22,6 @@
 mod Bastion.Metrics do
 
   import HttpServer
-  import Vault
 
   let table_name    = "_bastion_metrics"
   let total_key     = "total"

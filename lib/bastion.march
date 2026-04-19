@@ -75,10 +75,10 @@ mod Bastion do
         match rest do
         Cons(name, _) -> cmd_new(name)
         Nil ->
-          panic("error: missing app name\nusage: bastion new <app_name>")
+          todo("error: missing app name\nusage: bastion new <app_name>")
         end
       _ ->
-        panic("error: unknown command: " ++ cmd)
+        todo("error: unknown command: " ++ cmd)
       end
     _ -> do
       print_help()
@@ -98,7 +98,7 @@ mod Bastion do
   pfn cmd_new(name : String) : Unit do
     match Dir.exists(name) do
     true ->
-      panic("error: directory '" ++ name ++ "' already exists")
+      todo("error: directory '" ++ name ++ "' already exists")
     false -> do
       println("Creating Bastion app: " ++ name)
       scaffold(name)

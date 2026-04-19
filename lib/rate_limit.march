@@ -42,7 +42,6 @@
 
 mod RateLimit do
 
-  import Vault
   import Conn
 
   -- ── Key helpers ───────────────────────────────────────────────────────────

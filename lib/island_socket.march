@@ -50,9 +50,7 @@
 mod IslandSocket do
 
   import HttpServer
-  import Bastion.PubSub
   alias Bastion.PubSub as PubSub
-  import Crypto
   import Vault
 
   -- Vault table for island→channel topic mappings (keyed by "conn_id:island_id").
@@ -747,26 +745,6 @@ mod IslandSocket do
   -- code can surface it without having to parse human prose.
   pfn make_error_json(island_id : String, code : String) : String do
     "{\"island\":\"" ++ json_escape(island_id) ++ "\",\"type\":\"error\",\"payload\":{\"code\":\"" ++ json_escape(code) ++ "\"}}"
-  end
-
-  -- ── Response helpers ──────────────────────────────────────────────────
-
-  pfn send_render(ws_sock : WsSocket, island_id : String, html : String) : Unit do
-    WebSocket.send_frame(ws_sock, TextFrame(make_render_json(island_id, html)))
-  end
-
-  pfn send_state(ws_sock : WsSocket, island_id : String, state_json : String) : Unit do
-    WebSocket.send_frame(ws_sock, TextFrame(make_state_json(island_id, state_json)))
-  end
-
-  pfn send_merge(ws_sock : WsSocket, island_id : String, state_json : String) : Unit do
-    WebSocket.send_frame(ws_sock, TextFrame(make_merge_json(island_id, state_json)))
-  end
-
-  -- send_props pushes updated props from a parent to a specific child instance.
-  pfn send_props(ws_sock : WsSocket, child_id : String, props_json : String) : Unit do
-    let response = "{\"island\":\"" ++ json_escape(child_id) ++ "\",\"type\":\"props\",\"payload\":" ++ props_json ++ "}"
-    WebSocket.send_frame(ws_sock, TextFrame(response))
   end
 
   -- ── JSON helpers ────────────────────────────────────────────────────────

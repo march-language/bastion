@@ -30,7 +30,6 @@
 mod Cors do
 
   import HttpServer
-  import Conn
 
   -- ── Config type ─────────────────────────────────────────────────────────────
 
@@ -205,9 +204,15 @@ mod Cors do
 
   pfn join_strings(lst, sep) do
     match lst do
-    Nil            -> ""
-    Cons(h, Nil)   -> h
-    Cons(h, rest)  -> h ++ sep ++ join_strings(rest, sep)
+    Nil           -> ""
+    Cons(h, rest) -> join_strings_acc(rest, sep, h)
+    end
+  end
+
+  pfn join_strings_acc(lst, sep, acc) do
+    match lst do
+    Nil           -> acc
+    Cons(h, rest) -> join_strings_acc(rest, sep, acc ++ sep ++ h)
     end
   end
 

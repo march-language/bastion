@@ -83,15 +83,15 @@ mod Bastion.Test.Auth do
     let status = Conn.status(conn)
     let location = Conn.get_resp_header(conn, "location")
     if status != 302 do
-      panic("Assertion failed: " ++ msg ++ " (expected 302 redirect, got " ++ int_to_string(status) ++ ")")
+      todo("Assertion failed: " ++ msg ++ " (expected 302 redirect, got " ++ int_to_string(status) ++ ")")
     else ()
     end
     match location do
     None ->
-      panic("Assertion failed: " ++ msg ++ " (302 but no location header)")
+      todo("Assertion failed: " ++ msg ++ " (302 but no location header)")
     Some(loc) ->
       if loc != "/login" && loc != "/users/log_in" do
-        panic("Assertion failed: " ++ msg ++ " (redirected to " ++ loc ++ ", expected /login or /users/log_in)")
+        todo("Assertion failed: " ++ msg ++ " (redirected to " ++ loc ++ ", expected /login or /users/log_in)")
       else ()
       end
     end

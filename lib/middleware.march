@@ -8,9 +8,6 @@
 
 mod Middleware do
 
-  import HttpServer
-  import Logger
-  import Crypto
 
   doc """
   Execute a list of plugs in order, stopping when the conn is halted.

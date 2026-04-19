@@ -32,7 +32,6 @@
 
 mod Bastion.Upload do
 
-  import HttpServer
   import Conn
 
   -- ── Types ─────────────────────────────────────────────────────────────────
@@ -193,10 +192,14 @@ mod Bastion.Upload do
   end
 
   pfn drop_terminal(parts : List(String)) : List(String) do
+    List.reverse(drop_terminal_acc(parts, Nil))
+  end
+
+  pfn drop_terminal_acc(parts : List(String), acc : List(String)) : List(String) do
     match parts do
-    []               -> []
-    [_]              -> []   -- this is the terminal "--\r\n" chunk
-    Cons(p, rest)    -> Cons(p, drop_terminal(rest))
+    []            -> acc
+    [_]           -> acc   -- this is the terminal "--\r\n" chunk
+    Cons(p, rest) -> drop_terminal_acc(rest, Cons(p, acc))
     end
   end
 

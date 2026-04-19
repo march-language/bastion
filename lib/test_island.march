@@ -70,7 +70,7 @@ fn assert_renders_contains(name : String, render_fn : String -> String, state_js
   let html = render_island(name, render_fn, state_json)
   let found = String.contains(html, expected_substring)
   if !(found) do
-    panic("assert_renders_contains failed for island \"" ++ name ++ "\": expected to find \"" ++ expected_substring ++ "\" in:\n" ++ html)
+    todo("assert_renders_contains failed for island \"" ++ name ++ "\": expected to find \"" ++ expected_substring ++ "\" in:\n" ++ html)
   else
     ()
   end
@@ -111,7 +111,7 @@ fn assert_no_server_event_attrs(html : String) : Unit do
   let result = Islands.validate_server_html(html)
   match result do
   Ok(_)    -> ()
-  Err(msg) -> panic("assert_no_server_event_attrs failed: " ++ msg ++ "\nHTML: " ++ html)
+  Err(msg) -> todo("assert_no_server_event_attrs failed: " ++ msg ++ "\nHTML: " ++ html)
   end
 end
 

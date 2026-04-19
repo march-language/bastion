@@ -37,12 +37,9 @@
 mod Bastion.ChannelServer do
 
   import HttpServer
-  import Bastion.Telemetry
   import Bastion.Channel
   alias Bastion.Channel as Channel
-  import Bastion.PubSub
   alias Bastion.PubSub as PubSub
-  import Crypto
 
   -- ── Route type ────────────────────────────────────────────────────────────
   --

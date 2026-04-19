@@ -11,8 +11,6 @@
 
 mod Forge.DepotMigrate do
 
-  import CmdDepot
-
   fn main() do
     match CmdDepot.migrate() do
     Ok(_)    -> ()

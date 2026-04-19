@@ -123,7 +123,7 @@ mod Bastion.Test.Conn do
   fn assert_status(conn, expected : Int) do
     let actual = HttpServer.status(conn)
     if actual != expected do
-      panic(
+      todo(
         "assert_status failed: expected "
         ++ String.from_int(expected)
         ++ " but got "
@@ -147,7 +147,7 @@ mod Bastion.Test.Conn do
       String.to_lowercase(hk) == lower_key && hv == value
     end)
     if !(found) do
-      panic(
+      todo(
         "assert_header failed: expected header \""
         ++ key ++ ": " ++ value ++ "\" not found in response"
       )
@@ -164,7 +164,7 @@ mod Bastion.Test.Conn do
   fn assert_html_contains(conn, text : String) do
     let body = HttpServer.resp_body(conn)
     if !(String.contains(body, text)) do
-      panic("assert_html_contains failed: response body does not contain \"" ++ text ++ "\"")
+      todo("assert_html_contains failed: response body does not contain \"" ++ text ++ "\"")
     else conn end
   end
 
@@ -181,7 +181,7 @@ mod Bastion.Test.Conn do
       status == 301 || status == 302 || status == 303
       || status == 307 || status == 308
     if !(is_redirect) do
-      panic(
+      todo(
         "assert_redirected_to failed: expected redirect status (3xx) but got "
         ++ String.from_int(status)
       )
@@ -189,10 +189,10 @@ mod Bastion.Test.Conn do
       let location = get_resp_header(conn, "location")
       match location do
       None ->
-        panic("assert_redirected_to failed: no Location header in response")
+        todo("assert_redirected_to failed: no Location header in response")
       Some(loc) ->
         if loc != path do
-          panic(
+          todo(
             "assert_redirected_to failed: expected Location \""
             ++ path ++ "\" but got \"" ++ loc ++ "\""
           )
@@ -213,15 +213,15 @@ mod Bastion.Test.Conn do
     let ct = get_resp_header(conn, "content-type")
     let _ = match ct do
       None ->
-        panic("assert_json failed: no content-type header in response")
+        todo("assert_json failed: no content-type header in response")
       Some(v) ->
         if !(String.contains(v, "application/json")) do
-          panic("assert_json failed: content-type is \"" ++ v ++ "\", not application/json")
+          todo("assert_json failed: content-type is \"" ++ v ++ "\", not application/json")
         else () end
     end
     let body = HttpServer.resp_body(conn)
     if body != expected_json do
-      panic(
+      todo(
         "assert_json failed: expected body \""
         ++ expected_json ++ "\" but got \"" ++ body ++ "\""
       )

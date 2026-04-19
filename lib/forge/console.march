@@ -43,15 +43,6 @@ type ConsoleConfig = {
   banner      : String
 }
 
-pfn default_config(app_name : String) : ConsoleConfig do
-  {
-    app_name    = app_name,
-    with_server = false,
-    imports     = Nil,
-    banner      = default_banner(app_name)
-  }
-end
-
 pfn default_banner(app_name : String) : String do
   "\n" ++
   "  Bastion Console — " ++ app_name ++ "\n" ++
@@ -112,48 +103,6 @@ end
 
 pfn server_port() : String do
   Env.get("PORT", "4000")
-end
-
--- ---------------------------------------------------------------------------
--- REPL configuration
--- ---------------------------------------------------------------------------
-
-pfn build_repl_opts(app_name : String, extra_imports : List(String)) do
-  let prompt      = "iex(" ++ app_name ++ ")> "
-  let cont_prompt = "...(" ++ app_name ++ ")  "
-
-  -- Default bindings available in every console session
-  let bindings : List((String, String)) = Nil
-
-  -- Modules to import automatically
-  let default_imports = Cons("Bastion.Vault",
-                        Cons("Bastion.PubSub",
-                        Cons("Bastion.Metrics",
-                        Nil)))
-  let all_imports = List.append(default_imports, extra_imports)
-
-  -- Pre-evaluation prologue — runs before the REPL prompt appears
-  let prologue = build_prologue(all_imports)
-
-  {
-    prompt       = prompt,
-    cont_prompt  = cont_prompt,
-    bindings     = bindings,
-    prologue     = prologue,
-    history_file = Env.get("HOME", ".") ++ "/.march_history",
-    inspect_opts = {
-      limit  = 50,
-      pretty = true,
-      width  = 80
-    }
-  }
-end
-
-pfn build_prologue(imports : List(String)) : String do
-  let import_lines = List.map(imports, fn m ->
-    "import " ++ m
-  )
-  String.join(import_lines, "\n")
 end
 
 -- ---------------------------------------------------------------------------

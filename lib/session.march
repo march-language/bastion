@@ -41,8 +41,6 @@
 
 mod Session do
 
-  import Conn
-  import Crypto
 
   -- Assigns key where the secret_key_base is stored for the commit hook.
   let secret_assign = "_session_secret"

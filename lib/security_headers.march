@@ -26,8 +26,6 @@
 
 mod SecurityHeaders do
 
-  import HttpServer
-
   -- ── Default header suite ────────────────────────────────────────────────────
 
   doc """

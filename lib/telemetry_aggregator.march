@@ -17,7 +17,6 @@
 mod Bastion.Telemetry.Aggregator do
 
   import Vault
-  import Bastion.Telemetry
 
   -- Vault table names
   let events_table   = "_bastion_agg_events"
@@ -183,7 +182,7 @@ mod Bastion.Telemetry.Aggregator do
   -- Insert or update the RequestSummary for this request_id in the ring buffer.
   pfn upsert_summary(
     request_id : String,
-    event_name : List(String),
+    _event_name : List(String),
     duration   : Int,
     now_ms     : Int,
     measurements,

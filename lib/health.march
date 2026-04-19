@@ -29,7 +29,6 @@
 mod Bastion.Health do
 
   import HttpServer
-  import Vault
 
   let health_table = "_bastion_health"
   let drain_key    = "drain"

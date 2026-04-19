@@ -12,8 +12,6 @@
 
 mod Forge.DepotReset do
 
-  import CmdDepot
-
   fn main() do
     match CmdDepot.reset() do
     Ok(_)    -> ()

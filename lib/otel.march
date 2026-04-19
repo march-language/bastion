@@ -19,8 +19,6 @@
 
 mod Bastion.OpenTelemetry do
 
-  import Bastion.Telemetry
-  import Crypto
 
   -- ── Types ─────────────────────────────────────────────────────────────────
 
@@ -178,9 +176,5 @@ mod Bastion.OpenTelemetry do
     String.replace_all(s1, "\"", "\\\"")
   end
 
-  -- Stubbed: apply_extra_headers is a no-op until HttpClient is available.
-  pfn apply_extra_headers(client, _headers : List((String, String))) do
-    client
-  end
 
 end

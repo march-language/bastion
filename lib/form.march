@@ -22,7 +22,6 @@
 
 mod Form do
 
-  import Html
   import Gate
 
   -- ── Low-level tag builders ────────────────────────────────────────────────

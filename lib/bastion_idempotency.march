@@ -22,8 +22,6 @@
 
 mod BastionIdempotency do
 
-  import Vault
-
 -- ── Types ─────────────────────────────────────────────────────────────────────
 
 type IdempotencyState

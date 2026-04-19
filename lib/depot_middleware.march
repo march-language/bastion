@@ -29,10 +29,6 @@
 mod Depot.Middleware do
 
   import Pool
-  import Connection
-  import Conn
-  import Bastion.Telemetry
-  import Vault
 
   -- Assign keys used internally (string marker in assigns)
   let checked_assign = "_db_checked_out"
@@ -160,17 +156,6 @@ mod Depot.Middleware do
       -- SQL execution not yet implemented; Connection.exec_prepared pending.
       let _ = sql
       Err("raw SQL execution not yet implemented")
-    end
-  end
-
-  -- Zip a column-name list with a row of Option(String) values into an assoc list.
-  -- SQL NULLs (None) are omitted so callers can use record_get without unwrapping.
-  pfn zip_row(cols, vals) do
-    match (cols, vals) do
-    (Nil, _)                         -> Nil
-    (_, Nil)                         -> Nil
-    (Cons(c, cs), Cons(None, vs))    -> zip_row(cs, vs)
-    (Cons(c, cs), Cons(Some(v), vs)) -> Cons((c, v), zip_row(cs, vs))
     end
   end
 

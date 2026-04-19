@@ -21,19 +21,12 @@ end
 
 pfn assert_has(haystack : String, needle : String, label : String) : Unit do
   if !(e2e_contains(haystack, needle)) do
-    panic("assert_has [" ++ label ++ "]: expected to find \"" ++ needle ++ "\" in:\n" ++ haystack)
+    todo("assert_has [" ++ label ++ "]: expected to find \"" ++ needle ++ "\" in:\n" ++ haystack)
   else
     ()
   end
 end
 
-pfn assert_lacks(haystack : String, needle : String, label : String) : Unit do
-  if e2e_contains(haystack, needle) do
-    panic("assert_lacks [" ++ label ++ "]: expected NOT to find \"" ++ needle ++ "\" in:\n" ++ haystack)
-  else
-    ()
-  end
-end
 
 -- Convenience: call CounterIsland.update and get the new state
 pfn apply_msg(state, msg) do

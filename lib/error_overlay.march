@@ -21,7 +21,6 @@
 mod Bastion.ErrorOverlay do
 
   import HttpServer
-  import Html
 
 -- ---------------------------------------------------------------------------
 -- Public API

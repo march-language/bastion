@@ -20,24 +20,9 @@ import Test
 
 -- ── Helpers ───────────────────────────────────────────────────────────────
 
-pfn string_contains(haystack : String, needle : String) : Bool do
-  match String.index_of(haystack, needle) do
-  Some(_) -> true
-  None    -> false
-  end
-end
-
 pfn assert_contains(haystack : String, needle : String, msg : String) : Unit do
   if !(String.contains(haystack, needle)) do
     Test.fail(msg ++ " — expected to contain: \"" ++ needle ++ "\" in: \"" ++ haystack ++ "\"")
-  else
-    ()
-  end
-end
-
-pfn assert_not_contains(haystack : String, needle : String, msg : String) : Unit do
-  if string_contains(haystack, needle) do
-    Test.fail(msg ++ " — expected NOT to contain: \"" ++ needle ++ "\" in: \"" ++ haystack ++ "\"")
   else
     ()
   end

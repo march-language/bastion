@@ -29,7 +29,6 @@
 mod Bastion.Idempotency do
 
   import HttpServer
-  import Vault
 
   let table_name = "_bastion_idempotency"
 

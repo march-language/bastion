@@ -44,9 +44,7 @@
 
 mod Auth do
 
-  import Session
   import Conn
-  import Crypto
 
   -- ── Session keys / cookie names ───────────────────────────────────────────
 
@@ -219,7 +217,7 @@ mod Auth do
 
       conn |> Auth.log_in(user.id, None)
   """
-  fn log_in(conn, user_id, remember_token \\ None) do
+  fn log_in(conn, user_id, remember_token) do
     let conn2 =
       Session.clear(conn)
       |> Session.put(user_id_session_key, int_to_string(user_id))
@@ -256,7 +254,7 @@ mod Auth do
         Accounts.delete_remember_token(conn, token)
       end))
   """
-  fn log_out(conn, token_deleter \\ None) do
+  fn log_out(conn, token_deleter) do
     let conn2 = match token_deleter do
       None -> conn
       Some(deleter) ->

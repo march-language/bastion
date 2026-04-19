@@ -38,7 +38,6 @@ mod Cache do
 
   import HttpServer
   import Vault
-  import Crypto
 
   -- Vault table names for each cache type
   let response_table = "_bastion_response_cache"

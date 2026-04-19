@@ -51,9 +51,9 @@ mod Bastion.Test.Depot do
       Bastion.Test.Depot.checkout(["users", "user_tokens"])
   """
   fn checkout(tables) do
-    if not DepotTest.active() do
-      panic("Bastion.Test.Depot.checkout/1 called before start_sandbox/0 — call Bastion.Test.Depot.start_sandbox() once before your test suite")
-    end
+    if !DepotTest.active() do
+      todo("Bastion.Test.Depot.checkout/1 called before start_sandbox/0 — call Bastion.Test.Depot.start_sandbox() once before your test suite")
+    else () end
     DepotTest.checkout(tables)
   end
 

@@ -82,22 +82,6 @@ pfn field_type_to_depot(user_type) do
   end
 end
 
-pfn field_type_to_march(user_type) do
-  match user_type do
-  "string"    -> "String"
-  "text"      -> "String"
-  "integer"   -> "Int"
-  "int"       -> "Int"
-  "float"     -> "Float"
-  "boolean"   -> "Bool"
-  "bool"      -> "Bool"
-  "datetime"  -> "String"    -- UtcDatetime as string pending datetime stdlib
-  "date"      -> "String"
-  "uuid"      -> "String"
-  other       -> snake_to_pascal(other)
-  end
-end
-
 -- Parse "field:type" into (field_name, user_type)
 pfn parse_field(s) do
   match String.split_first(s, ":") do

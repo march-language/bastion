@@ -137,6 +137,7 @@ mod Gate do
           if len <= n do g
           else add_error(g, field, "is too long (maximum is " ++ int_to_string(n) ++ " characters)")
           end
+        _ -> g
         end
       )
     end
@@ -167,6 +168,7 @@ mod Gate do
             if n <= max do g
             else add_error(g, field, "must be less than or equal to " ++ int_to_string(max))
             end
+          _ -> g
           end
         )
       end
@@ -350,11 +352,17 @@ mod Gate do
   end
 
   pfn upsert_pair(pairs : List((String, String)), key : String, value : String) : List((String, String)) do
+    List.reverse(upsert_pair_acc(pairs, key, value, Nil))
+  end
+
+  pfn upsert_pair_acc(pairs : List((String, String)), key : String, value : String, acc : List((String, String))) : List((String, String)) do
     match pairs do
-    Nil -> [(key, value)]
+    Nil -> Cons((key, value), acc)
     Cons((k, v), rest) ->
-      if k == key do Cons((key, value), rest)
-      else Cons((k, v), upsert_pair(rest, key, value))
+      if k == key do
+        List.fold_left(rest, Cons((key, value), acc), fn (a, item) -> Cons(item, a))
+      else
+        upsert_pair_acc(rest, key, value, Cons((k, v), acc))
       end
     end
   end

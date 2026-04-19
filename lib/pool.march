@@ -24,8 +24,8 @@ mod Pool do
   }
 
   doc "Start a connection pool from a PoolConfig. Returns the pool handle."
-  fn start(config : PoolConfig) : Pool do
-    panic("Pool.start: not available in test stub — use the depot library at runtime")
+  fn start(_config : PoolConfig) : Pool do
+    todo("Pool.start: not available in test stub — use the depot library at runtime")
   end
 
   doc "Return a default PoolConfig for a given connection config."
@@ -35,13 +35,13 @@ mod Pool do
   end
 
   doc "Check out a connection from the pool."
-  fn checkout(pool : Pool) : Result(DbConn, String) do
-    panic("Pool.checkout: not available in test stub")
+  fn checkout(_pool : Pool) : Result(DbConn, String) do
+    todo("Pool.checkout: not available in test stub")
   end
 
   doc "Return a connection to the pool."
-  fn checkin(pool : Pool, db_conn : DbConn) do
-    panic("Pool.checkin: not available in test stub")
+  fn checkin(_pool : Pool, _db_conn : DbConn) do
+    todo("Pool.checkin: not available in test stub")
   end
 
 end

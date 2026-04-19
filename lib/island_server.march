@@ -36,7 +36,6 @@
 
 mod Bastion.IslandServer do
 
-  import Bastion.PubSub
   alias Bastion.PubSub as PubSub
 
   -- The event name used for all island state pushes.  IslandSocket subscribers

@@ -11,22 +11,22 @@ mod CmdDepot do
 
   doc "Run all pending Depot migrations."
   fn migrate() : Result(String, String) do
-    panic("CmdDepot.migrate: not available in stub — run forge bastion.depot.migrate")
+    todo("CmdDepot.migrate: not available in stub — run forge bastion.depot.migrate")
   end
 
   doc "Roll back the last N Depot migrations."
-  fn rollback(n : Int) : Result(String, String) do
-    panic("CmdDepot.rollback: not available in stub")
+  fn rollback(_n : Int) : Result(String, String) do
+    todo("CmdDepot.rollback: not available in stub")
   end
 
   doc "List all migrations and their status."
   fn migrations() : Result(String, String) do
-    panic("CmdDepot.migrations: not available in stub")
+    todo("CmdDepot.migrations: not available in stub")
   end
 
   doc "Reset the database by dropping and recreating all tables."
   fn reset() : Result(String, String) do
-    panic("CmdDepot.reset: not available in stub")
+    todo("CmdDepot.reset: not available in stub")
   end
 
 end

@@ -255,9 +255,13 @@ mod Bastion.Cmd do
   end
 
   pfn map_list(cmds : List(Cmd(a)), f : a -> b) : List(Cmd(b)) do
+    List.reverse(map_list_acc(cmds, f, Nil))
+  end
+
+  pfn map_list_acc(cmds : List(Cmd(a)), f : a -> b, acc : List(Cmd(b))) : List(Cmd(b)) do
     match cmds do
-    Nil -> Nil
-    Cons(c, rest) -> Cons(map(c, f), map_list(rest, f))
+    Nil           -> acc
+    Cons(c, rest) -> map_list_acc(rest, f, Cons(map(c, f), acc))
     end
   end
 

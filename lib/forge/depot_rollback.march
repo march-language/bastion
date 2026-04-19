@@ -10,8 +10,6 @@
 
 mod Forge.DepotRollback do
 
-  import CmdDepot
-
   fn main() do
     let raw  = Env.get("FORGE_TASK_ARGS", "")
     let step = match raw do

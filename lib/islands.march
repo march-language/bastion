@@ -121,11 +121,6 @@ mod Islands do
     end
   end
 
-  -- strategy_str is an alias for hydrate_attr for compatibility.
-  pfn strategy_str(strat : HydrateOn) : String do
-    hydrate_attr(strat)
-  end
-
   doc """
   Convert a dataflow mode value to the data-march-dataflow attribute string.
 
@@ -141,8 +136,8 @@ mod Islands do
   doc "Convert a DataFlow value to the data-march-dataflow attribute string."
   fn dataflow_mode_str(df : DataFlow) : String do
     match df do
-    DataFlow.Server -> "server"
     DataFlow.Client -> "client"
+    _ -> "server"
     end
   end
 
@@ -603,11 +598,6 @@ mod Islands do
     let s2 = String.replace_all(s1, "\"", "&quot;")
     let s3 = String.replace_all(s2, "<",  "&lt;")
     String.replace_all(s3, ">", "&gt;")
-  end
-
-  -- escape_attr is the legacy alias used in older call sites (double-quote escaping).
-  pfn escape_attr(s : String) : String do
-    escape_dq(s)
   end
 
   -- json_esc: escape a string for embedding in JSON string values.

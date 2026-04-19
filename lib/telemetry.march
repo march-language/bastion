@@ -37,8 +37,6 @@
 
 mod Bastion.Telemetry do
 
-  import Vault
-
   -- Vault table storing registered handlers
   let table_name = "_bastion_telemetry"
 

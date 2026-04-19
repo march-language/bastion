@@ -7,23 +7,23 @@ mod Test do
 
   doc "Fail immediately with a descriptive message."
   fn fail(msg : String) : Unit do
-    panic("FAIL: " ++ msg)
+    todo("FAIL: " ++ msg)
   end
 
   doc "Assert that cond is true; panic with msg if not."
   fn assert_true(cond : Bool, msg : String) : Unit do
-    if !(cond) do panic("Assertion failed: " ++ msg) else () end
+    if !(cond) do todo("Assertion failed: " ++ msg) else () end
   end
 
   doc "Assert that cond is false; panic with msg if not."
   fn assert_false(cond : Bool, msg : String) : Unit do
-    if cond do panic("Assertion failed: expected false — " ++ msg) else () end
+    if cond do todo("Assertion failed: expected false — " ++ msg) else () end
   end
 
   doc "Assert two ints are equal."
   fn assert_eq_int(a : Int, b : Int, msg : String) : Unit do
     if a != b do
-      panic("Assertion failed: " ++ msg
+      todo("Assertion failed: " ++ msg
         ++ " (got " ++ int_to_string(a)
         ++ ", expected " ++ int_to_string(b) ++ ")")
     else () end
@@ -32,7 +32,7 @@ mod Test do
   doc "Assert two strings are equal."
   fn assert_eq_str(a : String, b : String, msg : String) : Unit do
     if a != b do
-      panic("Assertion failed: " ++ msg
+      todo("Assertion failed: " ++ msg
         ++ " (got \"" ++ a ++ "\", expected \"" ++ b ++ "\")")
     else () end
   end
@@ -40,7 +40,7 @@ mod Test do
   doc "Assert two booleans are equal."
   fn assert_eq_bool(a : Bool, b : Bool, msg : String) : Unit do
     if a != b do
-      panic("Assertion failed: " ++ msg
+      todo("Assertion failed: " ++ msg
         ++ " (got " ++ bool_to_string(a)
         ++ ", expected " ++ bool_to_string(b) ++ ")")
     else () end
@@ -50,7 +50,7 @@ mod Test do
   fn assert_some(opt : Option(a), msg : String) : a do
     match opt do
     Some(x) -> x
-    None    -> panic("Assertion failed: expected Some but got None — " ++ msg)
+    None    -> todo("Assertion failed: expected Some but got None — " ++ msg)
     end
   end
 
@@ -58,7 +58,7 @@ mod Test do
   fn assert_none(opt : Option(a), msg : String) : Unit do
     match opt do
     None    -> ()
-    Some(_) -> panic("Assertion failed: expected None but got Some — " ++ msg)
+    Some(_) -> todo("Assertion failed: expected None but got Some — " ++ msg)
     end
   end
 
@@ -66,7 +66,7 @@ mod Test do
   fn assert_ok(res : Result(a, e), msg : String) : a do
     match res do
     Ok(x)  -> x
-    Err(_) -> panic("Assertion failed: expected Ok but got Err — " ++ msg)
+    Err(_) -> todo("Assertion failed: expected Ok but got Err — " ++ msg)
     end
   end
 
@@ -74,7 +74,7 @@ mod Test do
   fn assert_err(res : Result(a, e), msg : String) : e do
     match res do
     Err(e) -> e
-    Ok(_)  -> panic("Assertion failed: expected Err but got Ok — " ++ msg)
+    Ok(_)  -> todo("Assertion failed: expected Err but got Ok — " ++ msg)
     end
   end
 

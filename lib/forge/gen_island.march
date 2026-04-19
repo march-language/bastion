@@ -24,12 +24,6 @@ mod Forge.GenIsland do
 
 -- ── Name helpers ─────────────────────────────────────────────────────────────
 
-pfn capitalize(s) do
-  if String.is_empty(s) do s
-  else String.to_uppercase(String.slice_bytes(s, 0, 1)) ++ String.slice_bytes(s, 1, String.byte_size(s) - 1)
-  end
-end
-
 pfn pascal_to_snake(s) do
   let chars = String.split(s, "")
   pascal_to_snake_loop(chars, "", true)
