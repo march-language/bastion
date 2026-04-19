@@ -4,16 +4,15 @@
 -- delivery layer for Channel broadcasts and any other real-time fan-out the
 -- framework or user code needs.
 --
--- Subscriptions are stored in a Vault table keyed by topic.  Each entry is a
--- list of (subscriber_id, send_fn) pairs.  Broadcasting a message iterates
--- the list and calls each send_fn inline.  This means broadcasts happen in
--- the caller's execution context — there is no separate queue or thread.
+-- Subscriptions are stored in a Vault table keyed by "topic:sub_id".
+-- The value is the send_fn callback.  To iterate all subs for a topic,
+-- we use Vault.all() and filter by the topic prefix.
 --
 -- ── Usage ─────────────────────────────────────────────────────────────────────
 --
 --   -- Subscribe to a topic (typically done inside a WebSocket loop):
 --   let sub_id = "conn:" ++ conn_id ++ ":" ++ topic
---   Bastion.PubSub.subscribe(topic, sub_id, fn (event, payload_json) ->
+--   Bastion.PubSub.subscribe(topic, sub_id, fn event -> fn payload_json ->
 --     WebSocket.send_frame(ws, TextFrame(make_frame(topic, event, payload_json)))
 --   )
 --
@@ -25,10 +24,7 @@
 
 mod Bastion.PubSub do
 
-  import Vault
-
-  -- Vault table: topic → List((sub_id, send_fn))
-  -- send_fn signature: (event : String, payload_json : String) -> ()
+  -- Vault table: "topic:sub_id" → send_fn (String -> String -> ())
   let table_name = "_bastion_pubsub"
 
   -- ── Subscription management ───────────────────────────────────────────────
@@ -37,50 +33,43 @@ mod Bastion.PubSub do
   Subscribe to a topic with a delivery callback.
 
   sub_id    — unique string identifying this subscription (e.g. "conn:abc123:room:42")
-  send_fn   — fn(event, payload_json) called on each broadcast to this topic
+  send_fn   — fn(event)(payload_json) called on each broadcast to this topic
 
   If sub_id is already subscribed, the old send_fn is replaced.
   """
   fn subscribe(topic : String, sub_id : String, send_fn) do
-    let table   = Vault.open(table_name)
-    let current = Vault.get_or(table, topic, [])
-    let pruned  = List.filter(current, fn pair ->
-      let (id, _) = pair
-      id != sub_id
-    )
-    Vault.put(table, topic, Cons((sub_id, send_fn), pruned))
+    let table = Vault.open(table_name)
+    Vault.put(table, topic ++ ":" ++ sub_id, send_fn)
   end
 
   doc """
   Unsubscribe from a topic.  No-op if sub_id is not registered.
   """
   fn unsubscribe(topic : String, sub_id : String) do
-    let table   = Vault.open(table_name)
-    let current = Vault.get_or(table, topic, [])
-    let pruned  = List.filter(current, fn pair ->
-      let (id, _) = pair
-      id != sub_id
-    )
-    Vault.put(table, topic, pruned)
+    let table = Vault.open(table_name)
+    Vault.delete(table, topic ++ ":" ++ sub_id)
   end
 
   doc """
   Remove all subscriptions held by a connection across every topic.
   Call this when a WebSocket connection closes to avoid stale send_fns.
-
-  Iterates every topic in the PubSub table — O(topics).  Fine for typical
-  connection counts; revisit if topics grow into the millions.
   """
   fn unsubscribe_all(conn_id : String) do
     let table  = Vault.open(table_name)
-    let topics = Vault.keys(table)
-    List.each(topics, fn topic ->
-      let current = Vault.get_or(table, topic, [])
-      let pruned  = List.filter(current, fn pair ->
-        let (id, _) = pair
-        !String.starts_with(id, "conn:" ++ conn_id ++ ":")
-      )
-      Vault.put(table, topic, pruned)
+    let all    = Vault.all(table)
+    let prefix = "conn:" ++ conn_id ++ ":"
+    List.each(all, fn pair ->
+      let (key, _) = pair
+      -- key format is "topic:sub_id" and sub_id starts with "conn:conn_id:"
+      -- We need to check if the sub portion starts with the conn prefix
+      -- sub_id is the part after the first colon sequence
+      -- Simplest: store sub_id with no separator ambiguity
+      -- key = topic ++ ":" ++ sub_id; sub_id contains "conn:" prefix
+      -- We delete if the key contains ":" ++ prefix anywhere
+      if String.contains(key, ":" ++ prefix) do
+        Vault.delete(table, key)
+      else ()
+      end
     )
   end
 
@@ -88,9 +77,6 @@ mod Bastion.PubSub do
 
   doc """
   Broadcast an event to all subscribers of a topic.
-
-  Calls each subscriber's send_fn inline.  If a send_fn raises, the
-  remaining subscribers still receive the broadcast (errors are isolated).
 
       Bastion.PubSub.broadcast("room:42", "message:new", "{\"body\":\"hi\"}")
   """
@@ -101,9 +87,6 @@ mod Bastion.PubSub do
   doc """
   Broadcast an event to all subscribers of a topic, excluding one subscriber.
 
-  Use this from a channel handler to avoid echoing a message back to the
-  connection that originated it.
-
       Bastion.PubSub.broadcast_from(sub_id, "room:42", "typing:start", "{}")
   """
   fn broadcast_from(exclude_sub_id : String, topic : String, event : String, payload_json : String) do
@@ -113,15 +96,26 @@ mod Bastion.PubSub do
   -- ── Internal delivery ─────────────────────────────────────────────────────
 
   pfn deliver(topic : String, exclude : Option(String), event : String, payload_json : String) do
-    let table = Vault.open(table_name)
-    let subs  = Vault.get_or(table, topic, [])
-    List.each(subs, fn pair ->
-      let (id, send_fn) = pair
-      let skip = match exclude do
-        None    -> false
-        Some(x) -> x == id
+    let table  = Vault.open(table_name)
+    let all    = Vault.all(table)
+    let prefix = topic ++ ":"
+    let plen   = String.byte_size(prefix)
+    List.each(all, fn pair ->
+      let (key, send_fn) = pair
+      let klen = String.byte_size(key)
+      if klen > plen && String.slice_bytes(key, 0, plen) == prefix do
+        let sub_id = String.slice_bytes(key, plen, klen - plen)
+        let skip = match exclude do
+          None    -> false
+          Some(x) -> x == sub_id
+        end
+        if !skip do
+          let _ = send_fn(event, payload_json)
+          ()
+        else ()
+        end
+      else ()
       end
-      if !skip do send_fn(event, payload_json) else () end
     )
   end
 
@@ -129,8 +123,15 @@ mod Bastion.PubSub do
 
   doc "Return the number of active subscribers for a topic."
   fn subscriber_count(topic : String) : Int do
-    let table = Vault.open(table_name)
-    List.length(Vault.get_or(table, topic, []))
+    let table  = Vault.open(table_name)
+    let all    = Vault.all(table)
+    let prefix = topic ++ ":"
+    let plen   = String.byte_size(prefix)
+    List.length(List.filter(all, fn pair ->
+      let (key, _) = pair
+      let klen = String.byte_size(key)
+      klen > plen && String.slice_bytes(key, 0, plen) == prefix
+    ))
   end
 
   doc "Return true if any subscriber is registered for a topic."

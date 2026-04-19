@@ -161,13 +161,18 @@ pfn build_schema_fields(fields, acc) do
 end
 
 pfn build_cast_list(fields) do
-  let names = List.map(fields, fn (n, _) -> "\"" ++ n ++ "\"")
+  let names = List.map(fields, fn field -> do
+    let (n, _) = field
+    "\"" ++ n ++ "\""
+  end)
   String.join(names, ", ")
 end
 
 pfn build_required_list(fields) do
-  -- All fields are required by default
-  let names = List.map(fields, fn (n, _) -> "\"" ++ n ++ "\"")
+  let names = List.map(fields, fn field -> do
+    let (n, _) = field
+    "\"" ++ n ++ "\""
+  end)
   String.join(names, ", ")
 end
 

@@ -44,7 +44,7 @@ mod Bastion.Channel do
     assigns : List((String, String)),
     topic   : String,
     conn_id : String,
-    push_fn : (String, String) -> ()
+    push_fn : String -> String -> ()
   }
 
   -- ── Constructor (framework-internal) ─────────────────────────────────────
@@ -53,7 +53,7 @@ mod Bastion.Channel do
   Build a new ChannelConn.  Called by Bastion.ChannelServer when a join is
   accepted; user code does not normally need to call this directly.
   """
-  fn new_conn(topic : String, conn_id : String, push_fn : (String, String) -> ()) : ChannelConn do
+  fn new_conn(topic : String, conn_id : String, push_fn : String -> String -> ()) : ChannelConn do
     { assigns = [], topic = topic, conn_id = conn_id, push_fn = push_fn }
   end
 
@@ -103,7 +103,7 @@ mod Bastion.Channel do
       conn |> Channel.push("error", "{\"code\":\"not_found\"}")
   """
   fn push(cc : ChannelConn, event : String, payload_json : String) do
-    cc.push_fn(event, payload_json)
+    let _ = cc.push_fn(event, payload_json)
     cc
   end
 

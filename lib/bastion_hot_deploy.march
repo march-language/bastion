@@ -20,6 +20,8 @@
 
 mod BastionHotDeploy do
 
+  import Vault
+
 -- ---------------------------------------------------------------------------
 -- Types
 -- ---------------------------------------------------------------------------
@@ -37,11 +39,12 @@ type DrainConfig = DrainConfig(
 -- Private helpers
 -- ---------------------------------------------------------------------------
 
-pfn get_state_table() do
-  match Vault.whereis("hot_deploy_state") do
-  Some(tbl) -> tbl
-  None      -> Vault.new("hot_deploy_state")
-  end
+pfn get_status_table() do
+  Vault.open("hot_deploy_status")
+end
+
+pfn get_inflight_table() do
+  Vault.open("hot_deploy_inflight")
 end
 
 -- Decode stored String → DrainStatus (default Serving for missing key).
@@ -65,7 +68,7 @@ pfn encode_status(status) do
 end
 
 pfn set_status(tbl, status) do
-  Vault.set(tbl, "status", encode_status(status))
+  Vault.put(tbl, "status", encode_status(status))
 end
 
 -- ---------------------------------------------------------------------------
@@ -109,7 +112,7 @@ Return the current DrainStatus.  Defaults to Serving if no state has been set.
     BastionHotDeploy.get_status()
 """
 fn get_status() do
-  let tbl = get_state_table()
+  let tbl = get_status_table()
   let s   = Vault.get_or(tbl, "status", "serving")
   decode_status(s)
 end
@@ -151,28 +154,30 @@ Transition to Draining (from Serving).  Records the drain start timestamp as 0
     BastionHotDeploy.start_drain()
 """
 fn start_drain() do
-  let tbl = get_state_table()
+  let tbl = get_status_table()
+  let inf = get_inflight_table()
   set_status(tbl, Draining)
-  Vault.set(tbl, "drain_started_at", 0)
+  Vault.put(inf, "drain_started_at", 0)
 end
 
 doc "Transition to Stopped."
 fn stop_drain() do
-  let tbl = get_state_table()
+  let tbl = get_status_table()
   set_status(tbl, Stopped)
 end
 
 doc "Transition to Starting."
 fn mark_starting() do
-  let tbl = get_state_table()
+  let tbl = get_status_table()
   set_status(tbl, Starting)
 end
 
 doc "Transition to Serving.  Clears the drain_started_at timestamp."
 fn mark_serving() do
-  let tbl = get_state_table()
+  let tbl = get_status_table()
+  let inf = get_inflight_table()
   set_status(tbl, Serving)
-  Vault.set(tbl, "drain_started_at", 0)
+  Vault.put(inf, "drain_started_at", 0)
 end
 
 -- ---------------------------------------------------------------------------
@@ -185,9 +190,9 @@ Increment the in-flight request counter by 1.  Call at the start of each request
     BastionHotDeploy.increment_in_flight()
 """
 fn increment_in_flight() do
-  let tbl = get_state_table()
+  let tbl = get_inflight_table()
   let n   = Vault.get_or(tbl, "in_flight", 0)
-  Vault.set(tbl, "in_flight", n + 1)
+  Vault.put(tbl, "in_flight", n + 1)
 end
 
 doc """
@@ -197,10 +202,10 @@ Call when a request finishes.
     BastionHotDeploy.decrement_in_flight()
 """
 fn decrement_in_flight() do
-  let tbl = get_state_table()
+  let tbl = get_inflight_table()
   let n   = Vault.get_or(tbl, "in_flight", 0)
   let next = if n <= 0 do 0 else n - 1 end
-  Vault.set(tbl, "in_flight", next)
+  Vault.put(tbl, "in_flight", next)
 end
 
 doc """
@@ -209,7 +214,7 @@ Return the current in-flight request count.
     BastionHotDeploy.in_flight_count()
 """
 fn in_flight_count() do
-  let tbl = get_state_table()
+  let tbl = get_inflight_table()
   Vault.get_or(tbl, "in_flight", 0)
 end
 

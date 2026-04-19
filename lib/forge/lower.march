@@ -418,7 +418,7 @@ pfn generate_body_loop(tokens : List(Token), acc : String) : String do
   Nil -> acc
   Cons(ComponentOpen(name, attrs, _), rest) -> do
     -- Components with inner content: collect until matching close, then emit.
-    let (code, remaining) = generate_component_with_content(name, attrs, rest)
+    let (code, remaining) = generate_component_with_content(name, attrs, rest, fn ts -> generate_body(ts))
     generate_body_loop(remaining, acc ++ code)
   end
   Cons(tok, rest) -> do
@@ -492,10 +492,12 @@ end
 -- Generate a component call for <.Name attrs>inner</.Name>.
 -- Named slots become render_<slot>: fn -> ~H"""...""" end args.
 -- The default slot (inner content) becomes render_inner: fn -> ~H"""...""" end.
+-- The `gen` callback is passed in to avoid mutual recursion with generate_body.
 pfn generate_component_with_content(
     name   : String,
     attrs  : List(Attr),
-    tokens : List(Token)
+    tokens : List(Token),
+    gen    : List(Token) -> String
   ) : (String, List(Token)) do
   let (default_tokens, named_slots, remaining) =
     collect_component_content(name, tokens, Nil, Nil)
@@ -506,19 +508,19 @@ pfn generate_component_with_content(
   let slot_args = List.map(named_slots, fn pair ->
     match pair do
     (slot_name, slot_tokens) ->
-      let slot_content = generate_body(slot_tokens)
+      let slot_content = gen(slot_tokens)
       "render_" ++ slot_name ++ ": " ++ wrap_as_render_fn(slot_content)
     end)
 
   -- Default inner content arg (skipped if empty / whitespace-only)
-  let default_content = generate_body(default_tokens)
+  let default_content = gen(default_tokens)
   let has_default     = !String.is_empty(String.trim(default_content))
 
   let content_args = if has_default do
     Cons("render_inner: " ++ wrap_as_render_fn(default_content), slot_args)
   else slot_args end
 
-  let all_args = List.concat(base_args, content_args)
+  let all_args = List.append(base_args, content_args)
   let args_str = String.join(all_args, ", ")
   let code = wrap_interp(name ++ ".render(" ++ args_str ++ ") |> IOList.to_string()")
   (code, remaining)

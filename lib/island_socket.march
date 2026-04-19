@@ -50,7 +50,8 @@
 mod IslandSocket do
 
   import HttpServer
-  import Bastion.PubSub as PubSub
+  import Bastion.PubSub
+  alias Bastion.PubSub as PubSub
   import Crypto
   import Vault
 
@@ -59,9 +60,9 @@ mod IslandSocket do
   -- WebSocket connection closes.
   let channel_map_table = "_bastion_island_channel_map"
 
-  -- ── Configuration ──────────────────────────────────────────────────────
+  -- ── SocketConfiguration ──────────────────────────────────────────────────────
 
-  -- Configuration for the island socket endpoint.
+  -- SocketConfiguration for the island socket endpoint.
   --   path            — URL path to match for WebSocket upgrade
   --   allowed_origins — cross-origin WebSocket clients whose Origin header
   --                     is on this list are allowed to connect.  Same-origin
@@ -69,16 +70,16 @@ mod IslandSocket do
   --                     always allowed.  A WebSocket handshake with no Origin
   --                     header, or one whose Origin is not on the list and
   --                     does not match the Host, is rejected with 403.
-  type Config = Config(String, List(String))
+  type SocketConfig = SocketConfig(String, List(String))
 
   doc "Create a default config listening on /_bastion/ws with same-origin only."
-  fn default_config() : Config do
-    Config("/_bastion/ws", Nil)
+  fn default_config() : SocketConfig do
+    SocketConfig("/_bastion/ws", Nil)
   end
 
   doc "Create a config with a custom WebSocket path (same-origin only)."
-  fn make_config(path : String) : Config do
-    Config(path, Nil)
+  fn make_config(path : String) : SocketConfig do
+    SocketConfig(path, Nil)
   end
 
   doc """
@@ -88,21 +89,21 @@ mod IslandSocket do
   Example:
     IslandSocket.make_config_with_origins("/_bastion/ws", ["https://admin.example.com"])
   """
-  fn make_config_with_origins(path : String, origins : List(String)) : Config do
-    Config(path, origins)
+  fn make_config_with_origins(path : String, origins : List(String)) : SocketConfig do
+    SocketConfig(path, origins)
   end
 
   doc "Return the path from a config."
-  fn config_path(cfg : Config) : String do
+  fn config_path(cfg : SocketConfig) : String do
     match cfg do
-    Config(p, _) -> p
+    SocketConfig(p, _) -> p
     end
   end
 
   doc "Return the allowed cross-origin list from a config."
-  fn config_allowed_origins(cfg : Config) : List(String) do
+  fn config_allowed_origins(cfg : SocketConfig) : List(String) do
     match cfg do
-    Config(_, os) -> os
+    SocketConfig(_, os) -> os
     end
   end
 
@@ -363,7 +364,7 @@ mod IslandSocket do
   browsers do not enforce the same-origin policy on WebSocket connections,
   so the server must validate the Origin itself.
   """
-  fn plug(cfg : Config, registry : Registry) : Conn -> Conn do
+  fn plug(cfg : SocketConfig, registry : Registry) : Conn -> Conn do
     let socket_path = config_path(cfg)
     let allowed     = config_allowed_origins(cfg)
     fn conn -> do
@@ -418,7 +419,7 @@ mod IslandSocket do
       let new_store = handle_text(ws_sock, text, store, registry, conn_id)
       ws_loop(ws_sock, new_store, registry, conn_id)
     end
-    Close(_, _) -> do
+    WsFrame.Close(_, _) -> do
       -- Remove all PubSub subscriptions created by this connection.
       -- sub_ids follow the pattern "conn:<conn_id>:<island_id>" which matches
       -- PubSub.unsubscribe_all's prefix scan.
@@ -450,7 +451,7 @@ mod IslandSocket do
       if msg_type == "channel_push" do
         let topic   = json_string_field(msg, "topic")
         let payload = extract_payload(msg)
-        if not(String.is_empty(topic)) do
+        if !(String.is_empty(topic)) do
           let sender_sub = "conn:" ++ conn_id ++ ":" ++ island_id
           let _ = PubSub.broadcast_from(sender_sub, topic, "island_state", payload)
           ()
@@ -466,7 +467,7 @@ mod IslandSocket do
         let _ = if msg_type == "init" do
           let channel_topic = json_string_field(msg, "channel")
           let module_name   = json_string_field(msg, "module")
-          if not(String.is_empty(channel_topic)) do
+          if !(String.is_empty(channel_topic)) do
             match find_handler(registry, module_name) do
             Some(handler) -> do
               let render_fn = extract_render_fn(handler)
@@ -474,7 +475,7 @@ mod IslandSocket do
               -- Capture island_id and render_fn in the send_fn closure.
               -- The _event argument is ignored — any push to the topic is a
               -- state update regardless of event name.
-              let send_fn   = fn _event payload_json ->
+              let send_fn   = fn (_event, payload_json) -> do
                 let html = render_fn(payload_json)
                 WebSocket.send_frame(ws_sock, TextFrame(make_render_json(island_id, html)))
                 WebSocket.send_frame(ws_sock, TextFrame(make_state_json(island_id, payload_json)))
@@ -718,7 +719,7 @@ mod IslandSocket do
         let _ = Vault.delete(table, key)
         ()
       else () end
-    end)
+    )
   end
 
   -- ── JSON response builders ───────────────────────────────────────────────

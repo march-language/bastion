@@ -18,6 +18,8 @@
 
 mod BastionPubSub do
 
+  import Vault
+
 -- ── Internal helpers ────────────────────────────────────────────────────────
 
 pfn sub_key(topic) do "sub:" ++ topic end
@@ -25,19 +27,15 @@ pfn inbox_key(sub_id) do "inbox:" ++ sub_id end
 
 -- Return the vault table for the named pubsub, creating it if needed.
 pfn get_or_create_table(pubsub_name) do
-  match Vault.whereis(pubsub_name) do
-  Some(t) -> t
-  None    -> Vault.new(pubsub_name)
-  end
+  Vault.open(pubsub_name)
 end
 
 pfn list_contains(lst, elem) do
   match lst do
   Nil -> false
-  Cons(h, t) -> do
-    if h == elem then true
-    else list_contains(t, elem)
-  end
+  Cons(h, t) ->
+    if h == elem do true
+    else list_contains(t, elem) end
   end
 end
 
@@ -48,10 +46,9 @@ end
 pfn list_remove_first_loop(lst, elem, acc) do
   match lst do
   Nil -> List.reverse(acc)
-  Cons(h, t) -> do
-    if h == elem then List.append(List.reverse(acc), t)
-    else list_remove_first_loop(t, elem, Cons(h, acc))
-  end
+  Cons(h, t) ->
+    if h == elem do List.append(List.reverse(acc), t)
+    else list_remove_first_loop(t, elem, Cons(h, acc)) end
   end
 end
 
@@ -71,18 +68,18 @@ A trailing `*` in `pattern` is a wildcard prefix match.
     BastionPubSub.topic_matches("room:lobby", "room:lobby") -- true
 """
 pfn topic_matches_nonempty(pattern, topic) do
-  let plen = string_byte_length(pattern)
-  let last_char = string_slice(pattern, plen - 1, 1)
-  let prefix = string_slice(pattern, 0, plen - 1)
-  if last_char == "*" then string_starts_with(topic, prefix)
-  else pattern == topic
+  let plen = String.byte_size(pattern)
+  let last_char = String.slice_bytes(pattern, plen - 1, 1)
+  let prefix = String.slice_bytes(pattern, 0, plen - 1)
+  if last_char == "*" do String.starts_with(topic, prefix)
+  else pattern == topic end
 end
 
 fn topic_matches(pattern, topic) do
-  let plen = string_byte_length(pattern)
-  let tlen = string_byte_length(topic)
-  if plen == 0 then tlen == 0
-  else topic_matches_nonempty(pattern, topic)
+  let plen = String.byte_size(pattern)
+  let tlen = String.byte_size(topic)
+  if plen == 0 do tlen == 0
+  else topic_matches_nonempty(pattern, topic) end
 end
 
 -- ── Subscription management ─────────────────────────────────────────────────
@@ -95,8 +92,8 @@ fn subscribe(pubsub_name, topic, subscriber_id) do
   let t   = get_or_create_table(pubsub_name)
   let key = sub_key(topic)
   let current = Vault.get_or(t, key, Nil)
-  if list_contains(current, subscriber_id) then ()
-  else Vault.set(t, key, Cons(subscriber_id, current))
+  if list_contains(current, subscriber_id) do ()
+  else Vault.put(t, key, Cons(subscriber_id, current)) end
 end
 
 doc "Unsubscribe `subscriber_id` from `topic` in the named pubsub instance."
@@ -106,8 +103,8 @@ fn unsubscribe(pubsub_name, topic, subscriber_id) do
   let current = Vault.get_or(t, key, Nil)
   let trimmed = list_remove_first(current, subscriber_id)
   match trimmed do
-  Nil -> Vault.drop(t, key)
-  _   -> Vault.set(t, key, trimmed)
+  Nil -> Vault.delete(t, key)
+  _   -> Vault.put(t, key, trimmed)
   end
 end
 
@@ -122,13 +119,13 @@ end
 -- Deliver `message` to the inbox of every subscriber whose subscription
 -- pattern matches `topic`, skipping `excluded_id` when it is Some(id).
 pfn deliver_one_key(t, k, topic, message, excluded_id) do
-  let is_sub_key = string_starts_with(k, "sub:")
-  if not (is_sub_key) then ()
-  else do
-    let plen    = string_byte_length(k)
-    let pattern = string_slice(k, 4, plen - 4)
-    if not (topic_matches(pattern, topic)) then ()
-    else do
+  let is_sub_key = String.starts_with(k, "sub:")
+  if !is_sub_key do ()
+  else
+    let plen    = String.byte_size(k)
+    let pattern = String.slice_bytes(k, 4, plen - 4)
+    if !(topic_matches(pattern, topic)) do ()
+    else
       let sub_ids = Vault.get_or(t, k, Nil)
       deliver_to_subs(t, sub_ids, message, excluded_id)
     end
@@ -139,10 +136,8 @@ pfn deliver_to_matching(t, all_keys, topic, message, excluded_id) do
   match all_keys do
   Nil -> ()
   Cons(k, rest) ->
-    do
-      deliver_one_key(t, k, topic, message, excluded_id)
-      deliver_to_matching(t, rest, topic, message, excluded_id)
-    end
+    let _ = deliver_one_key(t, k, topic, message, excluded_id)
+    deliver_to_matching(t, rest, topic, message, excluded_id)
   end
 end
 
@@ -150,19 +145,17 @@ pfn deliver_to_subs(t, sub_ids, message, excluded_id) do
   match sub_ids do
   Nil -> ()
   Cons(sid, rest) ->
-    do
-      let should_skip = match excluded_id do
-        Some(excl) -> sid == excl
-        None       -> false
-      end
-      if should_skip then ()
-      else do
-        let ik = inbox_key(sid)
-        let inbox = Vault.get_or(t, ik, Nil)
-        Vault.set(t, ik, list_append_one(inbox, message))
-      end
-      deliver_to_subs(t, rest, message, excluded_id)
+    let should_skip = match excluded_id do
+      Some(excl) -> sid == excl
+      None       -> false
     end
+    let _ = if should_skip do ()
+    else
+      let ik = inbox_key(sid)
+      let inbox = Vault.get_or(t, ik, Nil)
+      Vault.put(t, ik, list_append_one(inbox, message))
+    end
+    deliver_to_subs(t, rest, message, excluded_id)
   end
 end
 
@@ -208,7 +201,7 @@ end
 doc "Clear the inbox of `subscriber_id` in the named pubsub."
 fn clear_inbox(pubsub_name, subscriber_id) do
   let t = get_or_create_table(pubsub_name)
-  Vault.drop(t, inbox_key(subscriber_id))
+  Vault.delete(t, inbox_key(subscriber_id))
 end
 
 end

@@ -88,15 +88,15 @@ mod Bastion.Health do
   fn plug_with_checks(conn, checks : List(Check)) do
     if HttpServer.path(conn) == "/health" do
       if draining() do
-        respond(conn, 503, "draining", [])
-      else
+        health_respond(conn, 503, "draining", [])
+      else do
         let failures = run_checks(checks)
         if List.is_empty(failures) do
-          respond(conn, 200, "ok", [])
+          health_respond(conn, 200, "ok", [])
         else
-          respond(conn, 503, "unhealthy", failures)
+          health_respond(conn, 503, "unhealthy", failures)
         end
-      end
+      end end
     else
       conn
     end
@@ -104,24 +104,26 @@ mod Bastion.Health do
 
   -- ── Internal ──────────────────────────────────────────────────────────────
 
-  pfn run_checks(checks : List(Check)) : List(String) do
-    List.filter_map(checks, fn c ->
-      match c do
-      Check(name, probe) ->
-        match probe() do
-        Ok(_)    -> None
-        Err(msg) -> Some(name ++ ": " ++ msg)
-        end
+  pfn run_check(c : Check) : Option(String) do
+    match c do
+    Check(name, probe) ->
+      match probe(()) do
+      Ok(_)    -> None
+      Err(msg) -> Some(name ++ ": " ++ msg)
       end
-    )
+    end
   end
 
-  pfn respond(conn, status : Int, status_str : String, failures : List(String)) do
+  pfn run_checks(checks : List(Check)) : List(String) do
+    List.filter_map(checks, fn c -> run_check(c))
+  end
+
+  pfn health_respond(conn, status : Int, status_str : String, failures : List(String)) do
+    let errs_str = String.join(List.map(failures, fn s -> "\"" ++ json_escape(s) ++ "\""), ",")
     let body = if List.is_empty(failures) do
       "{\"status\":\"" ++ status_str ++ "\"}"
     else
-      let errs = String.join(List.map(failures, fn s -> "\"" ++ json_escape(s) ++ "\""), ",")
-      "{\"status\":\"" ++ status_str ++ "\",\"errors\":[" ++ errs ++ "]}"
+      "{\"status\":\"" ++ status_str ++ "\",\"errors\":[" ++ errs_str ++ "]}"
     end
     HttpServer.put_resp_header(conn, "content-type", "application/json")
     |> HttpServer.put_resp_header("cache-control", "no-store")

@@ -102,8 +102,8 @@ end
 -- Append a directive string to an accumulator with "; " separator.
 -- Uses inline if (no trailing 'end') since it is the sole function body expr.
 pfn append_directive(acc, dir_str) do
-  if acc == "" then dir_str
-  else acc ++ "; " ++ dir_str
+  if acc == "" do dir_str
+  else acc ++ "; " ++ dir_str end
 end
 
 -- Convert a directive list to a semicolon-separated policy string.

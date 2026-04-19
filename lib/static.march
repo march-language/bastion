@@ -28,18 +28,18 @@ mod Static do
 
   import HttpServer
 
-  -- Configuration for the static file server.
-  --   Config(root_dir, url_prefix)
-  type Config = Config(String, String)
+  -- StaticConfiguration for the static file server.
+  --   StaticConfig(root_dir, url_prefix)
+  type StaticConfig = StaticConfig(String, String)
 
-  doc "Create a Config that serves files from root with no URL prefix."
-  fn config(root : String) : Config do
-    Config(root, "")
+  doc "Create a StaticConfig that serves files from root with no URL prefix."
+  fn config(root : String) : StaticConfig do
+    StaticConfig(root, "")
   end
 
-  doc "Create a Config that serves files from root, stripping the given URL prefix."
-  fn config_with_prefix(root : String, prefix : String) : Config do
-    Config(root, prefix)
+  doc "Create a StaticConfig that serves files from root, stripping the given URL prefix."
+  fn config_with_prefix(root : String, prefix : String) : StaticConfig do
+    StaticConfig(root, prefix)
   end
 
   doc """
@@ -53,7 +53,7 @@ mod Static do
     HttpServer.plug(server, Static.serve("priv/static"))
   """
   fn serve(root : String) : Conn -> Conn do
-    serve_with_config(Config(root, ""))
+    serve_with_config(StaticConfig(root, ""))
   end
 
   doc """
@@ -64,19 +64,19 @@ mod Static do
     -- A request for /static/app.css serves priv/static/app.css
   """
   fn serve_with_prefix(root : String, prefix : String) : Conn -> Conn do
-    serve_with_config(Config(root, prefix))
+    serve_with_config(StaticConfig(root, prefix))
   end
 
-  doc "Return a plug that serves static files using the given Config."
-  fn serve_with_config(cfg : Config) : Conn -> Conn do
+  doc "Return a plug that serves static files using the given StaticConfig."
+  fn serve_with_config(cfg : StaticConfig) : Conn -> Conn do
     fn conn -> handle(cfg, conn)
   end
 
   -- ── Internal request handling ──────────────────────────────────────
 
-  pfn handle(cfg : Config, conn : Conn) : Conn do
+  pfn handle(cfg : StaticConfig, conn : Conn) : Conn do
     match cfg do
-    Config(root, prefix) -> do
+    StaticConfig(root, prefix) -> do
       let req_path  = HttpServer.path(conn)
       let rel_path  = strip_and_normalise(url_path(req_path, prefix))
       -- Reject any path containing a ".." segment or backslash before reading

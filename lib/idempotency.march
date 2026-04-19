@@ -76,11 +76,11 @@ mod Bastion.Idempotency do
   fn protect_with(conn, handler_fn : () -> Conn, opts : IdempotencyOpts) do
     -- Only apply to POST and PUT
     let method = HttpServer.method(conn)
-    if method != "POST" && method != "PUT" do
-      handler_fn()
+    if method != :post && method != :put do
+      handler_fn(())
     else
       match HttpServer.get_req_header(conn, "idempotency-key") do
-      None      -> handler_fn()     -- no key: pass through
+      None      -> handler_fn(())     -- no key: pass through
       Some(raw_key) ->
         let key = build_key(raw_key, opts.scope)
         let table = Vault.open(table_name)
@@ -90,7 +90,7 @@ mod Bastion.Idempotency do
           replay_cached(conn, cached)
         None ->
           -- Cache miss: execute and cache if successful
-          let result  = handler_fn()
+          let result  = handler_fn(())
           let status  = HttpServer.status(result)
           if status >= 200 && status < 300 do
             let body    = HttpServer.resp_body(result)

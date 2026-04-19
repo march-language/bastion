@@ -33,24 +33,24 @@ mod IslandAssets do
 
   import HttpServer
 
-  -- Configuration for the asset server.
+  -- AssetConfiguration for the asset server.
   --   base_path — URL prefix for island assets (e.g. "/_bastion")
-  type Config = Config(String)
+  type AssetConfig = AssetConfig(String)
 
   doc "Create a default config that serves assets under /_bastion."
-  fn default_config() : Config do
-    Config("/_bastion")
+  fn default_config() : AssetConfig do
+    AssetConfig("/_bastion")
   end
 
   doc "Create a config with a custom base path."
-  fn make_config(base_path : String) : Config do
-    Config(base_path)
+  fn make_config(base_path : String) : AssetConfig do
+    AssetConfig(base_path)
   end
 
   doc "Return the base path from a config."
-  fn config_base_path(cfg : Config) : String do
+  fn config_base_path(cfg : AssetConfig) : String do
     match cfg do
-    Config(p) -> p
+    AssetConfig(p) -> p
     end
   end
 
@@ -67,7 +67,7 @@ mod IslandAssets do
 
   Non-matching requests pass through unchanged.
   """
-  fn plug(cfg : Config) : Conn -> Conn do
+  fn plug(cfg : AssetConfig) : Conn -> Conn do
     let base          = config_base_path(cfg)
     let js_path       = base ++ "/islands.js"
     let ws_js_path    = base ++ "/islands-ws.js"

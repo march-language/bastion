@@ -31,7 +31,7 @@ mod Bastion.Telemetry.Aggregator do
     name         : List(String),
     duration_ms  : Int,
     timestamp_ms : Int,
-    metadata     : String,
+    metadata     : String
   }
 
   type RequestSummary = {
@@ -42,13 +42,19 @@ mod Bastion.Telemetry.Aggregator do
     duration_ms  : Int,
     event_count  : Int,
     error        : Bool,
-    timestamp_ms : Int,
+    timestamp_ms : Int
   }
 
   type WaterfallData = {
     request_id : String,
     events     : List(EventEntry),
-    total_ms   : Int,
+    total_ms   : Int
+  }
+
+  type CounterSummary = {
+    total           : Int,
+    errors          : Int,
+    avg_duration_ms : Int
   }
 
   -- ── Public API ────────────────────────────────────────────────────────────
@@ -69,9 +75,8 @@ mod Bastion.Telemetry.Aggregator do
     Bastion.Telemetry.attach(
       "_bastion_aggregator",
       [["bastion"]],
-      fn event_name measurements metadata ->
+      fn (event_name, measurements, metadata) ->
         handle_event(event_name, measurements, metadata)
-      end
     )
   end
 
@@ -106,7 +111,7 @@ mod Bastion.Telemetry.Aggregator do
       Some({
         request_id = request_id,
         events     = events,
-        total_ms   = total,
+        total_ms   = total
       })
     end
   end
@@ -124,7 +129,7 @@ mod Bastion.Telemetry.Aggregator do
       c.errors          -- Int
       c.avg_duration_ms -- Int
   """
-  fn counters() : { total : Int, errors : Int, avg_duration_ms : Int } do
+  fn counters() : CounterSummary do
     let table = Vault.open(requests_table)
     let all   = Vault.get_or(table, "ring", [])
     let total = List.length(all)
@@ -145,7 +150,7 @@ mod Bastion.Telemetry.Aggregator do
   -- ── Internal event handler ─────────────────────────────────────────────────
 
   pfn handle_event(event_name : List(String), measurements, metadata) do
-    let now_ms      = Time.now_ms()
+    let now_ms      = float_to_int(unix_time(()) *. 1000.0)
     let last_seg    = last_segment(event_name)
     let duration    = extract_duration(measurements)
     let is_error    = last_seg == "exception"
@@ -157,7 +162,7 @@ mod Bastion.Telemetry.Aggregator do
       name         = event_name,
       duration_ms  = duration,
       timestamp_ms = now_ms,
-      metadata     = meta_json,
+      metadata     = meta_json
     }
     append_event(request_id, entry)
 
@@ -199,7 +204,7 @@ mod Bastion.Telemetry.Aggregator do
         duration_ms  = existing.duration_ms + duration,
         event_count  = existing.event_count + 1,
         error        = existing.error || is_error,
-        timestamp_ms = existing.timestamp_ms,
+        timestamp_ms = existing.timestamp_ms
       }
       let new_ring = replace_summary(ring, request_id, updated)
       Vault.put(req_table, "ring", new_ring)
@@ -216,7 +221,7 @@ mod Bastion.Telemetry.Aggregator do
         duration_ms  = duration,
         event_count  = 1,
         error        = is_error,
-        timestamp_ms = now_ms,
+        timestamp_ms = now_ms
       }
       -- Prepend and trim to max
       let max     = get_max()

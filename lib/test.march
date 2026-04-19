@@ -12,7 +12,7 @@ mod Test do
 
   doc "Assert that cond is true; panic with msg if not."
   fn assert_true(cond : Bool, msg : String) : Unit do
-    if not(cond) do panic("Assertion failed: " ++ msg) else () end
+    if !(cond) do panic("Assertion failed: " ++ msg) else () end
   end
 
   doc "Assert that cond is false; panic with msg if not."

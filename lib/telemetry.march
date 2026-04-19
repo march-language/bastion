@@ -42,11 +42,6 @@ mod Bastion.Telemetry do
   -- Vault table storing registered handlers
   let table_name = "_bastion_telemetry"
 
-  -- ── Types ─────────────────────────────────────────────────────────────────
-
-  -- A telemetry event name: list of string segments
-  type EventName = List(String)
-
   -- ── Attach / detach ───────────────────────────────────────────────────────
 
   doc """
@@ -62,10 +57,11 @@ mod Bastion.Telemetry do
         update_counter(m.status)
       end)
   """
-  fn attach(handler_id : String, event_names : List(EventName), handler_fn) do
-    let table = Vault.open(table_name)
-    let entry = (event_names, handler_fn)
-    Vault.put(table, handler_id, entry)
+  fn attach(handler_id : String, event_names : List(List(String)), handler_fn) do
+    let fn_table   = Vault.open(table_name ++ "_fn")
+    let subs_table = Vault.open(table_name ++ "_subs")
+    Vault.put(fn_table, handler_id, handler_fn)
+    Vault.put(subs_table, handler_id, event_names)
   end
 
   doc """
@@ -74,14 +70,16 @@ mod Bastion.Telemetry do
       Bastion.Telemetry.detach("my_metrics")
   """
   fn detach(handler_id : String) do
-    let table = Vault.open(table_name)
-    Vault.delete(table, handler_id)
+    let fn_table   = Vault.open(table_name ++ "_fn")
+    let subs_table = Vault.open(table_name ++ "_subs")
+    Vault.delete(fn_table, handler_id)
+    Vault.delete(subs_table, handler_id)
   end
 
   doc "Return the list of all attached handler IDs."
   fn attached_handlers() : List(String) do
-    let table = Vault.open(table_name)
-    Vault.keys(table)
+    let fn_table = Vault.open(table_name ++ "_fn")
+    Vault.keys(fn_table)
   end
 
   -- ── Emit ──────────────────────────────────────────────────────────────────
@@ -101,16 +99,20 @@ mod Bastion.Telemetry do
         { status = 200, duration_ms = 42 },
         { conn = conn })
   """
-  fn execute(event_name : EventName, measurements, metadata) do
-    let table    = Vault.open(table_name)
-    let handlers = Vault.all(table)
-    List.each(handlers, fn pair ->
-      let (_, entry) = pair
-      let (subscriptions, handler_fn) = entry
-      let subscribed = List.any(subscriptions, fn sub_event ->
-        events_match(sub_event, event_name)
-      )
-      if subscribed do handler_fn(event_name, measurements, metadata) else () end
+  fn execute(event_name : List(String), measurements, metadata) do
+    let fn_table   = Vault.open(table_name ++ "_fn")
+    let subs_table = Vault.open(table_name ++ "_subs")
+    let ids = Vault.keys(fn_table)
+    List.each(ids, fn handler_id ->
+      match Vault.get(fn_table, handler_id) do
+      None -> ()
+      Some(handler_fn) ->
+        let subscriptions = Vault.get_or(subs_table, handler_id, [])
+        let subscribed = List.any(subscriptions, fn sub_event ->
+          events_match(sub_event, event_name)
+        )
+        if subscribed do handler_fn(event_name, measurements, metadata) else () end
+      end
     )
   end
 
@@ -127,13 +129,13 @@ mod Bastion.Telemetry do
         Depot.exec(query)
       end)
   """
-  fn span(event_prefix : EventName, metadata, fn_) do
+  fn span(event_prefix : List(String), metadata, fn_) do
     let start_event = List.append(event_prefix, ["start"])
     let stop_event  = List.append(event_prefix, ["stop"])
     execute(start_event, { duration_ms = 0 }, metadata)
-    let start_ms = Time.now_ms()
+    let start_ms = float_to_int(unix_time(()) *. 1000.0)
     let result   = fn_()
-    let elapsed  = Time.now_ms() - start_ms
+    let elapsed  = float_to_int(unix_time(()) *. 1000.0) - start_ms
     execute(stop_event, { duration_ms = elapsed }, metadata)
     result
   end
@@ -148,7 +150,7 @@ mod Bastion.Telemetry do
   fn request_start(conn) do
     execute(
       ["bastion", "request", "start"],
-      { timestamp_ms = Time.now_ms() },
+      { timestamp_ms = float_to_int(unix_time(()) *. 1000.0) },
       { conn = conn }
     )
   end
@@ -172,11 +174,11 @@ mod Bastion.Telemetry do
   -- ["bastion", "request", "start"] and ["bastion", "request", "stop"].
   -- An exact match ("bastion", "request", "stop") only matches that event.
 
-  pfn events_match(subscribed : EventName, event : EventName) : Bool do
-    is_prefix_of(subscribed, event) || subscribed == event
+  pfn events_match(subscribed : List(String), event : List(String)) : Bool do
+    is_prefix_of(subscribed, event)
   end
 
-  pfn is_prefix_of(prefix : EventName, target : EventName) : Bool do
+  pfn is_prefix_of(prefix : List(String), target : List(String)) : Bool do
     match prefix do
     []              -> true
     Cons(p, rest_p) ->

@@ -56,7 +56,7 @@ mod Crypto do
       Crypto.random_bytes(16)  -- Bytes with 16 random bytes
   """
   fn random_bytes(n : Int) : Bytes do
-    stdlib_random_bytes(n)
+    StdCrypto.random_bytes(n)
   end
 
   doc """
@@ -77,11 +77,11 @@ mod Crypto do
       Crypto.generate_token(32)  -- e.g. "dGhpcyBpcyBhIHRlc3Q"
   """
   fn generate_token(n : Int) : String do
-    let raw   = stdlib_base64_encode(stdlib_random_bytes(n))
+    let raw   = StdCrypto.base64_encode(bytes_to_string(StdCrypto.random_bytes(n)))
     -- Convert standard base64 to URL-safe: replace + → -, / → _, strip =
-    let step1 = string_replace_all(raw, "=", "")
-    let step2 = string_replace_all(step1, "+", "-")
-    string_replace_all(step2, "/", "_")
+    let step1 = String.replace_all(raw, "=", "")
+    let step2 = String.replace_all(step1, "+", "-")
+    String.replace_all(step2, "/", "_")
   end
 
   -- ── Hashing ───────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ mod Crypto do
   Both `key` and `data` may be `String` or `Bytes`.
   """
   fn hmac_sha256(key : String, data : String) : String do
-    StdCrypto.hmac(:sha256, key, data)
+    StdCrypto.hmac(:sha256, Bytes.from_string(key), Bytes.from_string(data))
   end
 
   -- ── Key derivation ────────────────────────────────────────────────────────
@@ -225,9 +225,7 @@ mod Crypto do
       end
   """
   fn bytes_to_string(b : Bytes) : String do
-    match b do
-    Bytes(xs) -> string_join(List.map(xs, fn n -> char_from_int(n)), "")
-    end
+    StdCrypto.bytes_to_string(b)
   end
 
 end

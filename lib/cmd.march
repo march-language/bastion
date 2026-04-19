@@ -238,7 +238,7 @@ mod Bastion.Cmd do
   fn map(cmd : Cmd(a), f : a -> b) : Cmd(b) do
     match cmd do
     CmdNone                       -> CmdNone
-    CmdBatch(cmds)                -> CmdBatch(List.map(cmds, fn c -> map(c, f)))
+    CmdBatch(cmds)                -> CmdBatch(map_list(cmds, f))
     CmdHttpGet(url, handler)      -> CmdHttpGet(url, fn body -> f(handler(body)))
     CmdHttpPost(url, body, h)     -> CmdHttpPost(url, body, fn resp -> f(h(resp)))
     CmdAfter(ms, msg)             -> CmdAfter(ms, f(msg))
@@ -251,6 +251,13 @@ mod Bastion.Cmd do
     CmdLoadLocal(k, handler)      -> CmdLoadLocal(k, fn opt -> f(handler(opt)))
     CmdRemoveLocal(k)             -> CmdRemoveLocal(k)
     CmdChannelPush(ev, payload)   -> CmdChannelPush(ev, payload)
+    end
+  end
+
+  pfn map_list(cmds : List(Cmd(a)), f : a -> b) : List(Cmd(b)) do
+    match cmds do
+    Nil -> Nil
+    Cons(c, rest) -> Cons(map(c, f), map_list(rest, f))
     end
   end
 

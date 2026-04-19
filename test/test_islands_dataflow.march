@@ -28,7 +28,7 @@ pfn string_contains(haystack : String, needle : String) : Bool do
 end
 
 pfn assert_contains(haystack : String, needle : String, msg : String) : Unit do
-  if not(string_contains(haystack, needle)) do
+  if !(String.contains(haystack, needle)) do
     Test.fail(msg ++ " — expected to contain: \"" ++ needle ++ "\" in: \"" ++ haystack ++ "\"")
   else
     ()
@@ -357,7 +357,7 @@ describe "IslandSocket dataflow-aware registration" do
   test "islands without event handler return false for has_event_handler" do
     let reg = IslandSocket.new_registry()
               |> IslandSocket.register("Counter", noop_update, noop_render)
-    assert (not(IslandSocket.has_event_handler(reg, "Counter")))
+    assert (!(IslandSocket.has_event_handler(reg, "Counter")))
   end
 end
 
@@ -617,7 +617,7 @@ describe "IslandSocket bidirectional message flow" do
     assert (IslandSocket.has_island(s1, "c-1"))
     let (s2, _) = IslandSocket.process_msg_for_test(
       "{\"island\":\"c-1\",\"type\":\"destroy\"}", s1, reg)
-    assert (not(IslandSocket.has_island(s2, "c-1")))
+    assert (!(IslandSocket.has_island(s2, "c-1")))
   end
 
 end

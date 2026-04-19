@@ -134,16 +134,20 @@ mod Cache do
         HttpServer.html(conn2, 200, render_posts(posts))
       end)
   """
+  pfn open_response_table() do
+    Vault.open(response_table)
+  end
+
   fn cached(conn, key, ttl_secs, generator) do
-    let table = Vault.open(response_table)
+    let table = open_response_table()
     match Vault.get(table, key) do
     Some(entry) ->
       -- Cache hit: replay the stored response
       let (cached_status, cached_headers, cached_body) = entry
-      List.fold_left(cached_headers, conn, fn c -> fn pair -> do
+      List.fold_left(cached_headers, conn, fn (c, pair) ->
         let (hk, hv) = pair
         HttpServer.put_resp_header(c, hk, hv)
-      end)
+      )
       |> HttpServer.send_resp(cached_status, cached_body)
     None ->
       -- Cache miss: run the generator
@@ -168,7 +172,7 @@ mod Cache do
       Cache.invalidate("posts:index")
   """
   fn invalidate(key) do
-    let table = Vault.open(response_table)
+    let table = open_response_table()
     Vault.delete(table, key)
   end
 
@@ -179,7 +183,7 @@ mod Cache do
       Cache.invalidate_prefix("posts:")
   """
   fn invalidate_prefix(prefix) do
-    let table = Vault.open(response_table)
+    let table = open_response_table()
     let keys  = Vault.keys(table)
     List.each(keys, fn k ->
       if String.starts_with(k, prefix) do Vault.delete(table, k)

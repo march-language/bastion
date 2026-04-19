@@ -58,6 +58,28 @@ mod Bastion.JS do
   -- A typed variant of JsRef representing a browser Event object.
   type JsEvent = JsEvent(JsRef)
 
+  -- ── Private FFI stubs ─────────────────────────────────────────────────────
+  --
+  -- These are wired to the WASM import table by wasm-bridge.js.
+  -- Declared before use so the type checker can resolve them.
+
+  extern "bastion": () do
+    fn _js_call(func_path : String, args : List(JsRef)) : JsRef
+    fn _js_global(prop_path : String) : JsRef
+    fn _js_eval(js_code : String) : JsRef
+    fn _js_query_selector(selector : String) : JsRef
+    fn _js_get_attribute(ref : JsRef, attr : String) : JsRef
+    fn _js_set_attribute(ref : JsRef, attr : String, value : String) : JsRef
+    fn _js_remove_attribute(ref : JsRef, attr : String) : JsRef
+    fn _js_add_event_listener(ref : JsRef, event_name : String, handler : JsEvent -> a) : JsRef
+    fn _js_string_to_ref(s : String) : JsRef
+    fn _js_int_to_ref(n : Int) : JsRef
+    fn _js_bool_to_ref(b : Bool) : JsRef
+    fn _js_json_to_ref(json_str : String) : JsRef
+    fn _js_ref_to_string(ref : JsRef) : Option(String)
+    fn _js_ref_to_int(ref : JsRef) : Option(Int)
+  end
+
   -- ── Value constructors ────────────────────────────────────────────────────
 
   doc "The null JS value (JsRef 0)."
@@ -234,28 +256,6 @@ mod Bastion.JS do
   fn event_detail(ev : JsEvent) : JsRef do
     let (JsEvent(ev_ref)) = ev
     _js_get_attribute(ev_ref, "detail")
-  end
-
-  -- ── Private FFI stubs ─────────────────────────────────────────────────────
-  --
-  -- These are wired to the WASM import table by wasm-bridge.js.
-  -- They are not part of the public API — use the typed wrappers above.
-
-  extern "bastion": () do
-    fn _js_call(func_path : String, args : List(JsRef)) : JsRef
-    fn _js_global(prop_path : String) : JsRef
-    fn _js_eval(js_code : String) : JsRef
-    fn _js_query_selector(selector : String) : JsRef
-    fn _js_get_attribute(ref : JsRef, attr : String) : JsRef
-    fn _js_set_attribute(ref : JsRef, attr : String, value : String) : JsRef
-    fn _js_remove_attribute(ref : JsRef, attr : String) : JsRef
-    fn _js_add_event_listener(ref : JsRef, event_name : String, handler : JsEvent -> a) : JsRef
-    fn _js_string_to_ref(s : String) : JsRef
-    fn _js_int_to_ref(n : Int) : JsRef
-    fn _js_bool_to_ref(b : Bool) : JsRef
-    fn _js_json_to_ref(json_str : String) : JsRef
-    fn _js_ref_to_string(ref : JsRef) : Option(String)
-    fn _js_ref_to_int(ref : JsRef) : Option(Int)
   end
 
 end

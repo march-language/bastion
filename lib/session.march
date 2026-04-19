@@ -123,7 +123,7 @@ mod Session do
   fn delete(conn : Conn, key : String) : Conn do
     let data    = session_data(conn)
     let entries = parse_session(data)
-    let updated = List.filter(entries, fn (k, _) -> k != key)
+    let updated = List.filter(entries, fn pair -> match pair do (k, _) -> k != key end)
     conn
     |> HttpServer.assign(data_assign, serialize_session(updated))
     |> mark_dirty()
@@ -220,11 +220,11 @@ mod Session do
   end
 
   pfn serialize_session(entries : List((String, String))) : String do
-    String.join(List.map(entries, fn (k, v) -> k ++ "=" ++ v), ";")
+    String.join(List.map(entries, fn pair -> match pair do (k, v) -> k ++ "=" ++ v end), ";")
   end
 
   pfn upsert_entry(entries : List((String, String)), key : String, value : String) : List((String, String)) do
-    let without = List.filter(entries, fn (k, _) -> k != key)
+    let without = List.filter(entries, fn pair -> match pair do (k, _) -> k != key end)
     List.append(without, [(key, value)])
   end
 
