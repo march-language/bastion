@@ -29,6 +29,7 @@
 mod Depot.Middleware do
 
   import Pool
+  import Connection
   import Conn
   import Bastion.Telemetry
 
@@ -147,7 +148,11 @@ mod Depot.Middleware do
     Some(db_conn) ->
       let meta = { sql = sql }
       let result = Bastion.Telemetry.span(["bastion", "depot", "query"], meta, fn () ->
-        Depot.Query.exec_sql(db_conn, sql, params)
+        match Connection.exec_prepared(db_conn, sql, params) do
+        Err(e) -> Err(e)
+        Ok(res) ->
+          Ok(List.map(res.rows, fn row -> zip_row(res.columns, row)))
+        end
       )
       match result do
       Err(reason) ->
@@ -159,6 +164,17 @@ mod Depot.Middleware do
         Err(reason)
       Ok(_) -> result
       end
+    end
+  end
+
+  -- Zip a column-name list with a row of Option(String) values into an assoc list.
+  -- SQL NULLs (None) are omitted so callers can use record_get without unwrapping.
+  pfn zip_row(cols, vals) do
+    match (cols, vals) do
+    (Nil, _)                         -> Nil
+    (_, Nil)                         -> Nil
+    (Cons(c, cs), Cons(None, vs))    -> zip_row(cs, vs)
+    (Cons(c, cs), Cons(Some(v), vs)) -> Cons((c, v), zip_row(cs, vs))
     end
   end
 
