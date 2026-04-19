@@ -435,7 +435,7 @@ end
 pfn delete_all_user_tokens(user, context) do
   let tokens = Q.from(UserToken.schema())
     |> Q.where_(fn tok -> tok.user_id == user.id && tok.context == context)
-    |> Q.execute(Repo)
+    |> Q.execute(Repo.all(UserToken.schema()))
   List.each(tokens, fn tok -> Repo.delete(UserToken.schema(), tok.id))
 end
 

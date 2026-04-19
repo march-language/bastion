@@ -16,11 +16,14 @@
 mod BastionDepot do
 
   doc """
-  Pool middleware.  Attaches a connection pool to the conn's assigns under
-  the string key `"db"`, making it available to downstream handlers.
+  Store a pool reference in the conn assigns under `"db"`.
 
-  The pool value is opaque — any value works: a process PID, a pool
-  reference, or a mock string during tests.
+  This assigns the pool PID itself — it does NOT check out a connection.
+  Use `Depot.Middleware.with_pool/2` instead if you need a live connection
+  checked out per-request (with automatic checkin after the response).
+
+  This module is useful when you want to pass the pool down to handlers
+  that call `Pool.with_conn/2` themselves.
   """
   fn with_pool(conn, pool) do
     HttpServer.assign(conn, "db", pool)

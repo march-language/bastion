@@ -14,8 +14,15 @@
 --
 --   -- Register custom checks:
 --   let checks = [
---     Bastion.Health.check("depot", fn () -> Depot.ping(MyApp.Repo) end),
---     Bastion.Health.check("vault", fn () -> Vault.has(my_table, "heartbeat") end)
+--     Bastion.Health.check("depot", fn () ->
+--       match Pool.with_conn(my_pool, fn c -> Connection.simple_query(c, "SELECT 1") end) do
+--       Ok(_) -> Ok(())
+--       Err(e) -> Err(e)
+--       end
+--     end),
+--     Bastion.Health.check("vault", fn () ->
+--       if Vault.has(my_table, "heartbeat") do Ok(()) else Err("missing heartbeat key") end
+--     end)
 --   ]
 --   let c = Bastion.Health.plug_with_checks(conn, checks)
 
@@ -60,7 +67,12 @@ mod Bastion.Health do
   doc """
   Build a named health check from a probe function.
 
-      Bastion.Health.check("depot", fn () -> Depot.ping(MyApp.Repo) end)
+      Bastion.Health.check("depot", fn () ->
+        match Pool.with_conn(my_pool, fn c -> Connection.simple_query(c, "SELECT 1") end) do
+        Ok(_) -> Ok(())
+        Err(e) -> Err(e)
+        end
+      end)
   """
   fn check(name : String, probe : () -> Result((), String)) : Check do
     Check(name, probe)
