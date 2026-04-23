@@ -83,17 +83,20 @@ fn run(args : List(String)) do
     println("  HTTP server starting on http://localhost:" ++ server_port() ++ "\n")
   else () end
 
-  -- Hand off to the March REPL with ORC JIT for fast fragment compilation.
-  -- Check MARCH_CONSOLE_BIN for an override, fall back to "march" on PATH.
-  let march_bin = match System.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
-  let shell = "export MARCH_JIT_BACKEND=orc; exec " ++ march_bin ++ " repl"
-  match Process.spawn_async("sh", ["-c", shell]) do
+  -- ORC JIT cuts per-fragment compile time from ~145ms to ~0.2ms.
+  -- Set it on the forge process so every child inherits it automatically.
+  let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
+  let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
+  -- Primary path: redirect REPL stdio to /dev/tty so the REPL is fully
+  -- interactive even though Process.run pipes stdout internally.  The pipe
+  -- sees EOF immediately and Process.run blocks on waitpid until the user
+  -- quits.  Fallback (|| ...): /dev/tty unavailable in CI / headless
+  -- environments — run without redirect; ORC is still set via inheritance.
+  let shell = "exec " ++ march_bin ++ " repl >/dev/tty 2>/dev/tty" ++
+              " || exec " ++ march_bin ++ " repl"
+  match Process.run("sh", ["-c", shell]) do
     Err(msg) -> println("  Error starting REPL: " ++ msg)
-    Ok(proc) ->
-      match Process.wait_proc(proc) do
-        Err(msg) -> println("  REPL exited with error: " ++ msg)
-        Ok(_)    -> ()
-      end
+    Ok(_)    -> ()
   end
 end
 
