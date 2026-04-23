@@ -87,13 +87,16 @@ fn run(args : List(String)) do
   -- Set it on the forge process so every child inherits it automatically.
   let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
-  -- Primary path: redirect REPL stdio to /dev/tty so the REPL is fully
-  -- interactive even though Process.run pipes stdout internally.  The pipe
-  -- sees EOF immediately and Process.run blocks on waitpid until the user
-  -- quits.  Fallback (|| ...): /dev/tty unavailable in CI / headless
-  -- environments — run without redirect; ORC is still set via inheritance.
-  let shell = "exec " ++ march_bin ++ " repl >/dev/tty 2>/dev/tty" ++
-              " || exec " ++ march_bin ++ " repl"
+  -- Pipe :load commands for every lib/*.march file into the REPL, then
+  -- hand stdin to /dev/tty so the session is interactive.  stdout/stderr
+  -- also go to /dev/tty, bypassing the pipe that Process.run sets up
+  -- internally (the pipe sees EOF immediately; Process.run then blocks on
+  -- waitpid until the user quits).  Forge nulls stdin before running tasks,
+  -- so </dev/tty is required for keyboard input.
+  -- Fallback (|| ...): /dev/tty unavailable in CI / headless environments.
+  let preload = "{ for f in lib/*.march; do printf ':load %s\\n' \"$f\"; done; cat </dev/tty; }"
+  let shell = preload ++ " | " ++ march_bin ++ " repl >/dev/tty 2>/dev/tty" ++
+              " || " ++ march_bin ++ " repl"
   match Process.run("sh", ["-c", shell]) do
     Err(msg) -> println("  Error starting REPL: " ++ msg)
     Ok(_)    -> ()
