@@ -83,9 +83,11 @@ fn run(args : List(String)) do
     println("  HTTP server starting on http://localhost:" ++ server_port() ++ "\n")
   else () end
 
-  -- ORC JIT cuts per-fragment compile time from ~145ms to ~0.2ms.
-  -- Set it on the forge process so every child inherits it automatically.
-  let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
+  -- ORC JIT is NOT set here: ORC compiles fragments against its own symbol
+  -- table and cannot resolve symbols registered by :load (which go through
+  -- the interpreter's DMod env).  Calls to loaded module functions fail with
+  -- "Failed to materialize symbols" and return nothing.  The default
+  -- interpreter path is slower (~145ms/fragment) but correctly resolves them.
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
   -- expose march_bin to the Tcl script via env so there are no quoting issues
   let _ = Process.set_env("MARCH_BIN", march_bin)
