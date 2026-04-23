@@ -47,7 +47,7 @@ pfn default_banner(app_name : String) : String do
   "\n" ++
   "  Bastion Console — " ++ app_name ++ "\n" ++
   "  Type :quit or Ctrl+C to exit\n" ++
-  "  Load app code: :load lib/<module>.march\n" ++
+  "  App modules loaded from lib/ — type :env to list bindings\n" ++
   "\n"
 end
 
@@ -87,14 +87,27 @@ fn run(args : List(String)) do
   -- Set it on the forge process so every child inherits it automatically.
   let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
-  -- All three streams go to /dev/tty so the REPL has direct terminal
-  -- control (readline, history, proper echo).  Forge nulls stdin before
-  -- running tasks, so </dev/tty is required — without it march sees EOF
-  -- immediately and exits.  stdout/stderr go to /dev/tty so Process.run's
-  -- internal pipe drains immediately; Process.run then blocks on waitpid.
-  -- Fallback (|| ...): /dev/tty unavailable in CI / headless environments.
-  let shell = "exec " ++ march_bin ++ " repl </dev/tty >/dev/tty 2>/dev/tty" ++
-              " || exec " ++ march_bin ++ " repl"
+  -- expose march_bin to the Tcl script via env so there are no quoting issues
+  let _ = Process.set_env("MARCH_BIN", march_bin)
+  -- Use `expect` to spawn march with a real PTY (so readline/history work),
+  -- inject a :load command for each lib/*.march file (which uses the DMod-wrap
+  -- path, giving Counter.create, PageController.home etc.), then `interact` to
+  -- hand the session to the user.  All output goes through expect's PTY.
+  -- Forge nulls stdin, so all three streams are tied to /dev/tty.
+  -- Fallback chain: if expect or /dev/tty is absent, plain exec without loads.
+  let tcl =
+    "log_user 1; " ++
+    "spawn $env(MARCH_BIN) repl; " ++
+    "foreach f [glob -nocomplain lib/*.march] { " ++
+      "expect -re {march\\(\\d+\\)>}; " ++
+      "send \":load $f\\r\" }; " ++
+    "expect -re {march\\(\\d+\\)>}; " ++
+    "interact"
+  let shell =
+    "(command -v expect >/dev/null 2>&1 && " ++
+    "expect -c '" ++ tcl ++ "' </dev/tty >/dev/tty 2>/dev/tty)" ++
+    " || exec " ++ march_bin ++ " repl </dev/tty >/dev/tty 2>/dev/tty" ++
+    " || exec " ++ march_bin ++ " repl"
   match Process.run("sh", ["-c", shell]) do
     Err(msg) -> println("  Error starting REPL: " ++ msg)
     Ok(_)    -> ()
