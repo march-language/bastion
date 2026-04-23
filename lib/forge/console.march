@@ -47,7 +47,7 @@ pfn default_banner(app_name : String) : String do
   "\n" ++
   "  Bastion Console — " ++ app_name ++ "\n" ++
   "  Type :quit or Ctrl+C to exit\n" ++
-  "  Variables in scope: conn (test conn), Vault, Depot\n" ++
+  "  Load app code: :load lib/<module>.march\n" ++
   "\n"
 end
 
@@ -87,16 +87,14 @@ fn run(args : List(String)) do
   -- Set it on the forge process so every child inherits it automatically.
   let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
-  -- Pipe :load commands for every lib/*.march file into the REPL, then
-  -- hand stdin to /dev/tty so the session is interactive.  stdout/stderr
-  -- also go to /dev/tty, bypassing the pipe that Process.run sets up
-  -- internally (the pipe sees EOF immediately; Process.run then blocks on
-  -- waitpid until the user quits).  Forge nulls stdin before running tasks,
-  -- so </dev/tty is required for keyboard input.
+  -- All three streams go to /dev/tty so the REPL has direct terminal
+  -- control (readline, history, proper echo).  Forge nulls stdin before
+  -- running tasks, so </dev/tty is required — without it march sees EOF
+  -- immediately and exits.  stdout/stderr go to /dev/tty so Process.run's
+  -- internal pipe drains immediately; Process.run then blocks on waitpid.
   -- Fallback (|| ...): /dev/tty unavailable in CI / headless environments.
-  let preload = "{ for f in lib/*.march; do printf ':load %s\\n' \"$f\"; done; cat </dev/tty; }"
-  let shell = preload ++ " | " ++ march_bin ++ " repl >/dev/tty 2>/dev/tty" ++
-              " || " ++ march_bin ++ " repl"
+  let shell = "exec " ++ march_bin ++ " repl </dev/tty >/dev/tty 2>/dev/tty" ++
+              " || exec " ++ march_bin ++ " repl"
   match Process.run("sh", ["-c", shell]) do
     Err(msg) -> println("  Error starting REPL: " ++ msg)
     Ok(_)    -> ()
