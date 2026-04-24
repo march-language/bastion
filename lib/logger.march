@@ -1,28 +1,207 @@
 -- lib/logger.march — Logger
 --
--- Structured logging for Bastion applications.
+-- Process-based structured logging for Bastion applications.
 --
--- Output format is determined by the MARCH_ENV environment variable:
---   dev / development / test → human-readable  HH:MM:SS.mmm [level] message  key=value ...
---   prod / production        → JSON one-liner  {"ts":"…","level":"…","msg":"…", …}
+-- Log calls are fire-and-forget: the message is enqueued in LoggerActor's
+-- mailbox and written asynchronously, so request handlers are never blocked
+-- waiting for I/O.
 --
--- Metadata is a flat list of (key, value) string pairs. Include the
--- request_id from the conn assigns to tie log entries to requests:
+-- When the actor is not running (startup, tests, REPL) all calls fall back
+-- to synchronous println so no logs are ever silently dropped.
 --
---   let rid = match HttpServer.get_assign(conn, "request_id") do
---     Some(id) -> id | None -> "" end
---   Logger.info("user registered", [("request_id", rid), ("email", email)])
+-- The actor is started by the Application supervisor.  It reads LOG_LEVEL
+-- and MARCH_ENV from the environment on Start(), then the supervisor
+-- overrides with config-file values via SetLevel / SetFormat.
 --
--- In request handlers, prefer the convenience helpers that accept a conn
--- and read the request_id automatically:
+-- Runtime overrides:
+--   Logger.set_level(Logger.Warn)
+--   Logger.set_format("json")
 --
---   Logger.info_conn(conn, "user registered", [("email", email)])
+-- In request handlers prefer the _conn variants which pull request_id
+-- automatically:
+--   Logger.info_conn(conn, "user created", [("email", email)])
 
 mod Logger do
 
-  -- ── Level type ───────────────────────────────────────────────────────────────
+  -- ── Level ────────────────────────────────────────────────────────────────────
 
   type Level = Debug | Info | Warn | Error
+
+  -- ── Actor message type ───────────────────────────────────────────────────────
+  --
+  -- Declared explicitly so the Application supervisor can reference
+  -- constructors by qualified name (Logger.Start, Logger.SetLevel, etc.).
+
+  type LoggerMsg =
+      Start
+    | Log(Level, String, List((String, String)))
+    | SetLevel(Level)
+    | SetFormat(String)
+
+  -- ── LoggerActor ──────────────────────────────────────────────────────────────
+
+  actor LoggerActor do
+    state { level : Level, format : String }
+    init  { level = Info, format = "text" }
+
+    -- Sent by the Application supervisor after spawning.
+    -- Reads LOG_LEVEL + MARCH_ENV from environment to set initial config.
+    -- The supervisor then sends SetLevel/SetFormat to apply config-file values.
+    on Start() do
+      let lvl = parse_level(Env.get("LOG_LEVEL", "info"))
+      let march_env = String.to_lowercase(Env.get("MARCH_ENV", "dev"))
+      let fmt = if march_env == "prod" || march_env == "production" do "json" else "text" end
+      { level = lvl, format = fmt }
+    end
+
+    on Log(level, msg, meta) do
+      let _ = if level_gte(level, state.level) do
+        let line =
+          if state.format == "json" do format_json(level, msg, meta)
+          else format_human(level, msg, meta)
+          end
+        println(line)
+      else () end
+      state
+    end
+
+    on SetLevel(level) do
+      { state with level = level }
+    end
+
+    on SetFormat(fmt) do
+      { state with format = fmt }
+    end
+  end
+
+  -- ── Registry key ─────────────────────────────────────────────────────────────
+
+  let _key = "bastion:logger"
+
+  pfn actor_pid() : Option(Int) do
+    Registry.whereis(_key)
+  end
+
+  -- ── Public API ───────────────────────────────────────────────────────────────
+
+  doc """
+  Log at DEBUG level. Typically suppressed in production.
+
+      Logger.debug("cache miss", [("key", key)])
+  """
+  fn debug(msg : String, meta : List((String, String))) do
+    dispatch(Debug, msg, meta)
+  end
+
+  doc """
+  Log at INFO level. Normal operational events.
+
+      Logger.info("request complete", [("status", "200"), ("path", "/users")])
+  """
+  fn info(msg : String, meta : List((String, String))) do
+    dispatch(Info, msg, meta)
+  end
+
+  doc """
+  Log at WARN level. Unexpected but recoverable situations.
+
+      Logger.warn("slow query", [("duration_ms", "1200")])
+  """
+  fn warn(msg : String, meta : List((String, String))) do
+    dispatch(Warn, msg, meta)
+  end
+
+  doc """
+  Log at ERROR level. Errors that should be investigated.
+
+      Logger.error("db checkout failed", [("pool", "main")])
+  """
+  fn error(msg : String, meta : List((String, String))) do
+    dispatch(Error, msg, meta)
+  end
+
+  doc "Change the minimum log level at runtime."
+  fn set_level(level : Level) do
+    match actor_pid() do
+    None      -> ()
+    Some(pid) -> Actor.cast(pid, SetLevel(level))
+    end
+  end
+
+  doc "Change the log format at runtime. Valid values: \"text\", \"json\"."
+  fn set_format(fmt : String) do
+    match actor_pid() do
+    None      -> ()
+    Some(pid) -> Actor.cast(pid, SetFormat(fmt))
+    end
+  end
+
+  doc "Parse a level string (case-insensitive) to a Level value."
+  fn parse_level(s : String) : Level do
+    match String.to_lowercase(s) do
+    "debug" -> Debug
+    "warn"  -> Warn
+    "error" -> Error
+    _       -> Info
+    end
+  end
+
+  -- ── Conn helpers ─────────────────────────────────────────────────────────────
+
+  doc "Log INFO, pulling request_id from conn assigns automatically."
+  fn info_conn(conn, msg : String, meta : List((String, String))) do
+    dispatch(Info, msg, with_rid(conn, meta))
+  end
+
+  doc "Log WARN, pulling request_id from conn assigns automatically."
+  fn warn_conn(conn, msg : String, meta : List((String, String))) do
+    dispatch(Warn, msg, with_rid(conn, meta))
+  end
+
+  doc "Log ERROR, pulling request_id from conn assigns automatically."
+  fn error_conn(conn, msg : String, meta : List((String, String))) do
+    dispatch(Error, msg, with_rid(conn, meta))
+  end
+
+  -- ── Internal dispatch ────────────────────────────────────────────────────────
+
+  pfn dispatch(level, msg, meta) do
+    match actor_pid() do
+    None      -> log_direct(level, msg, meta)
+    Some(pid) -> Actor.cast(pid, Log(level, msg, meta))
+    end
+  end
+
+  pfn with_rid(conn, meta) do
+    match HttpServer.get_assign(conn, "request_id") do
+    Some(rid) -> Cons(("request_id", rid), meta)
+    None      -> meta
+    end
+  end
+
+  pfn level_gte(a : Level, b : Level) : Bool do
+    level_int(a) >= level_int(b)
+  end
+
+  pfn level_int(l : Level) : Int do
+    match l do
+    Debug -> 0
+    Info  -> 1
+    Warn  -> 2
+    Error -> 3
+    end
+  end
+
+  -- Synchronous fallback used when the actor is not running.
+  pfn log_direct(level, msg, meta) do
+    let march_env = String.to_lowercase(Env.get("MARCH_ENV", "dev"))
+    let line = if march_env == "prod" || march_env == "production" do format_json(level, msg, meta)
+               else format_human(level, msg, meta)
+               end
+    println(line)
+  end
+
+  -- ── Formatting ───────────────────────────────────────────────────────────────
 
   pfn level_to_string(level) do
     match level do
@@ -35,35 +214,44 @@ mod Logger do
 
   pfn level_to_ansi(level) do
     match level do
-    Debug -> "\027[36m"   -- cyan
-    Info  -> "\027[32m"   -- green
-    Warn  -> "\027[33m"   -- yellow
-    Error -> "\027[31m"   -- red
+    Debug -> "\027[36m"
+    Info  -> "\027[32m"
+    Warn  -> "\027[33m"
+    Error -> "\027[31m"
     end
   end
 
-  let ansi_reset = "\027[0m"
+  let _ansi_reset = "\027[0m"
 
-  -- ── Format detection ─────────────────────────────────────────────────────────
-
-  pfn is_json_env() do
-    match Process.env("MARCH_ENV") do
-    None       -> false
-    Some(env)  ->
-      let e = String.to_lowercase(env)
-      e == "prod" || e == "production"
+  -- 12:34:56.789 [info]  message  key=value  key2=value2
+  pfn format_human(level, msg, meta) do
+    let ts    = format_time_human(float_to_int(unix_time(()) * 1000.0))
+    let color = level_to_ansi(level)
+    let lvl   = "[" ++ level_to_string(level) ++ "]"
+    let base  = ts ++ " " ++ color ++ lvl ++ _ansi_reset ++ " " ++ msg
+    match meta do
+    Nil -> base
+    _   -> base ++ "  " ++ build_kv_pairs(meta, "")
     end
   end
 
-  -- ── Timestamp ────────────────────────────────────────────────────────────────
+  -- {"ts":"12:34:56.789","level":"info","msg":"message","key":"value"}
+  pfn format_json(level, msg, meta) do
+    let ts  = format_time_human(float_to_int(unix_time(()) * 1000.0))
+    let lvl = level_to_string(level)
+    let base =
+      "\"ts\":\"" ++ ts ++ "\","
+      ++ "\"level\":\"" ++ lvl ++ "\","
+      ++ "\"msg\":" ++ json_string(msg)
+    "{" ++ base ++ build_json_fields(meta, "") ++ "}"
+  end
 
-  -- Format unix_time_ms as HH:MM:SS.mmm (UTC approximation without stdlib date)
   pfn format_time_human(ms) do
     let total_secs = ms / 1000
     let millis     = ms - (total_secs * 1000)
-    let secs       = total_secs %60
-    let mins       = (total_secs / 60) %60
-    let hours      = (total_secs / 3600) %24
+    let secs       = total_secs % 60
+    let mins       = (total_secs / 60) % 60
+    let hours      = (total_secs / 3600) % 24
     pad2(hours) ++ ":" ++ pad2(mins) ++ ":" ++ pad2(secs) ++ "." ++ pad3(millis)
   end
 
@@ -79,46 +267,14 @@ mod Logger do
     end
   end
 
-  -- ── Human format ─────────────────────────────────────────────────────────────
-  --
-  --   12:34:56.789 [info]  message  key=value  key2=value2
-
-  pfn format_human(level, msg, meta) do
-    let ts    = format_time_human(float_to_int(unix_time(()) * 1000.0))
-    let color = level_to_ansi(level)
-    let lvl   = "[" ++ level_to_string(level) ++ "]"
-    let base  = ts ++ " " ++ color ++ lvl ++ ansi_reset ++ " " ++ msg
-    match meta do
-    Nil -> base
-    _   ->
-      let kv = build_kv_pairs(meta, "")
-      base ++ "  " ++ kv
-    end
-  end
-
   pfn build_kv_pairs(meta, acc) do
     match meta do
     Nil -> acc
     Cons((k, v), rest) ->
       let pair = k ++ "=" ++ v
-      let next = if acc == "" do pair else acc ++ "  " ++ pair end
+      let next = if String.is_empty(acc) do pair else acc ++ "  " ++ pair end
       build_kv_pairs(rest, next)
     end
-  end
-
-  -- ── JSON format ──────────────────────────────────────────────────────────────
-  --
-  --   {"ts":"12:34:56.789","level":"info","msg":"message","key":"value"}
-
-  pfn format_json(level, msg, meta) do
-    let ts  = format_time_human(float_to_int(unix_time(()) * 1000.0))
-    let lvl = level_to_string(level)
-    let base_fields =
-      "\"ts\":\"" ++ ts ++ "\","
-      ++ "\"level\":\"" ++ lvl ++ "\","
-      ++ "\"msg\":" ++ json_string(msg)
-    let extra = build_json_fields(meta, "")
-    "{" ++ base_fields ++ extra ++ "}"
   end
 
   pfn build_json_fields(meta, acc) do
@@ -135,7 +291,6 @@ mod Logger do
   end
 
   pfn json_escape(s) do
-    -- Escape backslash, double-quote, and common control chars
     String.replace(
       String.replace(
         String.replace(
@@ -143,94 +298,6 @@ mod Logger do
           "\"", "\\\""),
         "\n", "\\n"),
       "\t", "\\t")
-  end
-
-  -- ── Core log function ────────────────────────────────────────────────────────
-
-  pfn log(level, msg, meta) do
-    let line =
-      if is_json_env() do format_json(level, msg, meta)
-      else format_human(level, msg, meta)
-      end
-    println(line)
-  end
-
-  -- ── Public API ───────────────────────────────────────────────────────────────
-
-  doc """
-  Log at DEBUG level. Typically suppressed in production.
-
-      Logger.debug("cache miss", [("key", key)])
-  """
-  fn debug(msg, meta) do
-    log(Debug, msg, meta)
-  end
-
-  doc """
-  Log at INFO level. Normal operational events.
-
-      Logger.info("request complete", [("status", "200"), ("path", "/users")])
-  """
-  fn info(msg, meta) do
-    log(Info, msg, meta)
-  end
-
-  doc """
-  Log at WARN level. Unexpected but recoverable situations.
-
-      Logger.warn("slow query", [("duration_ms", "1200")])
-  """
-  fn warn(msg, meta) do
-    log(Warn, msg, meta)
-  end
-
-  doc """
-  Log at ERROR level. Errors that should be investigated.
-
-      Logger.error("db checkout failed", [("pool", "main")])
-  """
-  fn error(msg, meta) do
-    log(Error, msg, meta)
-  end
-
-  -- ── Conn convenience helpers ─────────────────────────────────────────────────
-  --
-  -- These pull request_id from the conn assigns automatically.
-
-  pfn request_id_from_conn(conn) do
-    match HttpServer.get_assign(conn, "request_id") do
-    Some(id) -> id
-    None     -> ""
-    end
-  end
-
-  doc """
-  Log INFO with the request_id from conn prepended to meta.
-
-      Logger.info_conn(conn, "user created", [("email", email)])
-  """
-  fn info_conn(conn, msg, meta) do
-    let rid = request_id_from_conn(conn)
-    let full_meta = if rid == "" do meta else Cons(("request_id", rid), meta) end
-    log(Info, msg, full_meta)
-  end
-
-  doc """
-  Log WARN with the request_id from conn prepended to meta.
-  """
-  fn warn_conn(conn, msg, meta) do
-    let rid = request_id_from_conn(conn)
-    let full_meta = if rid == "" do meta else Cons(("request_id", rid), meta) end
-    log(Warn, msg, full_meta)
-  end
-
-  doc """
-  Log ERROR with the request_id from conn prepended to meta.
-  """
-  fn error_conn(conn, msg, meta) do
-    let rid = request_id_from_conn(conn)
-    let full_meta = if rid == "" do meta else Cons(("request_id", rid), meta) end
-    log(Error, msg, full_meta)
   end
 
 end

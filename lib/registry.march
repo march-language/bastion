@@ -1,0 +1,45 @@
+-- lib/registry.march — Registry
+--
+-- Named actor registry backed by Vault.
+-- Maps String names to raw actor pids (Int) so any module can look up a
+-- running actor without threading pids through the call stack.
+--
+-- The registry is synchronous (Vault is an in-process map) and requires no
+-- process of its own — it is initialised at module-load time.
+--
+-- Convention: the Application supervisor registers each child after spawning
+-- it, then sends Start() so the child can perform its own setup.
+--
+--   Registry.register("bastion:logger", state.logger)
+--   Actor.cast(state.logger, Logger.Start())
+--
+-- Any module then looks up and sends to the actor by name:
+--
+--   match Registry.whereis("bastion:logger") do
+--   None      -> ()
+--   Some(pid) -> Actor.cast(pid, Logger.Log(Logger.Info, msg, meta))
+--   end
+
+mod Registry do
+
+  let _table = Vault.open("bastion:registry")
+
+  doc "Register an actor pid under a name. Overwrites any previous registration."
+  fn register(name : String, pid : Int) do
+    Vault.put(_table, name, int_to_string(pid))
+  end
+
+  doc "Look up a registered actor pid by name. Returns None if not registered."
+  fn whereis(name : String) : Option(Int) do
+    match Vault.get(_table, name) do
+    None    -> None
+    Some(s) -> Some(string_to_int(s))
+    end
+  end
+
+  doc "Remove a registration. No-op if the name was not registered."
+  fn unregister(name : String) do
+    Vault.delete(_table, name)
+  end
+
+end

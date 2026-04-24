@@ -174,19 +174,198 @@ pfn counter_island_source() do
 end
 
 pfn config_main() do
-  "mod Config do\n-- Application configuration.\n-- Environment-specific settings live in config/dev.march,\n-- config/test.march, and config/prod.march.\nend\n"
+  "mod Config do\n"
+  ++ "  -- Route to the environment-specific submodule based on MARCH_ENV.\n"
+  ++ "  -- Set MARCH_ENV=prod for production, MARCH_ENV=test for tests.\n"
+  ++ "\n"
+  ++ "  pfn e() do\n"
+  ++ "    let env = String.to_lowercase(Env.get(\"MARCH_ENV\", \"dev\"))\n"
+  ++ "    if env == \"prod\" || env == \"production\" do \"prod\"\n"
+  ++ "    else if env == \"test\" do \"test\"\n"
+  ++ "    else \"dev\"\n"
+  ++ "    end end\n"
+  ++ "  end\n"
+  ++ "\n"
+  ++ "  fn port()         : Int    do match e() do \"prod\" -> Config.Prod.port         | \"test\" -> Config.Test.port         | _ -> Config.Dev.port         end end\n"
+  ++ "  fn log_level()    : String do match e() do \"prod\" -> Config.Prod.log_level    | \"test\" -> Config.Test.log_level    | _ -> Config.Dev.log_level    end end\n"
+  ++ "  fn log_format()   : String do match e() do \"prod\" -> Config.Prod.log_format   | \"test\" -> Config.Test.log_format   | _ -> Config.Dev.log_format   end end\n"
+  ++ "  fn database_url() : String do match e() do \"prod\" -> Config.Prod.database_url | \"test\" -> Config.Test.database_url | _ -> Config.Dev.database_url end end\n"
+  ++ "  fn db_host()      : String do match e() do \"prod\" -> Config.Prod.db_host      | \"test\" -> Config.Test.db_host      | _ -> Config.Dev.db_host      end end\n"
+  ++ "  fn db_port()      : Int    do match e() do \"prod\" -> Config.Prod.db_port      | \"test\" -> Config.Test.db_port      | _ -> Config.Dev.db_port      end end\n"
+  ++ "  fn db_name()      : String do match e() do \"prod\" -> Config.Prod.db_name      | \"test\" -> Config.Test.db_name      | _ -> Config.Dev.db_name      end end\n"
+  ++ "  fn db_user()      : String do match e() do \"prod\" -> Config.Prod.db_user      | \"test\" -> Config.Test.db_user      | _ -> Config.Dev.db_user      end end\n"
+  ++ "  fn db_password()  : String do match e() do \"prod\" -> Config.Prod.db_password  | \"test\" -> Config.Test.db_password  | _ -> Config.Dev.db_password  end end\n"
+  ++ "  fn db_pool_min()  : Int    do match e() do \"prod\" -> Config.Prod.db_pool_min  | \"test\" -> Config.Test.db_pool_min  | _ -> Config.Dev.db_pool_min  end end\n"
+  ++ "  fn db_pool_max()  : Int    do match e() do \"prod\" -> Config.Prod.db_pool_max  | \"test\" -> Config.Test.db_pool_max  | _ -> Config.Dev.db_pool_max  end end\n"
+  ++ "\n"
+  ++ "end\n"
 end
 
-pfn config_dev() do
-  "mod Config.Dev do\n  let port = 4000\n  let debug = true\nend\n"
+pfn config_dev(name) do
+  "mod Config.Dev do\n"
+  ++ "  let port         : Int    = 4000\n"
+  ++ "  let debug        : Bool   = true\n"
+  ++ "  let log_level    : String = \"debug\"\n"
+  ++ "  let log_format   : String = \"text\"\n"
+  ++ "  let database_url : String = \"\"\n"
+  ++ "  let db_host      : String = \"localhost\"\n"
+  ++ "  let db_port      : Int    = 5432\n"
+  ++ "  let db_name      : String = \"" ++ name ++ "_dev\"\n"
+  ++ "  let db_user      : String = \"postgres\"\n"
+  ++ "  let db_password  : String = \"\"\n"
+  ++ "  let db_pool_min  : Int    = 2\n"
+  ++ "  let db_pool_max  : Int    = 10\n"
+  ++ "end\n"
 end
 
-pfn config_test() do
-  "mod Config.Test do\n  let port = 4001\n  let debug = false\nend\n"
+pfn config_test(name) do
+  "mod Config.Test do\n"
+  ++ "  let port         : Int    = 4001\n"
+  ++ "  let debug        : Bool   = false\n"
+  ++ "  let log_level    : String = \"warn\"\n"
+  ++ "  let log_format   : String = \"text\"\n"
+  ++ "  let database_url : String = \"\"\n"
+  ++ "  let db_host      : String = \"localhost\"\n"
+  ++ "  let db_port      : Int    = 5432\n"
+  ++ "  let db_name      : String = \"" ++ name ++ "_test\"\n"
+  ++ "  let db_user      : String = \"postgres\"\n"
+  ++ "  let db_password  : String = \"\"\n"
+  ++ "  let db_pool_min  : Int    = 1\n"
+  ++ "  let db_pool_max  : Int    = 5\n"
+  ++ "end\n"
 end
 
 pfn config_prod() do
-  "mod Config.Prod do\n  -- Set the PORT environment variable to configure the HTTP port.\n  let port = match Process.env(\"PORT\") do\n    Some(p) -> string_to_int(p)\n    None    -> 4000\n  end\nend\n"
+  "mod Config.Prod do\n"
+  ++ "  let port         : Int    = match Process.env(\"PORT\") do Some(p) -> string_to_int(p) | None -> 4000 end\n"
+  ++ "  let debug        : Bool   = false\n"
+  ++ "  let log_level    : String = Env.get(\"LOG_LEVEL\", \"info\")\n"
+  ++ "  let log_format   : String = \"json\"\n"
+  ++ "  let database_url : String = Env.get(\"DATABASE_URL\", \"\")\n"
+  ++ "  let db_host      : String = Env.get(\"DB_HOST\", \"localhost\")\n"
+  ++ "  let db_port      : Int    = match Process.env(\"DB_PORT\") do Some(p) -> string_to_int(p) | None -> 5432 end\n"
+  ++ "  let db_name      : String = Env.get(\"DB_NAME\", \"\")\n"
+  ++ "  let db_user      : String = Env.get(\"DB_USER\", \"postgres\")\n"
+  ++ "  let db_password  : String = Env.get(\"DB_PASSWORD\", \"\")\n"
+  ++ "  let db_pool_min  : Int    = match Process.env(\"DB_POOL_MIN\") do Some(p) -> string_to_int(p) | None -> 5 end\n"
+  ++ "  let db_pool_max  : Int    = match Process.env(\"DB_POOL_MAX\") do Some(p) -> string_to_int(p) | None -> 20 end\n"
+  ++ "end\n"
+end
+
+pfn application_source(pascal) do
+  "mod " ++ pascal ++ ".Application do\n"
+  ++ "\n"
+  ++ "  -- Application supervision tree.\n"
+  ++ "  -- Starts Logger, the Depot connection pool, and the HTTP server\n"
+  ++ "  -- as supervised actors.  Restart strategy is one_for_one: a crash\n"
+  ++ "  -- in one child does not affect its siblings.\n"
+  ++ "  --\n"
+  ++ "  -- Entry point: call " ++ pascal ++ ".Application.start() from main().\n"
+  ++ "\n"
+  ++ "  actor Supervisor do\n"
+  ++ "    state { logger : Int, db : Int }\n"
+  ++ "    init  { logger = 0, db = 0 }\n"
+  ++ "\n"
+  ++ "    supervise do\n"
+  ++ "      strategy     one_for_one\n"
+  ++ "      max_restarts 10 within 60\n"
+  ++ "      Logger.LoggerActor logger\n"
+  ++ "    end\n"
+  ++ "\n"
+  ++ "    -- Sent by start() after the supervise block has spawned all children.\n"
+  ++ "    -- Registers actors in the Registry and delivers their configuration.\n"
+  ++ "    on Boot() do\n"
+  ++ "      -- Register and configure the logger\n"
+  ++ "      Registry.register(\"bastion:logger\", state.logger)\n"
+  ++ "      Actor.cast(state.logger, Logger.Start())\n"
+  ++ "      Actor.cast(state.logger, Logger.SetLevel(Logger.parse_level(Config.log_level())))\n"
+  ++ "      Actor.cast(state.logger, Logger.SetFormat(Config.log_format()))\n"
+  ++ "      -- Start the Depot connection pool (manual spawn; supervision coming in v2)\n"
+  ++ "      let conn_cfg = {\n"
+  ++ "        host     = Config.db_host(),\n"
+  ++ "        port     = Config.db_port(),\n"
+  ++ "        user     = Config.db_user(),\n"
+  ++ "        database = Config.db_name(),\n"
+  ++ "        password = Config.db_password()\n"
+  ++ "      }\n"
+  ++ "      let pool_cfg = {\n"
+  ++ "        min_size = Config.db_pool_min(),\n"
+  ++ "        max_size = Config.db_pool_max(),\n"
+  ++ "        conn_cfg = conn_cfg\n"
+  ++ "      }\n"
+  ++ "      let db_ref = Depot.Pool.start(pool_cfg)\n"
+  ++ "      Registry.register(\"bastion:db_pool\", db_ref)\n"
+  ++ "      Logger.info(\"" ++ pascal ++ " started\", [])\n"
+  ++ "      { state with db = db_ref }\n"
+  ++ "    end\n"
+  ++ "  end\n"
+  ++ "\n"
+  ++ "  doc \"Start the application supervision tree. Returns the supervisor actor ref.\"\n"
+  ++ "  fn start() do\n"
+  ++ "    let sup = spawn(Supervisor)\n"
+  ++ "    Actor.cast(sup, Boot())\n"
+  ++ "    sup\n"
+  ++ "  end\n"
+  ++ "\n"
+  ++ "end\n"
+end
+
+pfn repo_source(pascal, name) do
+  "mod " ++ pascal ++ ".Repo do\n"
+  ++ "\n"
+  ++ "  -- Thin wrapper over the application's Depot connection pool.\n"
+  ++ "  -- Use this module for all database access in " ++ pascal ++ ".\n"
+  ++ "  --\n"
+  ++ "  --   import " ++ pascal ++ ".Repo\n"
+  ++ "  --\n"
+  ++ "  --   Repo.with_conn(fn conn -> do\n"
+  ++ "  --     Depot.Query.from(User.schema())\n"
+  ++ "  --     |> Depot.Query.where_eq(\"email\", email)\n"
+  ++ "  --     |> Depot.Query.exec_sql(conn)\n"
+  ++ "  --   end)\n"
+  ++ "\n"
+  ++ "  let _pool_key = \"bastion:db_pool\"\n"
+  ++ "\n"
+  ++ "  pfn pool() do\n"
+  ++ "    match Registry.whereis(_pool_key) do\n"
+  ++ "    Some(pid) -> pid\n"
+  ++ "    None      -> panic(\"" ++ pascal ++ ".Repo: db pool not started — call " ++ pascal ++ ".Application.start() first\")\n"
+  ++ "    end\n"
+  ++ "  end\n"
+  ++ "\n"
+  ++ "  doc \"Borrow a connection, run f(conn), and return the connection automatically.\"\n"
+  ++ "  fn with_conn(f) do\n"
+  ++ "    Depot.Pool.with_conn(pool(), f)\n"
+  ++ "  end\n"
+  ++ "\n"
+  ++ "  doc \"Borrow a pinned connection and run f(conn) inside a transaction.\"\n"
+  ++ "  fn transaction(f) do\n"
+  ++ "    Depot.Transaction.run_pool(pool(), f)\n"
+  ++ "  end\n"
+  ++ "\n"
+  ++ "end\n"
+end
+
+pfn env_example(name) do
+  "# " ++ name ++ " environment variables\n"
+  ++ "# Copy to .env and fill in your values.  Never commit .env.\n"
+  ++ "\n"
+  ++ "MARCH_ENV=dev\n"
+  ++ "PORT=4000\n"
+  ++ "\n"
+  ++ "# Logging\n"
+  ++ "LOG_LEVEL=debug\n"
+  ++ "\n"
+  ++ "# Database — use DATABASE_URL for a connection string,\n"
+  ++ "# or set individual DB_* vars (individual vars take effect when DATABASE_URL is empty).\n"
+  ++ "DATABASE_URL=\n"
+  ++ "DB_HOST=localhost\n"
+  ++ "DB_PORT=5432\n"
+  ++ "DB_NAME=" ++ name ++ "_dev\n"
+  ++ "DB_USER=postgres\n"
+  ++ "DB_PASSWORD=\n"
+  ++ "DB_POOL_MIN=2\n"
+  ++ "DB_POOL_MAX=10\n"
 end
 
 pfn app_css() do
@@ -256,7 +435,7 @@ pfn editorconfig() do
 end
 
 pfn gitignore() do
-  "/.march/\n/islands/*.wasm\n/islands/*.glue.js\n"
+  "/.march/\n/islands/*.wasm\n/islands/*.glue.js\n/.env\n"
 end
 
 pfn readme(name, pascal) do
@@ -296,12 +475,13 @@ fn scaffold(name) do
     Err("directory '" ++ name ++ "' already exists")
   else
     let pascal = snake_to_pascal(name)
-    let _ = Dir.mkdir_p(name ++ "/lib")
+    let _ = Dir.mkdir_p(name ++ "/lib/" ++ name)
     let _ = Dir.mkdir_p(name ++ "/config")
     let _ = Dir.mkdir_p(name ++ "/public/css")
     let _ = Dir.mkdir_p(name ++ "/public/js")
     let _ = Dir.mkdir_p(name ++ "/islands")
     let _ = Dir.mkdir_p(name ++ "/test")
+    let _ = Dir.mkdir_p(name ++ "/priv/depot/migrations")
     let write = fn path -> fn content -> do
       let _ = File.write(name ++ "/" ++ path, content)
       println("* creating " ++ name ++ "/" ++ path)
@@ -309,17 +489,21 @@ fn scaffold(name) do
     write("forge.toml")(forge_toml(name))
     write(".editorconfig")(editorconfig())
     write(".gitignore")(gitignore())
+    write(".env.example")(env_example(name))
     write("README.md")(readme(name, pascal))
     write("lib/" ++ name ++ ".march")(main_source(pascal))
+    write("lib/" ++ name ++ "/application.march")(application_source(pascal))
+    write("lib/" ++ name ++ "/repo.march")(repo_source(pascal, name))
     write("lib/page_controller.march")(page_controller_source(pascal))
     write("lib/counter.march")(counter_island_source())
     write("config/config.march")(config_main())
-    write("config/dev.march")(config_dev())
-    write("config/test.march")(config_test())
+    write("config/dev.march")(config_dev(name))
+    write("config/test.march")(config_test(name))
     write("config/prod.march")(config_prod())
     write("public/css/app.css")(app_css())
     write("public/js/.gitkeep")("")
     write("islands/.gitkeep")("")
+    write("priv/depot/migrations/.gitkeep")("")
     write("test/" ++ name ++ "_test.march")(test_source(name, pascal))
     let _ = Process.run("sh", ["-c", "git init " ++ name ++ " > /dev/null 2>&1"])
     Ok(())
