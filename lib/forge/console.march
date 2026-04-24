@@ -106,8 +106,12 @@ fn run(args : List(String)) do
     Process.set_env("MARCH_LIB_PATH", march_lib_path)
   else () end
 
-  -- ORC JIT cuts per-fragment compile time from ~145ms to ~0.2ms.
-  let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
+  -- Do NOT set MARCH_JIT_BACKEND=orc here. ORC makes the PTY REPL JIT-compile
+  -- expression fragments eagerly, which fails when modules have cross-module
+  -- references that weren't resolved during :load (e.g. TodoApp.start_server()
+  -- can't materialize because @ErrorView.render was unresolved in Router's JIT).
+  -- The default clang backend evaluates REPL expressions via the interpreter,
+  -- which uses the tc_env and handles cross-module calls correctly.
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
   let _ = Process.set_env("MARCH_BIN", march_bin)
 
