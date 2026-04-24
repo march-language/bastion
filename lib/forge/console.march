@@ -116,6 +116,7 @@ fn run(args : List(String)) do
   let _ = Process.set_env("MARCH_PROJECT_ROOT", proj_root)
   let app_pascal = snake_to_pascal(app_name)
   let _ = Process.set_env("MARCH_APP_MOD", app_pascal)
+  let _ = Process.set_env("MARCH_APP_NAME", app_name)
 
   -- Use `expect` to spawn march with a real PTY (readline/history work).
   -- Glob is anchored to the project root so it always loads the *user's* lib/
@@ -136,8 +137,10 @@ fn run(args : List(String)) do
   --      before config.march, which references Config.Dev etc. by qualified name.
   --   2. lib/**/*.march (sub-module files) — application, repo, etc. load before
   --      the top-level modules that depend on them.
-  --   3. lib/*.march in DECREASING order — todos.march loads before todo_app.march
-  --      so TodoApp can reference Todos without a forward-reference error.
+  --   3. lib/*.march — all files except the main app module in alphabetical
+  --      order, then the main app module last. This ensures utility modules
+  --      (e.g. math.march) and peer modules (e.g. todos.march) are registered
+  --      before the top-level module that references them.
   let tcl =
     "log_user 1; " ++
     "spawn $env(MARCH_BIN) repl; " ++
@@ -148,9 +151,14 @@ fn run(args : List(String)) do
     "foreach f [lsort [glob -nocomplain $proot/lib/**/*.march]] { " ++
       "expect -re {march\\(\\d+\\)>}; " ++
       "send \":load $f\\r\" }; " ++
-    "foreach f [lsort -decreasing [glob -nocomplain $proot/lib/*.march]] { " ++
+    "set _app_file \"$proot/lib/$env(MARCH_APP_NAME).march\"; " ++
+    "foreach f [lsort [glob -nocomplain $proot/lib/*.march]] { " ++
+      "if {$f ne $_app_file} { " ++
+        "expect -re {march\\(\\d+\\)>}; " ++
+        "send \":load $f\\r\" } }; " ++
+    "if {[file exists $_app_file]} { " ++
       "expect -re {march\\(\\d+\\)>}; " ++
-      "send \":load $f\\r\" }; " ++
+      "send \":load $_app_file\\r\" }; " ++
     server_send ++
     "expect -re {march\\(\\d+\\)>}; " ++
     "interact"
