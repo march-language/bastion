@@ -63,8 +63,12 @@ end
 
 fn run(args : List(String)) do
   let with_server = List.any(args, fn a -> a == "--server")
-  let app_name    = read_app_name()
-  let imports     = read_console_imports()
+
+  -- Load project once for name, root dir, and dep paths.
+  let proj_result = Forge.Project.load()
+  let app_name = match proj_result do Ok(proj) -> proj.name | Err(_) -> "app" end
+  let proj_root = match proj_result do Ok(proj) -> proj.root | Err(_) -> "." end
+  let imports  = read_console_imports()
 
   let config = {
     app_name    = app_name,
@@ -75,36 +79,57 @@ fn run(args : List(String)) do
 
   println(config.banner)
 
-  -- Start the application supervision tree (Vault, Depot pool, etc.)
-  let _ = start_app(config)
-
-  -- Optionally start the HTTP server alongside
-  let _ = if with_server do
-    println("  HTTP server starting on http://localhost:" ++ server_port() ++ "\n")
+  -- Set MARCH_LIB_PATH so :load resolves dep module imports (e.g. import Router).
+  -- Collect lib/ directories of all PathDep entries from forge.toml.
+  let dep_lib_paths = match proj_result do
+    Err(_)   -> Nil
+    Ok(proj) ->
+      List.filter_map(proj.deps, fn pair ->
+        match Tuple.second(pair) do
+        PathDep(p) ->
+          let abs = if String.starts_with(p, "/") do p
+                    else proj_root ++ "/" ++ p
+                    end
+          Some(abs ++ "/lib")
+        _ -> None
+        end)
+  end
+  let march_lib_path = String.join(dep_lib_paths, ":")
+  let _ = if !String.is_empty(march_lib_path) do
+    Process.set_env("MARCH_LIB_PATH", march_lib_path)
   else () end
 
   -- ORC JIT cuts per-fragment compile time from ~145ms to ~0.2ms.
-  -- register_module_decl (march repl_jit.ml) compiles :load-ed DMod functions
-  -- into the ORC dylib so Counter.create etc. are resolvable in later fragments.
   let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
   let _ = Process.set_env("MARCH_BIN", march_bin)
-  -- Expose the Application module name so TCL can call it without quoting issues.
+
+  -- Pass the project root and app module name via env so the TCL script can
+  -- glob the right lib/ directory even when forge changes CWD to the dep package.
+  let _ = Process.set_env("MARCH_PROJECT_ROOT", proj_root)
   let app_pascal = snake_to_pascal(app_name)
   let _ = Process.set_env("MARCH_APP_MOD", app_pascal)
-  -- Use `expect` to spawn march with a real PTY (readline/history work),
-  -- :load every lib file (flat + nested subdirs), then call Application.start()
-  -- inside the REPL so the Logger actor, Depot pool, etc. start in the same
-  -- process — logs stream directly to the PTY, just like `iex -S mix`.
-  -- Finally `interact` hands the session to the user.
+
+  -- Use `expect` to spawn march with a real PTY (readline/history work).
+  -- Glob is anchored to the project root so it always loads the *user's* lib/
+  -- files regardless of where forge invokes the task from.
+  -- Application.start() is injected so actors and the pool boot inside the
+  -- REPL process — logs stream to the PTY, just like `iex -S mix`.
+  let server_send = if with_server do
+    "expect -re {march\\(\\d+\\)>}; " ++
+    "send \"$env(MARCH_APP_MOD).main()\\r\"; "
+  else
+    "expect -re {march\\(\\d+\\)>}; " ++
+    "send \"$env(MARCH_APP_MOD).Application.start()\\r\"; "
+  end
   let tcl =
     "log_user 1; " ++
     "spawn $env(MARCH_BIN) repl; " ++
-    "foreach f [lsort [glob -nocomplain lib/*.march lib/**/*.march]] { " ++
+    "set proot $env(MARCH_PROJECT_ROOT); " ++
+    "foreach f [lsort [glob -nocomplain $proot/lib/*.march $proot/lib/**/*.march]] { " ++
       "expect -re {march\\(\\d+\\)>}; " ++
       "send \":load $f\\r\" }; " ++
-    "expect -re {march\\(\\d+\\)>}; " ++
-    "send \"$env(MARCH_APP_MOD).Application.start()\\r\"; " ++
+    server_send ++
     "expect -re {march\\(\\d+\\)>}; " ++
     "interact"
   let shell =
@@ -152,16 +177,7 @@ end
 -- Config file reading
 -- ---------------------------------------------------------------------------
 
-pfn read_app_name() : String do
-  -- TODO: read from forge.toml when Toml module is available
-  match Forge.Project.load() do
-  Ok(proj) -> proj.name
-  Err(_)   -> "app"
-  end
-end
-
 pfn read_console_imports() : List(String) do
-  -- TODO: read from forge.toml [console] section when Toml module is available
   Nil
 end
 
