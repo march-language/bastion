@@ -8,8 +8,6 @@
 
 mod Middleware do
 
-  import Crypto
-
   doc """
   Execute a list of plugs in order, stopping when the conn is halted.
 
@@ -58,7 +56,7 @@ mod Middleware do
     let meta = if rid == "" do [("path", path_str)]
                else [("path", path_str), ("request_id", rid)]
                end
-    Logger.info(method_str ++ " " ++ path_str, meta)
+    Logger.log_with(Logger.Info, method_str ++ " " ++ path_str, meta)
     conn
   end
 
@@ -74,7 +72,7 @@ mod Middleware do
     let existing = HttpServer.get_req_header(conn, "x-request-id")
     let id = match existing do
       Some(v) -> v
-      None    -> Crypto.generate_token(16)
+      None    -> Crypto.random_hex(16)
       end
     conn
     |> HttpServer.assign("request_id", id)
