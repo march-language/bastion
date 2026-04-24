@@ -96,7 +96,7 @@ fn run(args : List(String)) do
   end
   -- Reverse dep list so later deps (e.g. depot) take priority over earlier ones
   -- (e.g. bastion's Pool stub). Prepend proj config/ for the user's Config module.
-  let reversed_dep_paths = List.rev(dep_lib_paths)
+  let reversed_dep_paths = List.reverse(dep_lib_paths)
   let config_path = proj_root ++ "/config"
   let march_lib_path =
     config_path ++ (if !String.is_empty(String.join(reversed_dep_paths, ":")) do
