@@ -88,20 +88,23 @@ fn run(args : List(String)) do
   -- into the ORC dylib so Counter.create etc. are resolvable in later fragments.
   let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
-  -- expose march_bin to the Tcl script via env so there are no quoting issues
   let _ = Process.set_env("MARCH_BIN", march_bin)
-  -- Use `expect` to spawn march with a real PTY (so readline/history work),
-  -- inject a :load command for each lib/*.march file (which uses the DMod-wrap
-  -- path, giving Counter.create, PageController.home etc.), then `interact` to
-  -- hand the session to the user.  All output goes through expect's PTY.
-  -- Forge nulls stdin, so all three streams are tied to /dev/tty.
-  -- Fallback chain: if expect or /dev/tty is absent, plain exec without loads.
+  -- Expose the Application module name so TCL can call it without quoting issues.
+  let app_pascal = snake_to_pascal(app_name)
+  let _ = Process.set_env("MARCH_APP_MOD", app_pascal)
+  -- Use `expect` to spawn march with a real PTY (readline/history work),
+  -- :load every lib file (flat + nested subdirs), then call Application.start()
+  -- inside the REPL so the Logger actor, Depot pool, etc. start in the same
+  -- process — logs stream directly to the PTY, just like `iex -S mix`.
+  -- Finally `interact` hands the session to the user.
   let tcl =
     "log_user 1; " ++
     "spawn $env(MARCH_BIN) repl; " ++
-    "foreach f [glob -nocomplain lib/*.march] { " ++
+    "foreach f [lsort [glob -nocomplain lib/*.march lib/**/*.march]] { " ++
       "expect -re {march\\(\\d+\\)>}; " ++
       "send \":load $f\\r\" }; " ++
+    "expect -re {march\\(\\d+\\)>}; " ++
+    "send \"$env(MARCH_APP_MOD).Application.start()\\r\"; " ++
     "expect -re {march\\(\\d+\\)>}; " ++
     "interact"
   let shell =
@@ -116,16 +119,28 @@ fn run(args : List(String)) do
 end
 
 -- ---------------------------------------------------------------------------
+-- Helpers
+-- ---------------------------------------------------------------------------
+
+pfn snake_to_pascal(s : String) : String do
+  let parts     = String.split(s, "_")
+  let non_empty = List.filter(parts, fn p -> !String.is_empty(p))
+  let capped    = List.map(non_empty, fn p ->
+    if String.is_empty(p) do p
+    else String.to_uppercase(String.slice_bytes(p, 0, 1)) ++ String.slice_bytes(p, 1, String.byte_size(p) - 1)
+    end)
+  String.join(capped, "")
+end
+
+-- ---------------------------------------------------------------------------
 -- App startup
 -- ---------------------------------------------------------------------------
 
+-- start_app runs in the Forge process before the REPL is spawned.
+-- Real application startup (Logger actor, Depot pool, etc.) happens
+-- inside the REPL process via Application.start() injected by the
+-- TCL script below — exactly like `iex -S mix` starts the OTP app.
 pfn start_app(_config : ConsoleConfig) do
-  -- Start Vault tables the app uses
-  let _ = Vault.open("response_cache")
-  let _ = Vault.open("session_store")
-  let _ = Vault.open("rate_limit")
-  let _ = Vault.open("pubsub_registry")
-  -- TODO: start Depot pool when Depot module is available
   ()
 end
 
