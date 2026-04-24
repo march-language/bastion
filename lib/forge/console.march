@@ -47,7 +47,7 @@ pfn default_banner(app_name : String) : String do
   "\n" ++
   "  Bastion Console — " ++ app_name ++ "\n" ++
   "  Type :quit or Ctrl+C to exit\n" ++
-  "  App modules loaded from lib/ — type :env to list bindings\n" ++
+  "  Loading app modules from lib/...\n" ++
   "\n"
 end
 
@@ -126,31 +126,15 @@ fn run(args : List(String)) do
   -- Glob is anchored to the project root so it always loads the *user's* lib/
   -- files regardless of where forge invokes the task from.
   --
-  -- --server strategy: the PTY REPL's JIT (clang or ORC) fails to dlopen/
-  -- materialize expression fragments that reference cross-module symbols
-  -- (e.g. start_server() → Router.to_plug → ErrorView.render). The fix is to
-  -- run start_server() through a *non-interactive* (pipe-mode) march repl,
-  -- where the REPL evaluates expressions via the interpreter instead of JIT.
-  -- spawn_n forks the HTTP child; the pipe-mode REPL exits when stdin is
-  -- exhausted; the HTTP child lives on as an orphan writing logs to /dev/tty.
-  -- The interactive PTY REPL then starts with Application.start() only (for
-  -- DB access and live module inspection).
+  -- --server: run the app via the batch compiler in the background.
+  -- The batch compiler links all modules together, so cross-module calls work
+  -- without the JIT symbol issues that break PTY REPL expression evaluation.
+  -- The app's main() calls start_server() → spawn_n (forks the HTTP worker)
+  -- → wait_for (blocks the batch process). Both log to /dev/tty so output
+  -- appears interleaved in the terminal alongside the interactive REPL.
+  -- The interactive REPL starts Application.start() separately for DB access.
   let server_send = if with_server do
-    -- Build the load commands for the background pipe-mode repl, write to a
-    -- temp file, exec it non-interactively in the background (>/dev/tty so
-    -- HTTP child logs appear on screen), then start the app in the PTY REPL.
-    "set _sload {}; " ++
-    "foreach f [lsort -decreasing [glob -nocomplain $proot/config/*.march]] { append _sload \":load $f\\n\" }; " ++
-    "foreach f [lsort [glob -nocomplain $proot/lib/**/*.march]] { append _sload \":load $f\\n\" }; " ++
-    "foreach f [lsort [glob -nocomplain $proot/lib/*.march]] { if {$f ne $_app_file} { append _sload \":load $f\\n\" } }; " ++
-    "append _sload \":load $_app_file\\n\"; " ++
-    "append _sload \"$env(MARCH_APP_MOD).start_server()\\n\"; " ++
-    "set _stf [exec mktemp]; " ++
-    "set _sfd [open $_stf w]; " ++
-    "puts -nonewline $_sfd $_sload; " ++
-    "close $_sfd; " ++
-    "exec sh -c \"$env(MARCH_BIN) repl < $_stf >/dev/tty 2>/dev/tty &\"; " ++
-    "after 2000; " ++
+    "exec sh -c \"$env(MARCH_BIN) $proot/lib/$env(MARCH_APP_NAME).march >/dev/tty 2>/dev/tty &\"; " ++
     "expect -re {march\\(\\d+\\)>}; " ++
     "send \"$env(MARCH_APP_MOD).Application.start()\\r\"; "
   else
@@ -169,15 +153,22 @@ fn run(args : List(String)) do
   --      (e.g. math.march) and peer modules (e.g. todos.march) are registered
   --      before the top-level module that references them.
   let tcl =
-    "log_user 1; " ++
+    -- log_user 0 suppresses REPL output during module loading — prevents the
+    -- "Variables in Scope" dump that march prints after every :load. interact
+    -- hands the PTY directly to the terminal regardless of log_user.
+    "log_user 0; " ++
     "spawn $env(MARCH_BIN) repl; " ++
     "set proot $env(MARCH_PROJECT_ROOT); " ++
     "foreach f [lsort -decreasing [glob -nocomplain $proot/config/*.march]] { " ++
       "expect -re {march\\(\\d+\\)>}; " ++
       "send \":load $f\\r\" }; " ++
+    -- Guard [file dirname $f] ne $proot/lib: TCL's ** matches zero intermediate
+    -- segments, so lib/**/*.march also matches lib/foo.march. Without the guard
+    -- those top-level files load twice (here AND in the lib/*.march loop below).
     "foreach f [lsort [glob -nocomplain $proot/lib/**/*.march]] { " ++
-      "expect -re {march\\(\\d+\\)>}; " ++
-      "send \":load $f\\r\" }; " ++
+      "if {[file dirname $f] ne \"$proot/lib\"} { " ++
+        "expect -re {march\\(\\d+\\)>}; " ++
+        "send \":load $f\\r\" } }; " ++
     "set _app_file \"$proot/lib/$env(MARCH_APP_NAME).march\"; " ++
     "foreach f [lsort [glob -nocomplain $proot/lib/*.march]] { " ++
       "if {$f ne $_app_file} { " ++
