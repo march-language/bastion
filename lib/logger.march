@@ -1,303 +1,93 @@
--- lib/logger.march — Logger
+-- lib/logger.march — Bastion.Logger
 --
--- Process-based structured logging for Bastion applications.
+-- Thin wrapper over the March stdlib Logger.
 --
--- Log calls are fire-and-forget: the message is enqueued in LoggerActor's
--- mailbox and written asynchronously, so request handlers are never blocked
--- waiting for I/O.
+-- The stdlib Logger handles level filtering, structured fields, and
+-- pluggable appenders.  This module adds:
 --
--- When the actor is not running (startup, tests, REPL) all calls fall back
--- to synchronous println so no logs are ever silently dropped.
+--   1. Bastion's two-argument call convention: info(msg, meta)
+--      where meta : List((String, String)) maps naturally to logfmt/json fields.
 --
--- The actor is started by the Application supervisor.  It reads LOG_LEVEL
--- and MARCH_ENV from the environment on Start(), then the supervisor
--- overrides with config-file values via SetLevel / SetFormat.
+--   2. A configure/2 helper called by the Application supervisor to
+--      wire up the appender and level from Config on startup.
 --
--- Runtime overrides:
---   Logger.set_level(Logger.Warn)
---   Logger.set_format("json")
+--   3. _conn helpers that pull request_id from the Conn automatically.
 --
--- In request handlers prefer the _conn variants which pull request_id
--- automatically:
---   Logger.info_conn(conn, "user created", [("email", email)])
+-- The stdlib Logger is always available as `Logger`; use it directly
+-- for advanced use cases (with_scope, with_span, add_appender, etc.).
 
-mod Logger do
+mod Bastion.Logger do
 
-  -- ── Level ────────────────────────────────────────────────────────────────────
+  -- ── Public API ────────────────────────────────────────────────────────────────
 
-  type Level = Debug | Info | Warn | Error
-
-  -- ── Actor message type ───────────────────────────────────────────────────────
-  --
-  -- Declared explicitly so the Application supervisor can reference
-  -- constructors by qualified name (Logger.Start, Logger.SetLevel, etc.).
-
-  type LoggerMsg =
-      Start
-    | Log(Level, String, List((String, String)))
-    | SetLevel(Level)
-    | SetFormat(String)
-
-  -- ── LoggerActor ──────────────────────────────────────────────────────────────
-
-  actor LoggerActor do
-    state { level : Level, format : String }
-    init  { level = Info, format = "text" }
-
-    -- Sent by the Application supervisor after spawning.
-    -- Reads LOG_LEVEL + MARCH_ENV from environment to set initial config.
-    -- The supervisor then sends SetLevel/SetFormat to apply config-file values.
-    on Start() do
-      let lvl = parse_level(Env.get("LOG_LEVEL", "info"))
-      let march_env = String.to_lowercase(Env.get("MARCH_ENV", "dev"))
-      let fmt = if march_env == "prod" || march_env == "production" do "json" else "text" end
-      { level = lvl, format = fmt }
-    end
-
-    on Log(level, msg, meta) do
-      let _ = if level_gte(level, state.level) do
-        let line =
-          if state.format == "json" do format_json(level, msg, meta)
-          else format_human(level, msg, meta)
-          end
-        println(line)
-      else () end
-      state
-    end
-
-    on SetLevel(level) do
-      { state with level = level }
-    end
-
-    on SetFormat(fmt) do
-      { state with format = fmt }
-    end
-  end
-
-  -- ── Registry key ─────────────────────────────────────────────────────────────
-
-  let _key = "bastion:logger"
-
-  pfn actor_pid() : Option(Int) do
-    Registry.whereis(_key)
-  end
-
-  -- ── Public API ───────────────────────────────────────────────────────────────
-
-  doc """
-  Log at DEBUG level. Typically suppressed in production.
-
-      Logger.debug("cache miss", [("key", key)])
-  """
+  doc "Log at DEBUG level with optional key-value metadata."
   fn debug(msg : String, meta : List((String, String))) do
-    dispatch(Debug, msg, meta)
+    Logger.log_with(Logger.Debug, msg, meta)
   end
 
-  doc """
-  Log at INFO level. Normal operational events.
-
-      Logger.info("request complete", [("status", "200"), ("path", "/users")])
-  """
+  doc "Log at INFO level with optional key-value metadata."
   fn info(msg : String, meta : List((String, String))) do
-    dispatch(Info, msg, meta)
+    Logger.log_with(Logger.Info, msg, meta)
   end
 
-  doc """
-  Log at WARN level. Unexpected but recoverable situations.
-
-      Logger.warn("slow query", [("duration_ms", "1200")])
-  """
+  doc "Log at WARN level with optional key-value metadata."
   fn warn(msg : String, meta : List((String, String))) do
-    dispatch(Warn, msg, meta)
+    Logger.log_with(Logger.Warn, msg, meta)
+  end
+
+  doc "Log at ERROR level with optional key-value metadata."
+  fn error(msg : String, meta : List((String, String))) do
+    Logger.log_with(Logger.Error, msg, meta)
+  end
+
+  doc "Parse a level string (case-insensitive). Defaults to Info on unknown input."
+  fn parse_level(s : String) : Logger.Level do
+    match Logger.level_from_string(s) do
+    Some(l) -> l
+    None    -> Logger.Info
+    end
   end
 
   doc """
-  Log at ERROR level. Errors that should be investigated.
+  Configure the stdlib Logger from application config.
+  Call this once from Application.start() before any logging.
 
-      Logger.error("db checkout failed", [("pool", "main")])
+    Bastion.Logger.configure(Config.log_level(), Config.log_format())
   """
-  fn error(msg : String, meta : List((String, String))) do
-    dispatch(Error, msg, meta)
+  fn configure(level_str : String, format_str : String) do
+    Logger.set_level(parse_level(level_str))
+    Logger.clear_appenders()
+    let _ = if format_str == "json" do
+      Logger.add_appender(Logger.appender_stdout(Logger.format_json))
+    else if format_str == "logfmt" do
+      Logger.add_appender(Logger.appender_stdout(Logger.format_logfmt))
+    else
+      Logger.add_appender(Logger.appender_stdout(Logger.format_text))
+    end end
+    ()
   end
 
-  doc "Change the minimum log level at runtime."
-  fn set_level(level : Level) do
-    match actor_pid() do
-    None      -> ()
-    Some(pid) -> Actor.cast(pid, SetLevel(level))
-    end
-  end
+  -- ── Conn helpers ──────────────────────────────────────────────────────────────
 
-  doc "Change the log format at runtime. Valid values: \"text\", \"json\"."
-  fn set_format(fmt : String) do
-    match actor_pid() do
-    None      -> ()
-    Some(pid) -> Actor.cast(pid, SetFormat(fmt))
-    end
-  end
-
-  doc "Parse a level string (case-insensitive) to a Level value."
-  fn parse_level(s : String) : Level do
-    match String.to_lowercase(s) do
-    "debug" -> Debug
-    "warn"  -> Warn
-    "error" -> Error
-    _       -> Info
-    end
-  end
-
-  -- ── Conn helpers ─────────────────────────────────────────────────────────────
-
-  doc "Log INFO, pulling request_id from conn assigns automatically."
   fn info_conn(conn, msg : String, meta : List((String, String))) do
-    dispatch(Info, msg, with_rid(conn, meta))
+    Logger.log_with(Logger.Info, msg, with_rid(conn, meta))
   end
 
-  doc "Log WARN, pulling request_id from conn assigns automatically."
   fn warn_conn(conn, msg : String, meta : List((String, String))) do
-    dispatch(Warn, msg, with_rid(conn, meta))
+    Logger.log_with(Logger.Warn, msg, with_rid(conn, meta))
   end
 
-  doc "Log ERROR, pulling request_id from conn assigns automatically."
   fn error_conn(conn, msg : String, meta : List((String, String))) do
-    dispatch(Error, msg, with_rid(conn, meta))
+    Logger.log_with(Logger.Error, msg, with_rid(conn, meta))
   end
 
-  -- ── Internal dispatch ────────────────────────────────────────────────────────
-
-  pfn dispatch(level, msg, meta) do
-    match actor_pid() do
-    None      -> log_direct(level, msg, meta)
-    Some(pid) -> Actor.cast(pid, Log(level, msg, meta))
-    end
-  end
+  -- ── Internals ─────────────────────────────────────────────────────────────────
 
   pfn with_rid(conn, meta) do
     match HttpServer.get_assign(conn, "request_id") do
     Some(rid) -> Cons(("request_id", rid), meta)
     None      -> meta
     end
-  end
-
-  pfn level_gte(a : Level, b : Level) : Bool do
-    level_int(a) >= level_int(b)
-  end
-
-  pfn level_int(l : Level) : Int do
-    match l do
-    Debug -> 0
-    Info  -> 1
-    Warn  -> 2
-    Error -> 3
-    end
-  end
-
-  -- Synchronous fallback used when the actor is not running.
-  pfn log_direct(level, msg, meta) do
-    let march_env = String.to_lowercase(Env.get("MARCH_ENV", "dev"))
-    let line = if march_env == "prod" || march_env == "production" do format_json(level, msg, meta)
-               else format_human(level, msg, meta)
-               end
-    println(line)
-  end
-
-  -- ── Formatting ───────────────────────────────────────────────────────────────
-
-  pfn level_to_string(level) do
-    match level do
-    Debug -> "debug"
-    Info  -> "info"
-    Warn  -> "warn"
-    Error -> "error"
-    end
-  end
-
-  pfn level_to_ansi(level) do
-    match level do
-    Debug -> "\027[36m"
-    Info  -> "\027[32m"
-    Warn  -> "\027[33m"
-    Error -> "\027[31m"
-    end
-  end
-
-  let _ansi_reset = "\027[0m"
-
-  -- 12:34:56.789 [info]  message  key=value  key2=value2
-  pfn format_human(level, msg, meta) do
-    let ts    = format_time_human(float_to_int(unix_time(()) * 1000.0))
-    let color = level_to_ansi(level)
-    let lvl   = "[" ++ level_to_string(level) ++ "]"
-    let base  = ts ++ " " ++ color ++ lvl ++ _ansi_reset ++ " " ++ msg
-    match meta do
-    Nil -> base
-    _   -> base ++ "  " ++ build_kv_pairs(meta, "")
-    end
-  end
-
-  -- {"ts":"12:34:56.789","level":"info","msg":"message","key":"value"}
-  pfn format_json(level, msg, meta) do
-    let ts  = format_time_human(float_to_int(unix_time(()) * 1000.0))
-    let lvl = level_to_string(level)
-    let base =
-      "\"ts\":\"" ++ ts ++ "\","
-      ++ "\"level\":\"" ++ lvl ++ "\","
-      ++ "\"msg\":" ++ json_string(msg)
-    "{" ++ base ++ build_json_fields(meta, "") ++ "}"
-  end
-
-  pfn format_time_human(ms) do
-    let total_secs = ms / 1000
-    let millis     = ms - (total_secs * 1000)
-    let secs       = total_secs % 60
-    let mins       = (total_secs / 60) % 60
-    let hours      = (total_secs / 3600) % 24
-    pad2(hours) ++ ":" ++ pad2(mins) ++ ":" ++ pad2(secs) ++ "." ++ pad3(millis)
-  end
-
-  pfn pad2(n) do
-    if n < 10 do "0" ++ int_to_string(n) else int_to_string(n) end
-  end
-
-  pfn pad3(n) do
-    if n < 10 do "00" ++ int_to_string(n)
-    else if n < 100 do "0" ++ int_to_string(n)
-    else int_to_string(n)
-    end
-    end
-  end
-
-  pfn build_kv_pairs(meta, acc) do
-    match meta do
-    Nil -> acc
-    Cons((k, v), rest) ->
-      let pair = k ++ "=" ++ v
-      let next = if String.is_empty(acc) do pair else acc ++ "  " ++ pair end
-      build_kv_pairs(rest, next)
-    end
-  end
-
-  pfn build_json_fields(meta, acc) do
-    match meta do
-    Nil -> acc
-    Cons((k, v), rest) ->
-      let field = ",\"" ++ json_escape(k) ++ "\":" ++ json_string(v)
-      build_json_fields(rest, acc ++ field)
-    end
-  end
-
-  pfn json_string(s) do
-    "\"" ++ json_escape(s) ++ "\""
-  end
-
-  pfn json_escape(s) do
-    String.replace(
-      String.replace(
-        String.replace(
-          String.replace(s, "\\", "\\\\"),
-          "\"", "\\\""),
-        "\n", "\\n"),
-      "\t", "\\t")
   end
 
 end
