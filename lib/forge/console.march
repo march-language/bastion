@@ -83,11 +83,10 @@ fn run(args : List(String)) do
     println("  HTTP server starting on http://localhost:" ++ server_port() ++ "\n")
   else () end
 
-  -- ORC JIT is NOT set here: ORC compiles fragments against its own symbol
-  -- table and cannot resolve symbols registered by :load (which go through
-  -- the interpreter's DMod env).  Calls to loaded module functions fail with
-  -- "Failed to materialize symbols" and return nothing.  The default
-  -- interpreter path is slower (~145ms/fragment) but correctly resolves them.
+  -- ORC JIT cuts per-fragment compile time from ~145ms to ~0.2ms.
+  -- register_module_decl (march repl_jit.ml) compiles :load-ed DMod functions
+  -- into the ORC dylib so Counter.create etc. are resolvable in later fragments.
+  let _ = Process.set_env("MARCH_JIT_BACKEND", "orc")
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
   -- expose march_bin to the Tcl script via env so there are no quoting issues
   let _ = Process.set_env("MARCH_BIN", march_bin)
