@@ -117,7 +117,7 @@ fn run(args : List(String)) do
   -- REPL process — logs stream to the PTY, just like `iex -S mix`.
   let server_send = if with_server do
     "expect -re {march\\(\\d+\\)>}; " ++
-    "send \"$env(MARCH_APP_MOD).main()\\r\"; "
+    "send \"$env(MARCH_APP_MOD).start_server()\\r\"; "
   else
     "expect -re {march\\(\\d+\\)>}; " ++
     "send \"$env(MARCH_APP_MOD).Application.start()\\r\"; "
