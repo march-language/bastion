@@ -125,11 +125,34 @@ fn run(args : List(String)) do
   -- Use `expect` to spawn march with a real PTY (readline/history work).
   -- Glob is anchored to the project root so it always loads the *user's* lib/
   -- files regardless of where forge invokes the task from.
-  -- Application.start() is injected so actors and the pool boot inside the
-  -- REPL process — logs stream to the PTY, just like `iex -S mix`.
+  --
+  -- --server strategy: the PTY REPL's JIT (clang or ORC) fails to dlopen/
+  -- materialize expression fragments that reference cross-module symbols
+  -- (e.g. start_server() → Router.to_plug → ErrorView.render). The fix is to
+  -- run start_server() through a *non-interactive* (pipe-mode) march repl,
+  -- where the REPL evaluates expressions via the interpreter instead of JIT.
+  -- spawn_n forks the HTTP child; the pipe-mode REPL exits when stdin is
+  -- exhausted; the HTTP child lives on as an orphan writing logs to /dev/tty.
+  -- The interactive PTY REPL then starts with Application.start() only (for
+  -- DB access and live module inspection).
   let server_send = if with_server do
+    -- Build the load commands for the background pipe-mode repl, write to a
+    -- temp file, exec it non-interactively in the background (>/dev/tty so
+    -- HTTP child logs appear on screen), then start the app in the PTY REPL.
+    "set _sload {}; " ++
+    "foreach f [lsort -decreasing [glob -nocomplain $proot/config/*.march]] { append _sload \":load $f\\n\" }; " ++
+    "foreach f [lsort [glob -nocomplain $proot/lib/**/*.march]] { append _sload \":load $f\\n\" }; " ++
+    "foreach f [lsort [glob -nocomplain $proot/lib/*.march]] { if {$f ne $_app_file} { append _sload \":load $f\\n\" } }; " ++
+    "append _sload \":load $_app_file\\n\"; " ++
+    "append _sload \"$env(MARCH_APP_MOD).start_server()\\n\"; " ++
+    "set _stf [exec mktemp]; " ++
+    "set _sfd [open $_stf w]; " ++
+    "puts -nonewline $_sfd $_sload; " ++
+    "close $_sfd; " ++
+    "exec sh -c \"$env(MARCH_BIN) repl < $_stf >/dev/tty 2>/dev/tty &\"; " ++
+    "after 2000; " ++
     "expect -re {march\\(\\d+\\)>}; " ++
-    "send \"$env(MARCH_APP_MOD).start_server()\\r\"; "
+    "send \"$env(MARCH_APP_MOD).Application.start()\\r\"; "
   else
     "expect -re {march\\(\\d+\\)>}; " ++
     "send \"$env(MARCH_APP_MOD).Application.start()\\r\"; "
