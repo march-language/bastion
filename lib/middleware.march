@@ -8,6 +8,7 @@
 
 mod Middleware do
 
+  import Crypto
 
   doc """
   Execute a list of plugs in order, stopping when the conn is halted.
