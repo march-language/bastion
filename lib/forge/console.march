@@ -95,23 +95,22 @@ fn run(args : List(String)) do
         end)
   end
   -- Reverse dep list so later deps (e.g. depot) take priority over earlier ones
-  -- (e.g. bastion's Pool stub). Prepend proj config/ for the user's Config module.
+  -- (e.g. bastion's Pool stub). Prepend proj config/ and proj lib/ so the batch
+  -- compiler (--server) auto-discovers all app modules (todos.march etc.).
   let reversed_dep_paths = List.reverse(dep_lib_paths)
   let config_path = proj_root ++ "/config"
+  let app_lib_path = proj_root ++ "/lib"
   let march_lib_path =
-    config_path ++ (if !String.is_empty(String.join(reversed_dep_paths, ":")) do
+    config_path ++ ":" ++ app_lib_path ++
+    (if !String.is_empty(String.join(reversed_dep_paths, ":")) do
       ":" ++ String.join(reversed_dep_paths, ":")
     else "" end)
-  let _ = if !String.is_empty(march_lib_path) do
-    Process.set_env("MARCH_LIB_PATH", march_lib_path)
-  else () end
+  let _ = Process.set_env("MARCH_LIB_PATH", march_lib_path)
 
-  -- Do NOT set MARCH_JIT_BACKEND=orc here. ORC makes the PTY REPL JIT-compile
-  -- expression fragments eagerly, which fails when modules have cross-module
-  -- references that weren't resolved during :load (e.g. TodoApp.start_server()
-  -- can't materialize because @ErrorView.render was unresolved in Router's JIT).
-  -- The default clang backend evaluates REPL expressions via the interpreter,
-  -- which uses the tc_env and handles cross-module calls correctly.
+  -- Force interpreter mode so cross-module calls (e.g. TodoApp.Application.start())
+  -- work correctly in the REPL. The JIT backend can't resolve symbols for modules
+  -- loaded via :load because they're not in the JIT symbol table.
+  let _ = Process.set_env("MARCH_REPL_INTERP", "1")
   let march_bin = match Process.env("MARCH_CONSOLE_BIN") do Some(b) -> b | None -> "march" end
   let _ = Process.set_env("MARCH_BIN", march_bin)
 
