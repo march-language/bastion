@@ -43,15 +43,15 @@ mod Bastion.Health do
   before the drain timeout fires.
   """
   fn start_drain() do
-    let table = Vault.open(health_table)
-    Vault.put(table, drain_key, true)
+    let table = Vault.new(health_table)
+    Vault.set(table, drain_key, true)
   end
 
   doc """
   Returns true when a drain is in progress (start_drain was called).
   """
   fn draining() : Bool do
-    let table = Vault.open(health_table)
+    let table = Vault.new(health_table)
     match Vault.get(table, drain_key) do
     Some(true) -> true
     _          -> false

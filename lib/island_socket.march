@@ -689,32 +689,32 @@ mod IslandSocket do
   -- Store a conn_id+island_id → channel_topic mapping so we can unsubscribe
   -- from the right topic when the island is destroyed.
   pfn store_island_channel(conn_id : String, island_id : String, topic : String) do
-    let table = Vault.open(channel_map_table)
-    let _ = Vault.put(table, conn_id ++ ":" ++ island_id, topic)
+    let table = Vault.new(channel_map_table)
+    let _ = Vault.set(table, conn_id ++ ":" ++ island_id, topic)
     ()
   end
 
   -- Retrieve the channel topic stored for a given conn+island pair.
   pfn get_island_channel(conn_id : String, island_id : String) : Option(String) do
-    let table = Vault.open(channel_map_table)
+    let table = Vault.new(channel_map_table)
     Vault.get(table, conn_id ++ ":" ++ island_id)
   end
 
   -- Remove the channel-map entry for a single island (called on destroy).
   pfn remove_island_channel(conn_id : String, island_id : String) do
-    let table = Vault.open(channel_map_table)
-    let _ = Vault.delete(table, conn_id ++ ":" ++ island_id)
+    let table = Vault.new(channel_map_table)
+    let _ = Vault.drop(table, conn_id ++ ":" ++ island_id)
     ()
   end
 
   -- Remove all channel-map entries for a connection (called on WS close).
   pfn cleanup_channel_vault(conn_id : String) do
-    let table  = Vault.open(channel_map_table)
+    let table  = Vault.new(channel_map_table)
     let prefix = conn_id ++ ":"
     let keys   = Vault.keys(table)
     List.each(keys, fn key ->
       if String.starts_with(key, prefix) do
-        let _ = Vault.delete(table, key)
+        let _ = Vault.drop(table, key)
         ()
       else () end
     )

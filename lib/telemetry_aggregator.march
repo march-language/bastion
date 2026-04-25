@@ -69,8 +69,8 @@ mod Bastion.Telemetry.Aggregator do
   """
   fn start(max_requests : Int) do
     let max = if max_requests == 0 do 100 else max_requests end
-    let cfg_table = Vault.open(config_table)
-    Vault.put(cfg_table, max_key, max)
+    let cfg_table = Vault.new(config_table)
+    Vault.set(cfg_table, max_key, max)
     Bastion.Telemetry.attach(
       "_bastion_aggregator",
       [["bastion"]],
@@ -86,7 +86,7 @@ mod Bastion.Telemetry.Aggregator do
       let requests = Bastion.Telemetry.Aggregator.recent_requests(20)
   """
   fn recent_requests(limit : Int) : List(RequestSummary) do
-    let table = Vault.open(requests_table)
+    let table = Vault.new(requests_table)
     let all   = Vault.get_or(table, "ring", [])
     List.take(all, limit)
   end
@@ -102,7 +102,7 @@ mod Bastion.Telemetry.Aggregator do
       end
   """
   fn request_waterfall(request_id : String) : Option(WaterfallData) do
-    let table = Vault.open(events_table)
+    let table = Vault.new(events_table)
     match Vault.get(table, request_id) do
     None         -> None
     Some(events) ->
@@ -129,7 +129,7 @@ mod Bastion.Telemetry.Aggregator do
       c.avg_duration_ms -- Int
   """
   fn counters() : CounterSummary do
-    let table = Vault.open(requests_table)
+    let table = Vault.new(requests_table)
     let all   = Vault.get_or(table, "ring", [])
     let total = List.length(all)
     let errors = List.length(List.filter(all, fn r -> r.error))
@@ -140,10 +140,10 @@ mod Bastion.Telemetry.Aggregator do
 
   doc "Clear all aggregator state — both event and request tables."
   fn reset() do
-    let ev_table  = Vault.open(events_table)
-    let req_table = Vault.open(requests_table)
-    Vault.clear(ev_table)
-    Vault.clear(req_table)
+    let ev_table  = Vault.new(events_table)
+    let req_table = Vault.new(requests_table)
+    let _ = List.map(Vault.keys(ev_table),  fn k -> Vault.drop(ev_table,  k))
+    let _ = List.map(Vault.keys(req_table), fn k -> Vault.drop(req_table, k))
   end
 
   -- ── Internal event handler ─────────────────────────────────────────────────
@@ -174,9 +174,9 @@ mod Bastion.Telemetry.Aggregator do
 
   -- Append one EventEntry to the per-request list in the events table.
   pfn append_event(request_id : String, entry : EventEntry) do
-    let table    = Vault.open(events_table)
+    let table    = Vault.new(events_table)
     let existing = Vault.get_or(table, request_id, [])
-    Vault.put(table, request_id, List.append(existing, [entry]))
+    Vault.set(table, request_id, List.append(existing, [entry]))
   end
 
   -- Insert or update the RequestSummary for this request_id in the ring buffer.
@@ -189,7 +189,7 @@ mod Bastion.Telemetry.Aggregator do
     metadata,
     is_error   : Bool
   ) do
-    let req_table = Vault.open(requests_table)
+    let req_table = Vault.new(requests_table)
     let ring      = Vault.get_or(req_table, "ring", [])
     -- Check if there is already a summary for this request_id
     match find_summary(ring, request_id) do
@@ -206,7 +206,7 @@ mod Bastion.Telemetry.Aggregator do
         timestamp_ms = existing.timestamp_ms
       }
       let new_ring = replace_summary(ring, request_id, updated)
-      Vault.put(req_table, "ring", new_ring)
+      Vault.set(req_table, "ring", new_ring)
     None ->
       -- First time we see this request_id: create a new summary
       let method = extract_method(metadata)
@@ -225,12 +225,12 @@ mod Bastion.Telemetry.Aggregator do
       -- Prepend and trim to max
       let max     = get_max()
       let trimmed = List.take(ring, max - 1)
-      Vault.put(req_table, "ring", Cons(summary, trimmed))
+      Vault.set(req_table, "ring", Cons(summary, trimmed))
     end
   end
 
   pfn get_max() : Int do
-    let cfg = Vault.open(config_table)
+    let cfg = Vault.new(config_table)
     Vault.get_or(cfg, max_key, 100)
   end
 

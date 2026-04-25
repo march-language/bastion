@@ -30,7 +30,7 @@ mod BastionRoutes do
 -- pattern: "/users/:id" with :param placeholders
 
 pfn registry_table() do
-  Vault.open("bastion_routes")
+  Vault.new("bastion_routes")
 end
 
 doc """
@@ -46,7 +46,7 @@ Register a named route in the global registry.
 fn register(name, method, pattern, arity) do
   let tbl   = registry_table()
   let entry = (name, method, pattern, arity)
-  Vault.put(tbl, name, entry)
+  Vault.set(tbl, name, entry)
 end
 
 doc """

@@ -22,11 +22,11 @@
 
 mod Registry do
 
-  let _table = Vault.open("bastion:registry")
+  let _table = Vault.new("bastion:registry")
 
   doc "Register an actor pid under a name. Overwrites any previous registration."
   fn register(name : String, pid : Int) do
-    Vault.put(_table, name, int_to_string(pid))
+    Vault.set(_table, name, int_to_string(pid))
   end
 
   doc "Look up a registered actor pid by name. Returns None if not registered."
@@ -39,7 +39,7 @@ mod Registry do
 
   doc "Remove a registration. No-op if the name was not registered."
   fn unregister(name : String) do
-    Vault.delete(_table, name)
+    Vault.drop(_table, name)
   end
 
 end

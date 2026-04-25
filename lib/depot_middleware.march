@@ -59,15 +59,15 @@ mod Depot.Middleware do
   """
   fn with_pool(conn, pool) do
     let fd = HttpServer.fd(conn)
-    let pool_table = Vault.open(pool_table_name)
-    let _ = Vault.put(pool_table, fd, pool)
+    let pool_table = Vault.new(pool_table_name)
+    let _ = Vault.set(pool_table, fd, pool)
     match Pool.checkout(pool) do
     Err(_) ->
       -- Checkout failed — no db_conn stored; handlers detect via get_conn returning None
       conn
     Ok(db_conn) ->
-      let conn_table = Vault.open(conn_table_name)
-      let _ = Vault.put(conn_table, fd, db_conn)
+      let conn_table = Vault.new(conn_table_name)
+      let _ = Vault.set(conn_table, fd, db_conn)
       conn
       |> HttpServer.assign(checked_assign, "1")
       |> Conn.register_after_send("pool_checkin")
@@ -89,7 +89,7 @@ mod Depot.Middleware do
   """
   fn get_conn(conn) do
     let fd = HttpServer.fd(conn)
-    let conn_table = Vault.open(conn_table_name)
+    let conn_table = Vault.new(conn_table_name)
     Vault.get(conn_table, fd)
   end
 
@@ -100,7 +100,7 @@ mod Depot.Middleware do
   """
   fn get_pool(conn) do
     let fd = HttpServer.fd(conn)
-    let pool_table = Vault.open(pool_table_name)
+    let pool_table = Vault.new(pool_table_name)
     Vault.get(pool_table, fd)
   end
 
@@ -122,8 +122,8 @@ mod Depot.Middleware do
     None    -> conn   -- nothing checked out
     Some(_) ->
       let fd = HttpServer.fd(conn)
-      let pool_table = Vault.open(pool_table_name)
-      let conn_table = Vault.open(conn_table_name)
+      let pool_table = Vault.new(pool_table_name)
+      let conn_table = Vault.new(conn_table_name)
       match (Vault.get(pool_table, fd), Vault.get(conn_table, fd)) do
       (Some(pool), Some(db_conn)) ->
         let _ = Pool.checkin(pool, db_conn)

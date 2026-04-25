@@ -74,7 +74,7 @@ mod BastionCache do
       end)
   """
   fn cached(conn, key, ttl_secs, generator) do
-    let tbl = Vault.open("response_cache")
+    let tbl = Vault.new("response_cache")
     match Vault.get(tbl, key) do
     Some(entry) ->
       let (st, body) = entry
@@ -83,9 +83,9 @@ mod BastionCache do
       let result = generator(conn)
       let entry = (HttpServer.status(result), HttpServer.resp_body(result))
       if ttl_secs == 0 do
-        Vault.put(tbl, key, entry)
+        Vault.set(tbl, key, entry)
       else
-        let _ = Vault.put_ttl(tbl, key, entry, ttl_secs)
+        let _ = Vault.set_ttl(tbl, key, entry, ttl_secs)
         ()
       end
       result
@@ -108,15 +108,15 @@ mod BastionCache do
       end)
   """
   fn fragment(key, ttl_secs, generator) do
-    let tbl = Vault.open("fragment_cache")
+    let tbl = Vault.new("fragment_cache")
     match Vault.get(tbl, key) do
     Some(cached_frag) -> cached_frag
     None -> do
       let frag = generator()
       if ttl_secs == 0 do
-        Vault.put(tbl, key, frag)
+        Vault.set(tbl, key, frag)
       else
-        let _ = Vault.put_ttl(tbl, key, frag, ttl_secs)
+        let _ = Vault.set_ttl(tbl, key, frag, ttl_secs)
         ()
       end
       frag
@@ -133,8 +133,8 @@ mod BastionCache do
       BastionCache.invalidate("response_cache", "posts:index")
   """
   fn invalidate(table_name, key) do
-    let tbl = Vault.open(table_name)
-    Vault.delete(tbl, key)
+    let tbl = Vault.new(table_name)
+    Vault.drop(tbl, key)
   end
 
   doc """
@@ -145,12 +145,12 @@ mod BastionCache do
   """
   fn invalidate_prefix(table_name, prefix) do
     let prefix_len = String.byte_size(prefix)
-    let tbl  = Vault.open(table_name)
+    let tbl  = Vault.new(table_name)
     let keys = Vault.keys(tbl)
     List.each(keys, fn k ->
       let key_len = String.byte_size(k)
       if key_len >= prefix_len && String.slice_bytes(k, 0, prefix_len) == prefix do
-        Vault.delete(tbl, k)
+        Vault.drop(tbl, k)
       else ()
       end
     )

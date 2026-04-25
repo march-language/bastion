@@ -82,7 +82,7 @@ mod Bastion.Idempotency do
       None      -> handler_fn(())     -- no key: pass through
       Some(raw_key) ->
         let key = build_key(raw_key, opts.scope)
-        let table = Vault.open(table_name)
+        let table = Vault.new(table_name)
         match Vault.get(table, key) do
         Some(cached) ->
           -- Cache hit: replay the stored response
@@ -95,7 +95,7 @@ mod Bastion.Idempotency do
             let body    = HttpServer.resp_body(result)
             let headers = HttpServer.resp_headers(result)
             let entry   = (status, headers, body)
-            let _       = Vault.put_ttl(table, key, entry, opts.ttl_secs)
+            let _       = Vault.set_ttl(table, key, entry, opts.ttl_secs)
             result
           else
             result
@@ -140,7 +140,7 @@ mod Bastion.Idempotency do
 
   doc "Return true if an idempotency-key response is cached under a given scope."
   fn is_cached_with_scope(key : String, scope : String) : Bool do
-    let table = Vault.open(table_name)
+    let table = Vault.new(table_name)
     Vault.has(table, build_key(key, scope))
   end
 
@@ -151,8 +151,8 @@ mod Bastion.Idempotency do
 
   doc "Invalidate a cached idempotency key under a given scope."
   fn invalidate_with_scope(key : String, scope : String) do
-    let table = Vault.open(table_name)
-    Vault.delete(table, build_key(key, scope))
+    let table = Vault.new(table_name)
+    Vault.drop(table, build_key(key, scope))
   end
 
 end

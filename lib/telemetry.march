@@ -56,10 +56,10 @@ mod Bastion.Telemetry do
       end)
   """
   fn attach(handler_id : String, event_names : List(List(String)), handler_fn) do
-    let fn_table   = Vault.open(table_name ++ "_fn")
-    let subs_table = Vault.open(table_name ++ "_subs")
-    Vault.put(fn_table, handler_id, handler_fn)
-    Vault.put(subs_table, handler_id, event_names)
+    let fn_table   = Vault.new(table_name ++ "_fn")
+    let subs_table = Vault.new(table_name ++ "_subs")
+    Vault.set(fn_table, handler_id, handler_fn)
+    Vault.set(subs_table, handler_id, event_names)
   end
 
   doc """
@@ -68,15 +68,15 @@ mod Bastion.Telemetry do
       Bastion.Telemetry.detach("my_metrics")
   """
   fn detach(handler_id : String) do
-    let fn_table   = Vault.open(table_name ++ "_fn")
-    let subs_table = Vault.open(table_name ++ "_subs")
-    Vault.delete(fn_table, handler_id)
-    Vault.delete(subs_table, handler_id)
+    let fn_table   = Vault.new(table_name ++ "_fn")
+    let subs_table = Vault.new(table_name ++ "_subs")
+    Vault.drop(fn_table, handler_id)
+    Vault.drop(subs_table, handler_id)
   end
 
   doc "Return the list of all attached handler IDs."
   fn attached_handlers() : List(String) do
-    let fn_table = Vault.open(table_name ++ "_fn")
+    let fn_table = Vault.new(table_name ++ "_fn")
     Vault.keys(fn_table)
   end
 
@@ -98,8 +98,8 @@ mod Bastion.Telemetry do
         { conn = conn })
   """
   fn execute(event_name : List(String), measurements, metadata) do
-    let fn_table   = Vault.open(table_name ++ "_fn")
-    let subs_table = Vault.open(table_name ++ "_subs")
+    let fn_table   = Vault.new(table_name ++ "_fn")
+    let subs_table = Vault.new(table_name ++ "_subs")
     let ids = Vault.keys(fn_table)
     List.each(ids, fn handler_id ->
       match Vault.get(fn_table, handler_id) do

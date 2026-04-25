@@ -109,11 +109,11 @@ mod Bastion.Test.Channel do
       stop()
   """
   fn intercept(topic : String) : () -> () do
-    let table  = Vault.open(capture_table)
+    let table  = Vault.new(capture_table)
     let sub_id = "_test_intercept_" ++ topic
     let sub_fn = fn (event, payload_json) ->
       let current = Vault.get_or(table, topic, [])
-      Vault.put(table, topic, List.append(current, [(event, payload_json)]))
+      Vault.set(table, topic, List.append(current, [(event, payload_json)]))
     PubSub.subscribe(topic, sub_id, sub_fn)
     fn () -> PubSub.unsubscribe(topic, sub_id)
   end
@@ -127,7 +127,7 @@ mod Bastion.Test.Channel do
       TestChannel.assert_broadcast("room:general", "message:new", "{\"body\":\"hi\"}")
   """
   fn assert_broadcast(topic : String, event : String, payload_json : String) do
-    let table    = Vault.open(capture_table)
+    let table    = Vault.new(capture_table)
     let captured = Vault.get_or(table, topic, [])
     let found    = List.any(captured, fn pair ->
       let (ev, payload) = pair
@@ -140,7 +140,7 @@ mod Bastion.Test.Channel do
   Assert that NO broadcast matching event+payload was made to a topic.
   """
   fn refute_broadcast(topic : String, event : String, payload_json : String) do
-    let table    = Vault.open(capture_table)
+    let table    = Vault.new(capture_table)
     let captured = Vault.get_or(table, topic, [])
     let found    = List.any(captured, fn pair ->
       let (ev, payload) = pair
@@ -151,13 +151,13 @@ mod Bastion.Test.Channel do
 
   doc "Clear all captured broadcasts for a topic."
   fn clear_broadcasts(topic : String) do
-    let table = Vault.open(capture_table)
-    Vault.delete(table, topic)
+    let table = Vault.new(capture_table)
+    Vault.drop(table, topic)
   end
 
   doc "Return all captured broadcasts for a topic as a list of (event, payload_json) pairs."
   fn captured_broadcasts(topic : String) : List((String, String)) do
-    let table = Vault.open(capture_table)
+    let table = Vault.new(capture_table)
     Vault.get_or(table, topic, [])
   end
 

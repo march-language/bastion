@@ -38,16 +38,16 @@ mod Bastion.PubSub do
   If sub_id is already subscribed, the old send_fn is replaced.
   """
   fn subscribe(topic : String, sub_id : String, send_fn) do
-    let table = Vault.open(table_name)
-    Vault.put(table, topic ++ ":" ++ sub_id, send_fn)
+    let table = Vault.new(table_name)
+    Vault.set(table, topic ++ ":" ++ sub_id, send_fn)
   end
 
   doc """
   Unsubscribe from a topic.  No-op if sub_id is not registered.
   """
   fn unsubscribe(topic : String, sub_id : String) do
-    let table = Vault.open(table_name)
-    Vault.delete(table, topic ++ ":" ++ sub_id)
+    let table = Vault.new(table_name)
+    Vault.drop(table, topic ++ ":" ++ sub_id)
   end
 
   doc """
@@ -55,7 +55,7 @@ mod Bastion.PubSub do
   Call this when a WebSocket connection closes to avoid stale send_fns.
   """
   fn unsubscribe_all(conn_id : String) do
-    let table  = Vault.open(table_name)
+    let table  = Vault.new(table_name)
     let all    = Vault.all(table)
     let prefix = "conn:" ++ conn_id ++ ":"
     List.each(all, fn pair ->
@@ -67,7 +67,7 @@ mod Bastion.PubSub do
       -- key = topic ++ ":" ++ sub_id; sub_id contains "conn:" prefix
       -- We delete if the key contains ":" ++ prefix anywhere
       if String.contains(key, ":" ++ prefix) do
-        Vault.delete(table, key)
+        Vault.drop(table, key)
       else ()
       end
     )
@@ -96,7 +96,7 @@ mod Bastion.PubSub do
   -- ── Internal delivery ─────────────────────────────────────────────────────
 
   pfn deliver(topic : String, exclude : Option(String), event : String, payload_json : String) do
-    let table  = Vault.open(table_name)
+    let table  = Vault.new(table_name)
     let all    = Vault.all(table)
     let prefix = topic ++ ":"
     let plen   = String.byte_size(prefix)
@@ -123,7 +123,7 @@ mod Bastion.PubSub do
 
   doc "Return the number of active subscribers for a topic."
   fn subscriber_count(topic : String) : Int do
-    let table  = Vault.open(table_name)
+    let table  = Vault.new(table_name)
     let all    = Vault.all(table)
     let prefix = topic ++ ":"
     let plen   = String.byte_size(prefix)

@@ -38,11 +38,11 @@ type DrainConfig = DrainConfig(
 -- ---------------------------------------------------------------------------
 
 pfn get_status_table() do
-  Vault.open("hot_deploy_status")
+  Vault.new("hot_deploy_status")
 end
 
 pfn get_inflight_table() do
-  Vault.open("hot_deploy_inflight")
+  Vault.new("hot_deploy_inflight")
 end
 
 -- Decode stored String → DrainStatus (default Serving for missing key).
@@ -66,7 +66,7 @@ pfn encode_status(status) do
 end
 
 pfn set_status(tbl, status) do
-  Vault.put(tbl, "status", encode_status(status))
+  Vault.set(tbl, "status", encode_status(status))
 end
 
 -- ---------------------------------------------------------------------------
@@ -155,7 +155,7 @@ fn start_drain() do
   let tbl = get_status_table()
   let inf = get_inflight_table()
   set_status(tbl, Draining)
-  Vault.put(inf, "drain_started_at", 0)
+  Vault.set(inf, "drain_started_at", 0)
 end
 
 doc "Transition to Stopped."
@@ -175,7 +175,7 @@ fn mark_serving() do
   let tbl = get_status_table()
   let inf = get_inflight_table()
   set_status(tbl, Serving)
-  Vault.put(inf, "drain_started_at", 0)
+  Vault.set(inf, "drain_started_at", 0)
 end
 
 -- ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ Increment the in-flight request counter by 1.  Call at the start of each request
 fn increment_in_flight() do
   let tbl = get_inflight_table()
   let n   = Vault.get_or(tbl, "in_flight", 0)
-  Vault.put(tbl, "in_flight", n + 1)
+  Vault.set(tbl, "in_flight", n + 1)
 end
 
 doc """
@@ -203,7 +203,7 @@ fn decrement_in_flight() do
   let tbl = get_inflight_table()
   let n   = Vault.get_or(tbl, "in_flight", 0)
   let next = if n <= 0 do 0 else n - 1 end
-  Vault.put(tbl, "in_flight", next)
+  Vault.set(tbl, "in_flight", next)
 end
 
 doc """

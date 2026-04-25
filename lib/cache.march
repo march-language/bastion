@@ -134,7 +134,7 @@ mod Cache do
       end)
   """
   pfn open_response_table() do
-    Vault.open(response_table)
+    Vault.new(response_table)
   end
 
   fn cached(conn, key, ttl_secs, generator) do
@@ -157,7 +157,7 @@ mod Cache do
         let body    = HttpServer.resp_body(result)
         let headers = HttpServer.resp_headers(result)
         let entry   = (status, headers, body)
-        let _       = Vault.put_ttl(table, key, entry, ttl_secs)
+        let _       = Vault.set_ttl(table, key, entry, ttl_secs)
         result
       else
         result
@@ -172,7 +172,7 @@ mod Cache do
   """
   fn invalidate(key) do
     let table = open_response_table()
-    Vault.delete(table, key)
+    Vault.drop(table, key)
   end
 
   doc """
@@ -185,7 +185,7 @@ mod Cache do
     let table = open_response_table()
     let keys  = Vault.keys(table)
     List.each(keys, fn k ->
-      if String.starts_with(k, prefix) do Vault.delete(table, k)
+      if String.starts_with(k, prefix) do Vault.drop(table, k)
       else ()
       end
     )
@@ -204,12 +204,12 @@ mod Cache do
       let html = Cache.fragment("global_stats", 300, fn () -> render_stats() end)
   """
   fn fragment(key, ttl_secs, generator) do
-    let table = Vault.open(fragment_table)
+    let table = Vault.new(fragment_table)
     match Vault.get(table, key) do
     Some(cached) -> cached
     None -> do
       let content = generator()
-      let _       = Vault.put_ttl(table, key, content, ttl_secs)
+      let _       = Vault.set_ttl(table, key, content, ttl_secs)
       content
     end
     end
@@ -221,8 +221,8 @@ mod Cache do
       Cache.invalidate_fragment("global_stats")
   """
   fn invalidate_fragment(key) do
-    let table = Vault.open(fragment_table)
-    Vault.delete(table, key)
+    let table = Vault.new(fragment_table)
+    Vault.drop(table, key)
   end
 
 end

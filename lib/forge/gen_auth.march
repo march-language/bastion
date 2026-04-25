@@ -498,7 +498,7 @@ alias HttpServer as H
 alias RateLimit
 
 -- Vault table for registration rate limiting (5 registrations per IP per 10 minutes)
-let rate_table = Vault.open("auth_rate_limit")
+let rate_table = Vault.new("auth_rate_limit")
 
 fn new(conn) do
   let gate = Accounts.change_user_registration([])
@@ -551,7 +551,7 @@ alias HttpServer as H
 alias RateLimit
 
 -- Vault table for login/reset rate limiting (10 attempts per IP per minute)
-let rate_table = Vault.open("auth_rate_limit")
+let rate_table = Vault.new("auth_rate_limit")
 
 fn new(conn) do
   H.html(conn, 200, render_form(""))
@@ -780,7 +780,7 @@ alias HttpServer as H
 alias RateLimit
 
 -- Rate-limit table shared with session controller for login/reset routes
-let rate_table = Vault.open("auth_rate_limit")
+let rate_table = Vault.new("auth_rate_limit")
 
 -- GET /users/reset_password — show the "forgot password?" form
 fn new(conn) do
@@ -905,14 +905,14 @@ mod """ ++ pascal ++ """.AccountsFixtures do
 
 alias """ ++ pascal ++ """.Accounts as Accounts
 
-let user_counter = Vault.open("_auth_fixtures_counter")
+let user_counter = Vault.new("_auth_fixtures_counter")
 
 pfn unique_email() do
   let n = match Vault.get(user_counter, "count") do
     Some(c) -> c + 1
     None -> 1
   end
-  Vault.put(user_counter, "count", n)
+  Vault.set(user_counter, "count", n)
   "user" ++ String.from_int(n) ++ "@example.com"
 end
 
