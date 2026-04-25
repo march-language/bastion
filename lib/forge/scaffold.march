@@ -40,7 +40,6 @@ pfn main_source(pascal) do
   "  import HttpServer\n" ++
   "  import Router\n" ++
   "  import Middleware\n" ++
-  "  import Controller\n" ++
   "  import IslandSocket\n" ++
   "  import IslandAssets\n" ++
   "  import Static\n" ++
