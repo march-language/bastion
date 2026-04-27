@@ -121,6 +121,22 @@ fn run(args : List(String)) do
   let _ = Process.set_env("MARCH_APP_MOD", app_pascal)
   let _ = Process.set_env("MARCH_APP_NAME", app_name)
 
+  -- When running with --server, write server stdout/stderr to a plain log file.
+  -- A FIFO would block: on macOS open(O_WRONLY) on a FIFO stalls until a reader
+  -- appears, and the background job inherits the TCL pipe's write-end, so TCL's
+  -- `exec` never gets EOF.  A regular file opens instantly, closes the inherited
+  -- fd immediately, and lets `exec` return.
+  -- Future: tail -F the log inside the Notty left pane (see specs/dev-experience.md).
+  let march_server_log = "/tmp/" ++ app_name ++ "-server.log"
+  let _ = if with_server do
+    let _ = Process.run("sh", ["-c", "echo '' > " ++ march_server_log])
+    let _ = Process.set_env("MARCH_SERVER_LOG", march_server_log)
+    println("  Server logs → " ++ march_server_log)
+    println("  (tail -f " ++ march_server_log ++ " in another tab to watch request logs)")
+  else
+    ()
+  end
+
   -- Use `expect` to spawn march with a real PTY (readline/history work).
   -- Glob is anchored to the project root so it always loads the *user's* lib/
   -- files regardless of where forge invokes the task from.
@@ -128,12 +144,17 @@ fn run(args : List(String)) do
   -- --server: run the app via the batch compiler in the background.
   -- The batch compiler links all modules together, so cross-module calls work
   -- without the JIT symbol issues that break PTY REPL expression evaluation.
-  -- The app's main() calls start_server() → spawn_n (forks the HTTP worker)
-  -- → wait_for (blocks the batch process). Both log to /dev/tty so output
-  -- appears interleaved in the terminal alongside the interactive REPL.
+  -- Server stdout/stderr go to the log file (see MARCH_SERVER_LOG above).
   -- The interactive REPL starts Application.start() separately for DB access.
   let server_send = if with_server do
-    "exec sh -c \"$env(MARCH_BIN) $proot/lib/$env(MARCH_APP_NAME).march >/dev/tty 2>/dev/tty &\"; " ++
+    -- Start the HTTP server as a background batch process; its output goes to
+    -- the log file.  Using >> (not >) so multiple restarts accumulate.
+    -- The regular-file redirect opens instantly, closes the inherited pipe fd,
+    -- and lets TCL's exec return before the REPL prompt loop continues.
+    -- `echo $!` prints the background job PID to sh's stdout so TCL can capture
+    -- it.  TCL does NOT expand $! (! is not a valid variable-name character),
+    -- so $! passes through to sh and is expanded there.
+    "set server_pid [exec sh -c \"$env(MARCH_BIN) $proot/lib/$env(MARCH_APP_NAME).march >> $env(MARCH_SERVER_LOG) 2>&1 & echo $!\"]; " ++
     "expect -re {march\\(\\d+\\)>}; " ++
     "send \"$env(MARCH_APP_MOD).Application.start()\\r\"; "
   else
@@ -178,7 +199,14 @@ fn run(args : List(String)) do
       "send \":load $_app_file\\r\" }; " ++
     server_send ++
     "expect -re {march\\(\\d+\\)>}; " ++
-    "interact"
+    "interact; " ++
+    -- When the REPL exits, kill the background server so it doesn't linger.
+    -- catch suppresses errors if the server already exited on its own.
+    (if with_server do
+      "if {[info exists server_pid]} { catch {exec kill $server_pid} }"
+    else
+      ""
+    end)
   let shell =
     "(command -v expect >/dev/null 2>&1 && " ++
     "expect -c '" ++ tcl ++ "' </dev/tty >/dev/tty 2>/dev/tty)" ++

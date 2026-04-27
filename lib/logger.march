@@ -41,7 +41,7 @@ mod Bastion.Logger do
   end
 
   doc "Parse a level string (case-insensitive). Defaults to Info on unknown input."
-  fn parse_level(s : String) : Logger.Level do
+  fn parse_level(s : String) do
     match Logger.level_from_string(s) do
     Some(l) -> l
     None    -> Logger.Info

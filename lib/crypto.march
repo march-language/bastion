@@ -1,9 +1,8 @@
 -- lib/crypto.march — Cryptographic primitives for Bastion.
 --
--- This module wraps the March stdlib `Crypto` module with a Bastion-centric
--- API plus a few additional helpers.  All heavy lifting (hashing, HMAC,
--- PBKDF2, CSPRNG, Base64) is delegated to runtime builtins; Bastion adds
--- only pure-March glue code on top.
+-- Calls stdlib builtins (stdlib_random_bytes, stdlib_sha256, etc.) directly
+-- rather than aliasing the stdlib Crypto module.  This avoids the fragile
+-- `alias Crypto as StdCrypto` dance that caused a Heisenbug at runtime.
 --
 -- Public API summary:
 --
@@ -35,28 +34,104 @@
 --     base64_url_decode(s)         → Result(Bytes, String)
 --
 --   Utilities
---     bytes_to_string(b)           → String  (UTF-8 / raw bytes → String)
---
--- NOTE — AES-256-GCM and HKDF are not yet available.  The March runtime
--- does not yet expose `stdlib_aes_256_gcm_*` or `stdlib_hkdf` builtins.
--- Session cookies are signed (HMAC-SHA256) but not encrypted; this is
--- safe as long as the payload contains no secrets that must be hidden from
--- the browser.  Encryption will be added once the builtins ship.
+--     bytes_to_string(b)           → String  (bytes → String)
 
 mod Crypto do
 
-  alias Crypto as StdCrypto
+  -- ── Private helpers ───────────────────────────────────────────────────────
+
+  pfn rev_list(xs) do
+    fn go(lst, acc) do
+      match lst do
+      Nil -> acc
+      Cons(h, t) -> go(t, Cons(h, acc))
+      end
+    end
+    go(xs, Nil)
+  end
+
+  pfn hex_nibble(n) do
+    if n < 10 do int_to_string(n)
+    else char_from_int(87 + n)
+    end
+  end
+
+  pfn byte_to_hex(n) do
+    hex_nibble(n / 16) ++ hex_nibble(n % 16)
+  end
+
+  pfn bytes_to_hex(b) do
+    match b do
+    Bytes(xs) ->
+      fn go(bs, acc) do
+        match bs do
+        Nil -> string_join(rev_list(acc), "")
+        Cons(n, rest) -> go(rest, Cons(byte_to_hex(n), acc))
+        end
+      end
+      go(xs, Nil)
+    end
+  end
+
+  pfn hex_char_val(c) do
+    let code = char_to_int(c)
+    if code >= 48 && code <= 57 do code - 48
+    else if code >= 97 && code <= 102 do code - 87
+    else if code >= 65 && code <= 70 do code - 55
+    else -1 end end end
+  end
+
+  pfn hex_str_to_bytes(s) do
+    let chars = string_chars(s)
+    fn go(cs, acc) do
+      match cs do
+      Nil -> Some(rev_list(acc))
+      Cons(hi, Cons(lo, rest)) ->
+        let h = hex_char_val(hi)
+        let l = hex_char_val(lo)
+        if h < 0 || l < 0 do None
+        else go(rest, Cons(h * 16 + l, acc)) end
+      _ -> None
+      end
+    end
+    go(chars, Nil)
+  end
+
+  pfn to_url_safe_b64(s) do
+    let s1 = String.replace_all(s, "+", "-")
+    let s2 = String.replace_all(s1, "/", "_")
+    fn strip_pad(t) do
+      let len = string_byte_length(t)
+      if len > 0 && string_slice(t, len - 1, 1) == "=" do
+        strip_pad(string_slice(t, 0, len - 1))
+      else t end
+    end
+    strip_pad(s2)
+  end
+
+  pfn from_url_safe_b64(s) do
+    let s1 = String.replace_all(s, "-", "+")
+    let s2 = String.replace_all(s1, "_", "/")
+    let len = string_byte_length(s2)
+    let rem = len % 4
+    if rem == 0 do s2
+    else if rem == 2 do s2 ++ "=="
+    else if rem == 3 do s2 ++ "="
+    else s2 end end end
+  end
+
+  let pw_iterations = 600000
+  let pw_dklen = 32
 
   -- ── Random ────────────────────────────────────────────────────────────────
 
   doc """
-  Generate `n` cryptographically secure random bytes from the OS CSPRNG
-  (`/dev/urandom` on Unix).
+  Generate `n` cryptographically secure random bytes from the OS CSPRNG.
 
       Crypto.random_bytes(16)  -- Bytes with 16 random bytes
   """
   fn random_bytes(n : Int) : Bytes do
-    StdCrypto.random_bytes(n)
+    stdlib_random_bytes(n)
   end
 
   doc """
@@ -65,23 +140,17 @@ mod Crypto do
       Crypto.random_hex(16)  -- 32-char lowercase hex string
   """
   fn random_hex(n : Int) : String do
-    StdCrypto.random_hex(n)
+    bytes_to_hex(stdlib_random_bytes(n))
   end
 
   doc """
   Generate a URL-safe, base64-encoded random token of `n` bytes entropy.
-
-  The result has no padding characters and uses `-`/`_` instead of `+`/`/`.
-  A 32-byte token produces a 43-character string.
+  No padding characters; uses `-`/`_` instead of `+`/`/`.
 
       Crypto.generate_token(32)  -- e.g. "dGhpcyBpcyBhIHRlc3Q"
   """
   fn generate_token(n : Int) : String do
-    let raw   = StdCrypto.base64_encode(bytes_to_string(StdCrypto.random_bytes(n)))
-    -- Convert standard base64 to URL-safe: replace + → -, / → _, strip =
-    let step1 = String.replace_all(raw, "=", "")
-    let step2 = String.replace_all(step1, "+", "-")
-    String.replace_all(step2, "/", "_")
+    to_url_safe_b64(stdlib_base64_encode(bytes_to_string(stdlib_random_bytes(n))))
   end
 
   -- ── Hashing ───────────────────────────────────────────────────────────────
@@ -91,11 +160,9 @@ mod Crypto do
 
       Crypto.sha256("hello")
       -- "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-
-  `data` may be a `String` or `Bytes`.
   """
   fn sha256(data : String) : String do
-    StdCrypto.sha256(data)
+    stdlib_sha256(data)
   end
 
   -- ── HMAC ─────────────────────────────────────────────────────────────────
@@ -104,31 +171,24 @@ mod Crypto do
   Compute HMAC-SHA256 of `data` under `key`, returning a lowercase hex string.
 
       Crypto.hmac_sha256("secret", "message")
-
-  Both `key` and `data` may be `String` or `Bytes`.
   """
   fn hmac_sha256(key : String, data : String) : String do
-    StdCrypto.hmac(:sha256, Bytes.from_string(key), Bytes.from_string(data))
+    -- Use stdlib_hmac_sha256 to avoid shadowing the same-named builtin.
+    match stdlib_hmac_sha256(key, data) do
+    Ok(b)  -> bytes_to_hex(b)
+    Err(_) -> ""
+    end
   end
 
   -- ── Key derivation ────────────────────────────────────────────────────────
 
   doc """
-  Derive a 32-byte key from `secret` and a `context` label.
-
-  Uses SHA-256 over `"<secret>:<context>"` as a simple deterministic KDF.
-  The same inputs always produce the same output, so this is suitable for
-  deriving stable sub-keys (e.g. "session_signing", "csrf_signing") from a
-  single `secret_key_base`.
-
-  NOTE: This is not HKDF.  HKDF will be substituted once the March runtime
-  exposes `stdlib_hkdf`; the cookie format remains stable across the upgrade
-  because the derived keys are not stored.
+  Derive a 32-byte key from `secret` and a `context` label via SHA-256.
 
       let k = Crypto.derive_key(secret_key_base, "session_signing")
   """
   fn derive_key(secret : String, context : String) : String do
-    StdCrypto.sha256(secret ++ ":" ++ context)
+    stdlib_sha256(secret ++ ":" ++ context)
   end
 
   -- ── Password hashing ──────────────────────────────────────────────────────
@@ -139,93 +199,109 @@ mod Crypto do
 
       let h = Crypto.hash_password("my-secret-pass")
       -- "pbkdf2:sha256:600000:<salt_hex>:<hash_hex>"
-
-  Safe to store in a database column.  Use `verify_password/2` to authenticate.
   """
   fn hash_password(plain : String) : String do
-    StdCrypto.hash_password(plain)
+    let salt_bytes = stdlib_random_bytes(16)
+    let salt_hex = bytes_to_hex(salt_bytes)
+    match pbkdf2_sha256(plain, salt_bytes, pw_iterations, pw_dklen) do
+    Ok(hash_bytes) ->
+      let hash_hex = bytes_to_hex(hash_bytes)
+      "pbkdf2:sha256:" ++ int_to_string(pw_iterations) ++ ":" ++ salt_hex ++ ":" ++ hash_hex
+    Err(_) -> ""
+    end
   end
 
   doc """
   Verify `plain` against a stored hash produced by `hash_password/1`.
 
       Crypto.verify_password("correct-horse-battery-staple", stored_hash)
-      -- true or false
-
-  Returns `false` for unrecognised hash formats.
   """
   fn verify_password(plain : String, stored : String) : Bool do
-    StdCrypto.verify_password(plain, stored)
+    let parts = string_split(stored, ":")
+    match parts do
+    Cons("pbkdf2", Cons("sha256", Cons(iter_str, Cons(salt_hex, Cons(hash_hex, Nil))))) ->
+      match string_to_int(iter_str) do
+      None -> false
+      Some(iters) ->
+        match hex_str_to_bytes(salt_hex) do
+        None -> false
+        Some(byte_list) ->
+          let salt_bytes = Bytes(byte_list)
+          match pbkdf2_sha256(plain, salt_bytes, iters, pw_dklen) do
+          Ok(new_bytes) ->
+            let new_hex = bytes_to_hex(new_bytes)
+            secure_compare(new_hex, hash_hex)
+          Err(_) -> false
+          end
+        end
+      end
+    _ -> false
+    end
   end
 
   -- ── Constant-time comparison ──────────────────────────────────────────────
 
   doc """
-  Compare two strings for equality in time proportional to `max(|a|, |b|)`.
-
-  Never short-circuits on a byte difference or on a length mismatch, which
-  prevents timing side-channels when validating secrets (tokens, HMAC digests,
-  session cookies).
+  Compare two strings for equality in constant time (proportional to the
+  longer string length).  Prevents timing attacks on secret comparisons.
 
       Crypto.secure_compare(request_token, stored_token)
   """
   fn secure_compare(a : String, b : String) : Bool do
-    StdCrypto.secure_compare(a, b)
+    let la = string_byte_length(a)
+    let lb = string_byte_length(b)
+    let a_chars = string_chars(a)
+    let b_chars = string_chars(b)
+    fn go(acs, bcs, diff) do
+      match (acs, bcs) do
+      (Nil, Nil) -> diff
+      (Cons(x, xr), Cons(y, yr)) ->
+        let d = if x == y do 0 else 1 end
+        go(xr, yr, diff + d)
+      (Cons(_, xr), Nil) -> go(xr, Nil, diff + 1)
+      (Nil, Cons(_, yr)) -> go(Nil, yr, diff + 1)
+      end
+    end
+    let total = go(a_chars, b_chars, 0)
+    total == 0 && la == lb
   end
 
   -- ── Base64 ────────────────────────────────────────────────────────────────
 
-  doc """
-  Base64-encode `data` (standard alphabet, padded with `=`).
-
-  `data` may be a `String` or `Bytes`.
-  """
+  doc "Base64-encode `data` using the standard alphabet (padded with `=`)."
   fn base64_encode(data : String) : String do
-    StdCrypto.base64_encode(data)
+    stdlib_base64_encode(data)
   end
 
-  doc """
-  Decode a standard Base64 string to bytes.
-
-  Returns `Ok(Bytes)` on success or `Err(message)` on invalid input.
-  Use `bytes_to_string/1` to convert the result back to a `String`.
-  """
+  doc "Decode a standard Base64 string to bytes."
   fn base64_decode(s : String) : Result(Bytes, String) do
-    StdCrypto.base64_decode(s)
+    stdlib_base64_decode(s)
   end
 
-  doc """
-  Base64-encode `data` using the URL-safe alphabet (no padding, `-`/`_`).
-  """
+  doc "Base64-encode `data` using the URL-safe alphabet (no padding, `-`/`_`)."
   fn base64_url_encode(data : String) : String do
-    StdCrypto.base64_url_encode(data)
+    to_url_safe_b64(stdlib_base64_encode(data))
   end
 
-  doc """
-  Decode a URL-safe Base64 string to bytes.
-
-  Returns `Ok(Bytes)` or `Err(message)`.
-  """
+  doc "Decode a URL-safe Base64 string to bytes."
   fn base64_url_decode(s : String) : Result(Bytes, String) do
-    StdCrypto.base64_url_decode(s)
+    stdlib_base64_decode(from_url_safe_b64(s))
   end
 
   -- ── Utilities ─────────────────────────────────────────────────────────────
 
-  doc """
-  Convert a `Bytes` value to a `String` by treating each byte as a UTF-8
-  octet and joining them.
-
-  This is the inverse of passing a `String` to `base64_encode` or `sha256`;
-  it reconstructs the original `String` from a decoded `Bytes` result.
-
-      match Crypto.base64_decode(encoded) do
-      Ok(b)    -> Crypto.bytes_to_string(b)
-      Err(msg) -> ""
-      end
-  """
+  doc "Convert a `Bytes` value to a `String` (each byte treated as a raw octet)."
   fn bytes_to_string(b : Bytes) : String do
-    StdCrypto.bytes_to_string(b)
+    match b do
+    Bytes(xs) ->
+      fn go(cs, acc) do
+        match cs do
+        Nil -> string_join(rev_list(acc), "")
+        Cons(n, rest) -> go(rest, Cons(char_from_int(n), acc))
+        end
+      end
+      go(xs, Nil)
+    end
   end
 
 end

@@ -33,7 +33,7 @@ mod Registry do
   fn whereis(name : String) : Option(Int) do
     match Vault.get(_table, name) do
     None    -> None
-    Some(s) -> Some(string_to_int(s))
+    Some(s) -> string_to_int(s)
     end
   end
 
