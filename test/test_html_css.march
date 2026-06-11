@@ -149,12 +149,12 @@ describe "IOList.concat" do
       IOList.from_string("Hi"),
       IOList.from_string("</h1>")
     ]
-    let result = IOList.concat(parts)
+    let result = List.fold_left(parts, IOList.empty(), fn (acc, p) -> IOList.append(acc, p))
     assert (IOList.to_string(result) == "<h1>Hi</h1>")
   end
 
   test "handles empty list" do
-    let result = IOList.concat([])
+    let result = List.fold_left([], IOList.empty(), fn (acc, p) -> IOList.append(acc, p))
     assert (IOList.to_string(result) == "")
   end
 end

@@ -79,7 +79,11 @@ describe "Form.select_tag" do
       None    -> None
       Some(i) -> String.index_of(String.slice_bytes(html, i + 1, String.byte_size(html) - i - 1), "selected")
       end
-    assert (idx2 == None)
+    let no_second_selected = match idx2 do
+      None    -> true
+      Some(_) -> false
+      end
+    assert no_second_selected
   end
 
   test "escapes option labels and values" do
@@ -141,7 +145,7 @@ end
 describe "Form.Input.render" do
   test "renders field with value from gate" do
     let gate = Gate.cast([("email", "me@example.com")], ["email"])
-    let iol  = Form.Input.render("email", "email", "Email", Some(gate))
+    let iol  = Form.Input.render("email", "email", "Email", Some(gate), "", false, "")
     let html = IOList.to_string(iol)
     assert (string_contains(html, "value=\"me@example.com\""))
     assert (string_contains(html, "Email"))
@@ -150,26 +154,31 @@ describe "Form.Input.render" do
   test "shows error from gate" do
     let gate = Gate.cast([("email", "bad")], ["email"])
                |> Gate.validate_format("email", ".+@.+")
-    let iol  = Form.Input.render("email", "email", "Email", Some(gate))
+    let iol  = Form.Input.render("email", "email", "Email", Some(gate), "", false, "")
     let html = IOList.to_string(iol)
     assert (string_contains(html, "form-error"))
   end
 
   test "explicit value overrides empty gate field" do
     let gate = Gate.cast([], ["email"])
-    let iol  = Form.Input.render("email", "email", "Email", Some(gate), "fallback@example.com")
+    let iol  = Form.Input.render("email", "email", "Email", Some(gate), "fallback@example.com", false, "")
     let html = IOList.to_string(iol)
     assert (string_contains(html, "value=\"fallback@example.com\""))
   end
 
+  -- KNOWN FAILURE (native codegen): module-nested default-arg fns lower
+  -- through a tuple-switch dispatcher that corrupts non-pointer args — the
+  -- explicitly passed `required = true` arrives as false, so the " *" marker
+  -- is never appended.  Interpreted mode passes.  Compiler-side repro:
+  -- march repo test/native/default_args_nested.march (commit 63dcfbf).
   test "required marker appended to label" do
-    let iol  = Form.Input.render("name", "text", "Full Name", None, "", true)
+    let iol  = Form.Input.render("name", "text", "Full Name", None, "", true, "")
     let html = IOList.to_string(iol)
     assert (string_contains(html, "Full Name *"))
   end
 
   test "None gate uses explicit value" do
-    let iol  = Form.Input.render("q", "text", "Query", None, "hello")
+    let iol  = Form.Input.render("q", "text", "Query", None, "hello", false, "")
     let html = IOList.to_string(iol)
     assert (string_contains(html, "value=\"hello\""))
     assert (!string_contains(html, "form-error"))
@@ -182,7 +191,7 @@ describe "Form.Select.render" do
   test "renders select with options from gate field" do
     let gate = Gate.cast([("role", "admin")], ["role"])
     let opts = [("Admin", "admin"), ("Member", "member")]
-    let iol  = Form.Select.render("role", "Role", opts, Some(gate))
+    let iol  = Form.Select.render("role", "Role", opts, Some(gate), "", false, "")
     let html = IOList.to_string(iol)
     assert (string_contains(html, "<select"))
     assert (string_contains(html, "value=\"admin\" selected"))
@@ -218,9 +227,9 @@ end
 
 describe "Form.Wrapper.render" do
   test "renders form tag with action and method" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "<form"))
@@ -230,9 +239,9 @@ describe "Form.Wrapper.render" do
   end
 
   test "injects CSRF hidden input" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "name=\"_csrf_token\""))
@@ -240,19 +249,19 @@ describe "Form.Wrapper.render" do
   end
 
   test "CSRF token value matches conn assign" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let token       = CSRF.token(conn)
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "value=\"" ++ token ++ "\""))
   end
 
   test "renders inner content between CSRF tag and closing form" do
-    let conn          = HttpServer.test_conn("GET", "/")
+    let conn          = Bastion.Test.Conn.build_conn("GET", "/")
                         |> CSRF.ensure_token()
-    let content_inner = fn _ -> IOList.from_string("<input name=\"email\" />")
+    let content_inner = fn () -> IOList.from_string("<input name=\"email\" />")
     let iol           = Form.Wrapper.render(conn, "/users", "post", "", "", "", content_inner)
     let html          = IOList.to_string(iol)
     assert (string_contains(html, "<input name=\"email\" />"))
@@ -271,63 +280,63 @@ describe "Form.Wrapper.render" do
   end
 
   test "adds class attribute when provided" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "post", "login-form", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "class=\"login-form\""))
   end
 
   test "no class attribute when empty" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (!string_contains(html, "class="))
   end
 
   test "adds id attribute when provided" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "post", "", "my-form", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "id=\"my-form\""))
   end
 
   test "adds enctype for file uploads" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/upload", "post", "", "", "multipart/form-data", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "enctype=\"multipart/form-data\""))
   end
 
   test "escapes action URL special characters" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/path?a=1&b=2", "post", "", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "action=\"/path?a=1&amp;b=2\""))
   end
 
   test "method defaults to post when empty" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "", "", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "method=\"post\""))
   end
 
   test "lowercases method" do
-    let conn        = HttpServer.test_conn("GET", "/")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
-    let empty_inner = fn _ -> IOList.from_string("")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "POST", "", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "method=\"post\""))
@@ -336,22 +345,13 @@ describe "Form.Wrapper.render" do
   test "CSRF not injected when token not in conn" do
     -- A fresh test_conn without ensure_token has no CSRF token.
     -- Wrapper should still render (token will be empty string).
-    let conn        = HttpServer.test_conn("GET", "/")
-    let empty_inner = fn _ -> IOList.from_string("")
+    let conn        = Bastion.Test.Conn.build_conn("GET", "/")
+    let empty_inner = fn () -> IOList.from_string("")
     let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
     let html        = IOList.to_string(iol)
     -- Should still have the hidden input, just with empty value
     assert (string_contains(html, "name=\"_csrf_token\""))
     assert (string_contains(html, "value=\"\""))
-  end
-end
-
--- ── Helpers ───────────────────────────────────────────────────────────────────
-
-pfn string_contains(haystack : String, needle : String) : Bool do
-  match String.index_of(haystack, needle) do
-  Some(_) -> true
-  None    -> false
   end
 end
 

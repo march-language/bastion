@@ -1,0 +1,10 @@
+[
+  {
+    "hash": "9c5f990611c955cbd5729aab5d8fa6c0c41e786c",
+    "short_hash": "9c5f990",
+    "author": "Matthew Gilliam",
+    "date": "2026-04-26T23:36:24-04:00",
+    "message": "fix: rewrite crypto.march, fix forge console --server hang and cleanup\n\ncrypto.march (complete rewrite)\n- Drop the fragile `alias Crypto as StdCrypto` pattern that caused a\n  Heisenbug (bindings were only populated when a debug printf was present)\n- Call stdlib builtins directly (stdlib_random_bytes, stdlib_sha256,\n  stdlib_hmac_sha256, stdlib_base64_encode, stdlib_base64_decode) and copy\n  the private helper functions inline (bytes_to_hex, hex_nibble, etc.)\n- Use stdlib_hmac_sha256 instead of hmac_sha256 in the wrapper body to\n  avoid infinite recursion through the name-shadowing closure\n- Fix generate_token: call bytes_to_string before stdlib_base64_encode\n  since the type checker models that function as String → String\n- Add Err(_) catch-all arms to hmac_sha256, hash_password, verify_password\n  to resolve non-exhaustive pattern warnings\n\nforge/console.march (--server mode)\n- Replace FIFO with a plain log file: opening a FIFO write-end without a\n  reader blocks on macOS (open O_WRONLY stalls until a reader appears), and\n  the background job inherits the TCL pipe's write-fd, so TCL's `exec` never\n  received EOF — causing a permanent hang on `forge bastion.console --server`\n- Capture the server PID via `set server_pid [exec sh -c \"... & echo $!\"]`\n  so the server is killed when the user exits the REPL (`:q` or Ctrl+C)\n- Print log file path and tail hint at startup\n\nlogger.march\n- Remove explicit `: Logger.Level` return type annotation from parse_level;\n  inside mod Bastion.Logger the annotation resolved to bare `Level` while\n  the body returned `Logger.Level`, causing a spurious type error\n\nregistry.march\n- Fix `Some(string_to_int(s))` → `string_to_int(s)`: string_to_int already\n  returns Option(Int), so wrapping it in Some produced Option(Option(Int))\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>",
+    "files_changed": 4
+  }
+]

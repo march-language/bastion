@@ -259,22 +259,22 @@ end
 
 describe "extract_mod_name" do
   test "mod Counter do" do
-    assert (extract_mod_name("mod Counter do") == Some("Counter"))
+    assert (match extract_mod_name("mod Counter do") do Some(n) -> n == "Counter" | None -> false end)
   end
   test "mod SearchBar do" do
-    assert (extract_mod_name("mod SearchBar do") == Some("SearchBar"))
+    assert (match extract_mod_name("mod SearchBar do") do Some(n) -> n == "SearchBar" | None -> false end)
   end
   test "fn line returns None" do
-    assert (extract_mod_name("fn init() do") == None)
+    assert (Option.is_none(extract_mod_name("fn init() do")))
   end
   test "empty string returns None" do
-    assert (extract_mod_name("") == None)
+    assert (Option.is_none(extract_mod_name("")))
   end
   test "comment line returns None" do
-    assert (extract_mod_name("-- mod Ignored do") == None)
+    assert (Option.is_none(extract_mod_name("-- mod Ignored do")))
   end
   test "indented mod line" do
-    assert (extract_mod_name("  mod MyIsland do") == Some("MyIsland"))
+    assert (match extract_mod_name("  mod MyIsland do") do Some(n) -> n == "MyIsland" | None -> false end)
   end
 end
 
