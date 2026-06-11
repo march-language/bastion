@@ -90,7 +90,7 @@ end
 -- Used to inspect the conn returned by require_auth regardless of branch.
 pfn auth_result_conn(result) do
   match result do
-  Ok(tc) -> unwrap(tc)
+  Ok(tc) -> TypedMiddleware.unwrap(tc)
   Err(c) -> c
   end
 end
@@ -1080,17 +1080,17 @@ describe "TypedMiddleware.parse_body" do
   test "assigns body string to _body key" do
     let conn = make_post("/", "{\"x\":1}")
     let out  = TypedMiddleware.wrap(conn) |> parse_body()
-    assert (get_body_string(unwrap(out)) == "{\"x\":1}")
+    assert (get_body_string(TypedMiddleware.unwrap(out)) == "{\"x\":1}")
   end
   test "empty string for GET with no body" do
     let conn = make_get("/")
     let out  = TypedMiddleware.wrap(conn) |> parse_body()
-    assert (get_body_string(unwrap(out)) == "")
+    assert (get_body_string(TypedMiddleware.unwrap(out)) == "")
   end
   test "does not halt the conn" do
     let conn = make_post("/", "data")
     let out  = TypedMiddleware.wrap(conn) |> parse_body()
-    assert (not (HttpServer.halted(unwrap(out))))
+    assert (not (HttpServer.halted(TypedMiddleware.unwrap(out))))
   end
 end
 

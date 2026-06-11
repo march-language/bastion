@@ -420,7 +420,7 @@ end
 -- Msg JSON:    "Increment" | "Decrement"
 -- Render HTML: <span class="count">N</span>
 
-pfn counter_update_fn(pair : (String, String)) : String do
+fn counter_update_fn(pair : (String, String)) : String do
   match pair do
   ("{\"count\":0}",  "\"Increment\"") -> "{\"count\":1}"
   ("{\"count\":1}",  "\"Increment\"") -> "{\"count\":2}"
@@ -433,7 +433,7 @@ pfn counter_update_fn(pair : (String, String)) : String do
   end
 end
 
-pfn counter_render_fn(state : String) : String do
+fn counter_render_fn(state : String) : String do
   match state do
   "{\"count\":0}"  -> "<span class=\"count\">0</span>"
   "{\"count\":1}"  -> "<span class=\"count\">1</span>"
@@ -466,7 +466,7 @@ describe "IslandSocket bidirectional message flow" do
 
   test "init message registers island and returns render response" do
     let reg = IslandSocket.new_registry()
-              |> IslandSocket.register("Counter", counter_update_fn, counter_render_fn)
+              |> IslandSocket.register("Counter", fn p -> counter_update_fn(p), fn s -> counter_render_fn(s))
     let store = IslandSocket.empty_store()
     let init_msg = "{\"island\":\"c-1\",\"type\":\"init\",\"module\":\"Counter\",\"payload\":{\"count\":0}}"
     let (new_store, responses) = IslandSocket.process_msg_for_test(init_msg, store, reg)
@@ -478,7 +478,7 @@ describe "IslandSocket bidirectional message flow" do
 
   test "init message returns state response alongside render" do
     let reg = IslandSocket.new_registry()
-              |> IslandSocket.register("Counter", counter_update_fn, counter_render_fn)
+              |> IslandSocket.register("Counter", fn p -> counter_update_fn(p), fn s -> counter_render_fn(s))
     let store = IslandSocket.empty_store()
     let init_msg = "{\"island\":\"c-1\",\"type\":\"init\",\"module\":\"Counter\",\"payload\":{\"count\":0}}"
     let (_, responses) = IslandSocket.process_msg_for_test(init_msg, store, reg)
@@ -490,7 +490,7 @@ describe "IslandSocket bidirectional message flow" do
 
   test "client event updates state and server sends updated render" do
     let reg = IslandSocket.new_registry()
-              |> IslandSocket.register("Counter", counter_update_fn, counter_render_fn)
+              |> IslandSocket.register("Counter", fn p -> counter_update_fn(p), fn s -> counter_render_fn(s))
     let store = IslandSocket.empty_store()
     let init_msg = "{\"island\":\"c-1\",\"type\":\"init\",\"module\":\"Counter\",\"payload\":{\"count\":0}}"
     let (s1, _) = IslandSocket.process_msg_for_test(init_msg, store, reg)
@@ -501,7 +501,7 @@ describe "IslandSocket bidirectional message flow" do
 
   test "server sends updated state JSON after client event" do
     let reg = IslandSocket.new_registry()
-              |> IslandSocket.register("Counter", counter_update_fn, counter_render_fn)
+              |> IslandSocket.register("Counter", fn p -> counter_update_fn(p), fn s -> counter_render_fn(s))
     let store = IslandSocket.empty_store()
     let (s1, _) = IslandSocket.process_msg_for_test(
       "{\"island\":\"c-1\",\"type\":\"init\",\"module\":\"Counter\",\"payload\":{\"count\":0}}", store, reg)
@@ -515,7 +515,7 @@ describe "IslandSocket bidirectional message flow" do
 
   test "state stays in sync after multiple round-trips" do
     let reg = IslandSocket.new_registry()
-              |> IslandSocket.register("Counter", counter_update_fn, counter_render_fn)
+              |> IslandSocket.register("Counter", fn p -> counter_update_fn(p), fn s -> counter_render_fn(s))
     let store = IslandSocket.empty_store()
     let (s1, _) = IslandSocket.process_msg_for_test(
       "{\"island\":\"c-1\",\"type\":\"init\",\"module\":\"Counter\",\"payload\":{\"count\":0}}", store, reg)
@@ -532,7 +532,7 @@ describe "IslandSocket bidirectional message flow" do
 
   test "multiple islands on same page are independent" do
     let reg = IslandSocket.new_registry()
-              |> IslandSocket.register("Counter", counter_update_fn, counter_render_fn)
+              |> IslandSocket.register("Counter", fn p -> counter_update_fn(p), fn s -> counter_render_fn(s))
     let store = IslandSocket.empty_store()
     -- Init two islands with different starting states
     let (s1, _) = IslandSocket.process_msg_for_test(
@@ -595,7 +595,7 @@ describe "IslandSocket bidirectional message flow" do
 
   test "destroy message removes island from the store" do
     let reg = IslandSocket.new_registry()
-              |> IslandSocket.register("Counter", counter_update_fn, counter_render_fn)
+              |> IslandSocket.register("Counter", fn p -> counter_update_fn(p), fn s -> counter_render_fn(s))
     let store = IslandSocket.empty_store()
     let (s1, _) = IslandSocket.process_msg_for_test(
       "{\"island\":\"c-1\",\"type\":\"init\",\"module\":\"Counter\",\"payload\":{\"count\":0}}", store, reg)

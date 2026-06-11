@@ -3,23 +3,25 @@
 
 mod TestGate do
 
+import Gate
+
 -- ── Gate.cast ────────────────────────────────────────────────────────────────
 
 describe "Gate.cast" do
   test "keeps only permitted fields" do
     let gate = Gate.cast([("email", "a@b.com"), ("role", "admin")], ["email"])
-    assert (Gate.get_change(gate, "email") == Some("a@b.com"))
-    assert (Gate.get_change(gate, "role") == None)
+    assert (opt_eq_str(Gate.get_change(gate, "email"), "a@b.com"))
+    assert (Option.is_none(Gate.get_change(gate, "role")))
   end
 
   test "empty params gives empty changes" do
     let gate = Gate.cast([], ["email"])
-    assert (Gate.get_change(gate, "email") == None)
+    assert (Option.is_none(Gate.get_change(gate, "email")))
   end
 
   test "empty permitted keeps nothing" do
     let gate = Gate.cast([("email", "a@b.com")], [])
-    assert (Gate.get_change(gate, "email") == None)
+    assert (Option.is_none(Gate.get_change(gate, "email")))
   end
 
   test "fresh gate is valid" do
@@ -34,19 +36,19 @@ describe "Gate.cast_record" do
   test "changes override original data in get_field" do
     let record = [("email", "old@example.com")]
     let gate   = Gate.cast_record(record, [("email", "new@example.com")], ["email"])
-    assert (Gate.get_field(gate, "email") == Some("new@example.com"))
+    assert (opt_eq_str(Gate.get_field(gate, "email"), "new@example.com"))
   end
 
   test "original data is returned when no change present" do
     let record = [("email", "old@example.com"), ("name", "Alice")]
     let gate   = Gate.cast_record(record, [("email", "new@example.com")], ["email"])
-    assert (Gate.get_field(gate, "name") == Some("Alice"))
+    assert (opt_eq_str(Gate.get_field(gate, "name"), "Alice"))
   end
 
   test "get_change returns None for fields not in params" do
     let record = [("email", "old@example.com")]
     let gate   = Gate.cast_record(record, [], ["email"])
-    assert (Gate.get_change(gate, "email") == None)
+    assert (Option.is_none(Gate.get_change(gate, "email")))
   end
 end
 
@@ -63,7 +65,7 @@ describe "Gate.validate_required" do
     let gate = Gate.cast([], ["email"])
                |> Gate.validate_required(["email"])
     assert (!Gate.valid(gate))
-    assert (Gate.error_for(gate, "email") != None)
+    assert (Option.is_some(Gate.error_for(gate, "email")))
   end
 
   test "error when field is empty string" do
@@ -82,8 +84,8 @@ describe "Gate.validate_required" do
     let gate = Gate.cast([("email", "a@b.com")], ["email", "password"])
                |> Gate.validate_required(["email", "password"])
     assert (!Gate.valid(gate))
-    assert (Gate.error_for(gate, "password") != None)
-    assert (Gate.error_for(gate, "email") == None)
+    assert (Option.is_some(Gate.error_for(gate, "password")))
+    assert (Option.is_none(Gate.error_for(gate, "email")))
   end
 end
 
@@ -158,7 +160,7 @@ describe "Gate.validate_confirmation" do
     let gate = Gate.cast([("password", "secret123"), ("password_confirmation", "wrong")], ["password", "password_confirmation"])
                |> Gate.validate_confirmation("password")
     assert (!Gate.valid(gate))
-    assert (Gate.error_for(gate, "password_confirmation") != None)
+    assert (Option.is_some(Gate.error_for(gate, "password_confirmation")))
   end
 
   test "no error when confirmation field absent" do
@@ -174,19 +176,19 @@ describe "Gate.put_change / delete_change" do
   test "put_change adds a new field" do
     let gate = Gate.cast([], [])
                |> Gate.put_change("hashed_password", "bcrypt_hash")
-    assert (Gate.get_change(gate, "hashed_password") == Some("bcrypt_hash"))
+    assert (opt_eq_str(Gate.get_change(gate, "hashed_password"), "bcrypt_hash"))
   end
 
   test "put_change replaces existing field" do
     let gate = Gate.cast([("email", "old@example.com")], ["email"])
                |> Gate.put_change("email", "new@example.com")
-    assert (Gate.get_change(gate, "email") == Some("new@example.com"))
+    assert (opt_eq_str(Gate.get_change(gate, "email"), "new@example.com"))
   end
 
   test "delete_change removes a field" do
     let gate = Gate.cast([("password", "plain")], ["password"])
                |> Gate.delete_change("password")
-    assert (Gate.get_change(gate, "password") == None)
+    assert (Option.is_none(Gate.get_change(gate, "password")))
   end
 end
 
@@ -202,7 +204,7 @@ describe "Gate.add_error" do
   test "error_for returns the message" do
     let gate = Gate.cast([], [])
                |> Gate.add_error("email", "has already been taken")
-    assert (Gate.error_for(gate, "email") == Some("has already been taken"))
+    assert (opt_eq_str(Gate.error_for(gate, "email"), "has already been taken"))
   end
 
   test "errors returns all error pairs" do
@@ -215,7 +217,7 @@ describe "Gate.add_error" do
 
   test "error_for returns None for field with no error" do
     let gate = Gate.cast([("email", "a@b.com")], ["email"])
-    assert (Gate.error_for(gate, "email") == None)
+    assert (Option.is_none(Gate.error_for(gate, "email")))
   end
 end
 
@@ -229,8 +231,8 @@ describe "Gate pipeline" do
                |> Gate.validate_length("password", [LenMin(12)])
     -- email passes required, password fails length
     assert (!Gate.valid(gate))
-    assert (Gate.error_for(gate, "email") == None)
-    assert (Gate.error_for(gate, "password") != None)
+    assert (Option.is_none(Gate.error_for(gate, "email")))
+    assert (Option.is_some(Gate.error_for(gate, "password")))
   end
 
   test "all fields valid gives valid gate" do
@@ -244,9 +246,9 @@ end
 
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
-pfn string_contains(haystack : String, needle : String) : Bool do
-  match String.index_of(haystack, needle) do
-  Some(_) -> true
+fn opt_eq_str(actual : Option(String), expected : String) : Bool do
+  match actual do
+  Some(v) -> v == expected
   None    -> false
   end
 end

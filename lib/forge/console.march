@@ -236,17 +236,10 @@ end
 -- App startup
 -- ---------------------------------------------------------------------------
 
--- start_app runs in the Forge process before the REPL is spawned.
+-- Nothing happens in the Forge process before the REPL is spawned.
 -- Real application startup (Logger actor, Depot pool, etc.) happens
 -- inside the REPL process via Application.start() injected by the
 -- TCL script below — exactly like `iex -S mix` starts the OTP app.
-pfn start_app(_config : ConsoleConfig) do
-  ()
-end
-
-pfn server_port() : String do
-  Env.get("PORT", "4000")
-end
 
 -- ---------------------------------------------------------------------------
 -- Config file reading

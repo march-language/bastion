@@ -29,7 +29,7 @@ mod Bastion.Test.Auth do
   doc """
   Log a user into a test conn.
 
-  Calls Auth.log_in/2 with the user's id, then loads the session cookie into
+  Calls Auth.log_in/3 with the user's id, then loads the session cookie into
   the conn assigns so that downstream middleware (Auth.load_current_user) can
   read the session without a round-trip through the cookie jar.
 
@@ -55,8 +55,9 @@ mod Bastion.Test.Auth do
   fn log_in_user_with_secret(conn, user, secret) do
     -- Load the session first (initialises the session state on the conn)
     let conn2 = Session.load(conn, secret)
-    -- Use Auth.log_in to write the user_id (clears session, sets current_user_id)
-    let conn3 = Auth.log_in(conn2, user.id)
+    -- Use Auth.log_in to write the user_id (clears session, sets current_user_id).
+    -- No remember-me token in tests — pass None.
+    let conn3 = Auth.log_in(conn2, user.id, None)
     -- Commit the session so the cookie is written to assigns immediately
     Session.commit_from_conn(conn3)
   end
@@ -81,7 +82,7 @@ mod Bastion.Test.Auth do
   """
   fn assert_redirects_to_login(conn, msg) do
     let status = Conn.status(conn)
-    let location = Conn.get_resp_header(conn, "location")
+    let location = HttpServer.get_resp_header(conn, "location")
     if status != 302 do
       todo("Assertion failed: " ++ msg ++ " (expected 302 redirect, got " ++ int_to_string(status) ++ ")")
     else ()

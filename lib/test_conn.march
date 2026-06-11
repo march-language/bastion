@@ -1,7 +1,9 @@
 -- lib/test_conn.march — Bastion.Test.Conn: HTTP request simulation helpers.
 --
--- Builds fake HttpServer.Conn values for in-process request testing.
--- No HTTP server is started; the pipeline runs synchronously in the test process.
+-- Builds real HttpServer.Conn values for in-process request testing.
+-- No HTTP server is started; the pipeline runs synchronously in the test
+-- process.  Conns are constructed directly with a dummy fd (0), so all
+-- HttpServer / Conn accessors and the router work unchanged.
 --
 -- ── Usage ──────────────────────────────────────────────────────────────────────
 --
@@ -23,11 +25,6 @@
 --       |> MyApp.Router.call()
 --     assert_status(conn, 200)
 --   end
---
--- ── Dependencies ───────────────────────────────────────────────────────────────
---
---   Requires HttpServer.test_conn/2 from the March stdlib for constructing
---   a fake Conn without a live TCP socket.
 
 mod Bastion.Test.Conn do
 
@@ -38,23 +35,27 @@ mod Bastion.Test.Conn do
   doc """
   Build a simulated request conn with the given method and path.
 
-  method — uppercase HTTP method string: "GET", "POST", "PUT", "DELETE", etc.
-  path   — URL path, e.g. "/users/42" or "/api/data?page=1"
+  method — HTTP method string, any case: "GET", "post", "Put", "DELETE", etc.
+  path   — URL path, e.g. "/users/42" or "/api/data?page=1".
+           A "?query" suffix is split off into the conn's query string.
 
       let conn = build_conn("GET", "/users")
       let conn = build_conn("POST", "/api/items")
   """
-  fn build_conn(method : String, path : String) do
-    HttpServer.test_conn(String.upcase(method), path)
+  fn build_conn(method : String, path : String) : Conn do
+    match String.split_first(path, "?") do
+    Some((p, qs)) -> make_conn(method_atom(method), p, qs)
+    None          -> make_conn(method_atom(method), path, "")
+    end
   end
 
   doc """
   Build a simulated request conn with method, path, and an initial body.
   Sets Content-Length automatically.
 
-      let conn = build_conn("POST", "/submit", "name=Alice&email=a@b.com")
+      let conn = build_conn_with_body("POST", "/submit", "name=Alice&email=a@b.com")
   """
-  fn build_conn(method : String, path : String, body : String) do
+  fn build_conn_with_body(method : String, path : String, body : String) : Conn do
     build_conn(method, path)
     |> put_req_body(body)
   end
@@ -63,12 +64,19 @@ mod Bastion.Test.Conn do
 
   doc """
   Set a request header on the conn.  key is normalised to lower-case.
+  Replaces any existing header with the same (case-insensitive) name.
 
       conn |> put_req_header("accept", "application/json")
       conn |> put_req_header("Authorization", "Bearer abc123")
   """
-  fn put_req_header(conn, key : String, value : String) do
-    HttpServer.put_req_header(conn, String.to_lowercase(key), value)
+  fn put_req_header(conn : Conn, key : String, value : String) : Conn do
+    let lower_key = String.to_lowercase(key)
+    match conn do
+    Conn(fd, m, p, pi, qs, rh, rb, s, rhs, rbody, h, a, u) ->
+      Conn(fd, m, p, pi, qs,
+        Cons(Header(lower_key, value), remove_header(rh, lower_key)),
+        rb, s, rhs, rbody, h, a, u)
+    end
   end
 
   doc """
@@ -76,11 +84,12 @@ mod Bastion.Test.Conn do
 
       conn |> put_req_body("{\"name\":\"Alice\"}")
   """
-  fn put_req_body(conn, body : String) do
-    let len = String.length(body)
-    conn
-    |> HttpServer.put_req_body(body)
-    |> HttpServer.put_req_header("content-length", String.from_int(len))
+  fn put_req_body(conn : Conn, body : String) : Conn do
+    let with_body = match conn do
+      Conn(fd, m, p, pi, qs, rh, _, s, rhs, rbody, h, a, u) ->
+        Conn(fd, m, p, pi, qs, rh, body, s, rhs, rbody, h, a, u)
+      end
+    put_req_header(with_body, "content-length", String.from_int(String.byte_size(body)))
   end
 
   doc """
@@ -90,26 +99,29 @@ mod Bastion.Test.Conn do
       conn |> put_req_cookie("session_id", "abc123")
       conn |> put_req_cookie("remember_me", "1")
   """
-  fn put_req_cookie(conn, name : String, value : String) do
+  fn put_req_cookie(conn : Conn, name : String, value : String) : Conn do
     let cookie_pair = name ++ "=" ++ value
-    let existing = HttpServer.get_req_header(conn, "cookie")
-    let cookie_value = match existing do
-      None         -> cookie_pair
-      Some(prev)   -> prev ++ "; " ++ cookie_pair
-    end
-    HttpServer.put_req_header(conn, "cookie", cookie_value)
+    let cookie_value = match HttpServer.get_req_header(conn, "cookie") do
+      None       -> cookie_pair
+      Some(prev) -> prev ++ "; " ++ cookie_pair
+      end
+    put_req_header(conn, "cookie", cookie_value)
   end
 
   doc """
-  Append query parameters to the conn's query string.
+  Replace the conn's query string with the given parameters.
+  Values are percent-encoded.
 
   params — list of (key, value) string pairs
 
       conn |> put_query_params([("page", "2"), ("limit", "20")])
   """
-  fn put_query_params(conn, params : List((String, String))) do
+  fn put_query_params(conn : Conn, params : List((String, String))) : Conn do
     let qs = encode_query_params(params)
-    HttpServer.put_query_string(conn, qs)
+    match conn do
+    Conn(fd, m, p, pi, _, rh, rb, s, rhs, rbody, h, a, u) ->
+      Conn(fd, m, p, pi, qs, rh, rb, s, rhs, rbody, h, a, u)
+    end
   end
 
   -- ── Response assertions ───────────────────────────────────────────────────
@@ -120,7 +132,7 @@ mod Bastion.Test.Conn do
       assert_status(conn, 200)
       assert_status(conn, 404)
   """
-  fn assert_status(conn, expected : Int) do
+  fn assert_status(conn : Conn, expected : Int) : Conn do
     let actual = HttpServer.status(conn)
     if actual != expected do
       todo(
@@ -139,19 +151,22 @@ mod Bastion.Test.Conn do
       assert_header(conn, "content-type", "application/json")
       assert_header(conn, "location", "/users/1")
   """
-  fn assert_header(conn, key : String, value : String) do
-    let lower_key = String.to_lowercase(key)
-    let headers   = HttpServer.resp_headers(conn)
-    let found = List.any(headers, fn pair -> do
-      let (hk, hv) = pair
-      String.to_lowercase(hk) == lower_key && hv == value
-    end)
-    if !(found) do
+  fn assert_header(conn : Conn, key : String, value : String) : Conn do
+    match HttpServer.get_resp_header(conn, key) do
+    None ->
       todo(
         "assert_header failed: expected header \""
         ++ key ++ ": " ++ value ++ "\" not found in response"
       )
-    else conn end
+    Some(actual) ->
+      if actual != value do
+        todo(
+          "assert_header failed: expected header \"" ++ key
+          ++ "\" to equal \"" ++ value
+          ++ "\" but got \"" ++ actual ++ "\""
+        )
+      else conn end
+    end
   end
 
   doc """
@@ -161,7 +176,7 @@ mod Bastion.Test.Conn do
       assert_html_contains(conn, "Welcome")
       assert_html_contains(conn, "<h1>Hello</h1>")
   """
-  fn assert_html_contains(conn, text : String) do
+  fn assert_html_contains(conn : Conn, text : String) : Conn do
     let body = HttpServer.resp_body(conn)
     if !(String.contains(body, text)) do
       todo("assert_html_contains failed: response body does not contain \"" ++ text ++ "\"")
@@ -175,7 +190,7 @@ mod Bastion.Test.Conn do
       assert_redirected_to(conn, "/login")
       assert_redirected_to(conn, "/users/1")
   """
-  fn assert_redirected_to(conn, path : String) do
+  fn assert_redirected_to(conn : Conn, path : String) : Conn do
     let status = HttpServer.status(conn)
     let is_redirect =
       status == 301 || status == 302 || status == 303
@@ -186,8 +201,7 @@ mod Bastion.Test.Conn do
         ++ String.from_int(status)
       )
     else
-      let location = get_resp_header(conn, "location")
-      match location do
+      match HttpServer.get_resp_header(conn, "location") do
       None ->
         todo("assert_redirected_to failed: no Location header in response")
       Some(loc) ->
@@ -209,16 +223,15 @@ mod Bastion.Test.Conn do
 
       assert_json(conn, "{\"status\":\"ok\"}")
   """
-  fn assert_json(conn, expected_json : String) do
-    let ct = get_resp_header(conn, "content-type")
-    let _ = match ct do
+  fn assert_json(conn : Conn, expected_json : String) : Conn do
+    let _ = match HttpServer.get_resp_header(conn, "content-type") do
       None ->
         todo("assert_json failed: no content-type header in response")
       Some(v) ->
         if !(String.contains(v, "application/json")) do
           todo("assert_json failed: content-type is \"" ++ v ++ "\", not application/json")
         else () end
-    end
+      end
     let body = HttpServer.resp_body(conn)
     if body != expected_json do
       todo(
@@ -230,82 +243,102 @@ mod Bastion.Test.Conn do
 
   -- ── Response introspection ────────────────────────────────────────────────
 
-  doc "Return the value of a response header, or None if absent."
-  fn get_resp_header(conn, key : String) : Option(String) do
-    let lower_key = String.to_lowercase(key)
-    let headers   = HttpServer.resp_headers(conn)
-    List.find_map(headers, fn pair -> do
-      let (hk, hv) = pair
-      if String.to_lowercase(hk) == lower_key do Some(hv) else None end
-    end)
+  doc "Return the value of a response header (case-insensitive), or None if absent."
+  fn get_resp_header(conn : Conn, key : String) : Option(String) do
+    HttpServer.get_resp_header(conn, key)
   end
 
   doc "Return the response status code."
-  fn resp_status(conn) : Int do
+  fn resp_status(conn : Conn) : Int do
     HttpServer.status(conn)
   end
 
   doc "Return the response body string."
-  fn resp_body(conn) : String do
+  fn resp_body(conn : Conn) : String do
     HttpServer.resp_body(conn)
   end
 
   doc "Return true if the response has been sent (status is non-zero)."
-  fn responded(conn) : Bool do
+  fn responded(conn : Conn) : Bool do
     HttpServer.status(conn) != 0
   end
 
   -- ── Auth helpers ──────────────────────────────────────────────────────────
 
-  doc """
-  Inject a session cookie identifying `user_id` — simulates a logged-in user.
-  Works with Bastion.Session; the session is written into the Cookie header.
-
-      conn |> authenticate_as(user.id)
-  """
-  fn authenticate_as(conn, user_id : String) do
-    -- Write the user_id into the session via Session module
-    let conn_with_session = Bastion.Session.put(conn, "current_user_id", user_id)
-    -- Commit session to set the cookie header
-    Bastion.Session.commit(conn_with_session)
-  end
+  -- TODO: authenticate_as(conn, user_id) — simulating a logged-in user requires
+  -- writing a *signed* "_session" cookie into the request Cookie header so that
+  -- Session.load / TypedMiddleware.load_session can verify and decode it.
+  -- Session's sign_and_encode is private (pfn), so the signed value cannot be
+  -- produced from here.  Re-add this helper once Session exposes a public
+  -- signing function (e.g. Session.sign_for_test/2) or a test-only cookie
+  -- builder.  Until then, tests can call Session.put(conn, "current_user_id", id)
+  -- AFTER session load has run, or exercise auth flows through the real login
+  -- endpoint.
 
   doc """
   Set a Bearer token in the Authorization request header.
 
       conn |> with_api_token("my-api-token-abc")
   """
-  fn with_api_token(conn, token : String) do
+  fn with_api_token(conn : Conn, token : String) : Conn do
     put_req_header(conn, "authorization", "Bearer " ++ token)
   end
 
   -- ── Private helpers ───────────────────────────────────────────────────────
 
+  -- Construct a fresh request Conn with a dummy fd and no response state.
+  pfn make_conn(meth : Atom, path : String, qs : String) : Conn do
+    let segments = List.filter(String.split(path, "/"), fn s -> !(String.is_empty(s)))
+    Conn(0, meth, path, segments, qs, Nil, "", 0, Nil, "", false, Nil, NoUpgrade)
+  end
+
+  -- Convert an HTTP method string (any case) to its request atom.
+  pfn method_atom(method : String) : Atom do
+    let m = String.to_uppercase(method)
+    if m == "GET" do :get
+    else if m == "POST" do :post
+    else if m == "PUT" do :put
+    else if m == "PATCH" do :patch
+    else if m == "DELETE" do :delete
+    else if m == "HEAD" do :head
+    else if m == "OPTIONS" do :options
+    else if m == "TRACE" do :trace
+    else if m == "CONNECT" do :connect
+    else todo("build_conn: unknown HTTP method \"" ++ method ++ "\"")
+    end end end end end end end end end
+  end
+
+  -- Drop all headers whose (case-insensitive) name equals lower_name.
+  pfn remove_header(headers : List(Header), lower_name : String) : List(Header) do
+    List.filter(headers, fn hd ->
+      match hd do
+      Header(n, _) -> String.to_lowercase(n) != lower_name
+      end
+    )
+  end
+
   -- Encode a list of (key, value) pairs as a URL query string.
   -- e.g. [("page", "2"), ("limit", "10")] → "page=2&limit=10"
   pfn encode_query_params(params : List((String, String))) : String do
-    let parts = List.map(params, fn pair -> do
-      let (k, v) = pair
-      url_encode(k) ++ "=" ++ url_encode(v)
-    end)
+    let parts = List.map(params, fn pair ->
+      match pair do
+      (k, v) -> url_encode(k) ++ "=" ++ url_encode(v)
+      end
+    )
     String.join(parts, "&")
   end
 
   -- Percent-encode characters that are not safe in query strings.
-  -- Encodes spaces as %20 and common special chars.
+  -- Encodes spaces as %20 and common special chars.  "%" must be first.
   pfn url_encode(s : String) : String do
-    String.chars(s)
-    |> List.map(fn c -> do
-      if c == " " do "%20"
-      else if c == "&" do "%26"
-      else if c == "=" do "%3D"
-      else if c == "+" do "%2B"
-      else if c == "#" do "%23"
-      else if c == "?" do "%3F"
-      else if c == "%" do "%25"
-      else c end end end end end end end
-    end)
-    |> String.concat()
+    s
+    |> String.replace_all("%", "%25")
+    |> String.replace_all(" ", "%20")
+    |> String.replace_all("&", "%26")
+    |> String.replace_all("=", "%3D")
+    |> String.replace_all("+", "%2B")
+    |> String.replace_all("#", "%23")
+    |> String.replace_all("?", "%3F")
   end
 
 end

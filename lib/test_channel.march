@@ -49,10 +49,10 @@ mod Bastion.Test.Channel do
   returned conn to verify direct pushes (not yet implemented — see below).
   """
   fn join(
-    join_fn : (Channel.ChannelConn, String, String) -> Result(Channel.ChannelConn, String),
+    join_fn : Bastion.Channel.ChannelConn -> String -> String -> Result(Bastion.Channel.ChannelConn, String),
     topic : String,
     params_json : String
-  ) : Result(Channel.ChannelConn, String) do
+  ) : Result(Bastion.Channel.ChannelConn, String) do
     let conn_id  = "test_conn_" ++ topic
     let push_fn  = fn (_, _) -> ()   -- no-op; no live socket in tests
     let cc       = Channel.new_conn(topic, conn_id, push_fn)
@@ -64,11 +64,11 @@ mod Bastion.Test.Channel do
   to distinguish multiple test connections in the same test.
   """
   fn join_as(
-    join_fn : (Channel.ChannelConn, String, String) -> Result(Channel.ChannelConn, String),
+    join_fn : Bastion.Channel.ChannelConn -> String -> String -> Result(Bastion.Channel.ChannelConn, String),
     topic : String,
     params_json : String,
     conn_id : String
-  ) : Result(Channel.ChannelConn, String) do
+  ) : Result(Bastion.Channel.ChannelConn, String) do
     let push_fn  = fn (_, _) -> ()
     let cc       = Channel.new_conn(topic, conn_id, push_fn)
     join_fn(cc, topic, params_json)
@@ -87,11 +87,11 @@ mod Bastion.Test.Channel do
       let conn2 = TestChannel.push(conn, MyApp.RoomChannel.handle_in, "message:new", "{\"body\":\"hi\"}")
   """
   fn push(
-    conn : Channel.ChannelConn,
-    handle_in_fn : (Channel.ChannelConn, String, String) -> Channel.ChannelConn,
+    conn : Bastion.Channel.ChannelConn,
+    handle_in_fn : Bastion.Channel.ChannelConn -> String -> String -> Bastion.Channel.ChannelConn,
     event : String,
     payload_json : String
-  ) : Channel.ChannelConn do
+  ) : Bastion.Channel.ChannelConn do
     handle_in_fn(conn, event, payload_json)
   end
 
@@ -168,9 +168,12 @@ mod Bastion.Test.Channel do
 
       TestChannel.assert_assign(conn, "room_id", "general")
   """
-  fn assert_assign(conn : Channel.ChannelConn, key : String, value : String) do
+  fn assert_assign(conn : Bastion.Channel.ChannelConn, key : String, value : String) do
     let actual = Channel.get_assign(conn, key)
-    assert (actual == Some(value))
+    match actual do
+    Some(v) -> assert (v == value)
+    None    -> assert false
+    end
   end
 
 end

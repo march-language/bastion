@@ -261,7 +261,7 @@ mod Bastion.Cmd do
   pfn map_list_acc(cmds : List(Cmd(a)), f : a -> b, acc : List(Cmd(b))) : List(Cmd(b)) do
     match cmds do
     Nil           -> acc
-    Cons(c, rest) -> map_list_acc(rest, f, Cons(map(c, f), acc))
+    Cons(c, rest) -> map_list_acc(rest, f, Cons(Bastion.Cmd.map(c, f), acc))
     end
   end
 
