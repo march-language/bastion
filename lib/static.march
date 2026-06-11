@@ -78,9 +78,13 @@ mod Static do
     match cfg do
     StaticConfig(root, prefix) -> do
       let req_path  = HttpServer.path(conn)
-      let rel_path  = strip_and_normalise(url_path(req_path, prefix))
-      -- Reject any path containing a ".." segment or backslash before reading
-      -- the file.  Without this check an attacker could request
+      -- Percent-decode BEFORE the traversal check, then never transform the
+      -- path again.  Checking first and decoding later (or serving the raw
+      -- path while some lower layer decodes) lets "%2e%2e" sneak past the
+      -- ".." rejection.  Order: strip prefix → decode → normalise → reject.
+      let rel_path  = strip_and_normalise(Uri.decode(url_path(req_path, prefix)))
+      -- Reject any path containing a ".." segment, backslash, or NUL before
+      -- reading the file.  Without this check an attacker could request
       -- /static/../../etc/passwd and escape the configured root directory.
       match is_unsafe_path(rel_path) do
       true  -> conn
@@ -130,7 +134,13 @@ mod Static do
   pfn is_unsafe_path(path : String) : Bool do
     match String.contains(path, "\\") do
     true  -> true
-    false -> has_dotdot_segment(String.split(path, "/"))
+    false ->
+      -- NUL truncates paths in C-backed filesystem APIs; it can only appear
+      -- here via a %00 sequence in the (now-decoded) URL — always hostile.
+      match String.contains(path, char_from_int(0)) do
+      true  -> true
+      false -> has_dotdot_segment(String.split(path, "/"))
+      end
     end
   end
 

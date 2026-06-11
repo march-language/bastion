@@ -159,8 +159,12 @@ mod Session do
         Some(v) -> [("Max-Age", v)]
         None    -> []
         end
+      -- Secure is env-gated per specs/cookies.md: on in prod (cookies must
+      -- only travel over HTTPS), off in dev/test so plain-HTTP localhost
+      -- development keeps working.
+      let secure = if Config.is_prod() do [("Secure", "")] else [] end
       let opts = List.append(
-        [("Path", "/"), ("HttpOnly", ""), ("SameSite", "Lax")],
+        List.append([("Path", "/"), ("HttpOnly", ""), ("SameSite", "Lax")], secure),
         max_age
       )
       Conn.put_resp_cookie(conn, cookie_name, signed, opts)

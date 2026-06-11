@@ -7,20 +7,22 @@
 --
 -- The crash REPL is not yet available (requires March.Repl, not yet implemented).
 --
--- IMPORTANT: Never use this module in production.
+-- The debug endpoint and rich error page are hard-gated at runtime on
+-- Bastion.Dev.dev_env(): outside dev the plug answers 404 and the error
+-- page degrades to a plain 500 without exception details.  You can still
+-- additionally guard the mount in your router, but production safety does
+-- not depend on it.
 --
 -- Typical setup in your router:
 --
 --   import Bastion.ErrorOverlay
 --
---   -- Mount the debug endpoint (dev only):
---   if dev_env?() do
---     conn |> ErrorOverlay.router_plug()
---   else conn end
+--   conn |> ErrorOverlay.router_plug()
 
 mod Bastion.ErrorOverlay do
 
   import HttpServer
+  import Bastion.Dev
 
 -- ---------------------------------------------------------------------------
 -- Public API
@@ -48,25 +50,41 @@ end
 
 doc """
 Route plug: intercept /_bastion/debug/:id requests.
-Mount this in your router (dev only).
+
+Hard-gated at runtime on `Bastion.Dev.dev_env()` — outside dev the
+endpoint answers a plain 404 (indistinguishable from a missing route)
+regardless of how the app mounted it, so a forgotten `if dev_env?()`
+in a router cannot expose the debug surface in production.
 """
 fn router_plug(conn) do
   let path = HttpServer.path(conn)
   let prefix = "/_bastion/debug/"
   if String.starts_with(path, prefix) do
-    let session_id = String.slice_bytes(path, String.byte_size(prefix),
-                       String.byte_size(path) - String.byte_size(prefix))
-    debug_socket(conn, session_id)
+    if Bastion.Dev.dev_env() do
+      let session_id = String.slice_bytes(path, String.byte_size(prefix),
+                         String.byte_size(path) - String.byte_size(prefix))
+      debug_socket(conn, session_id)
+    else
+      HttpServer.send_resp(conn, 404, "Not Found")
+    end
   else conn end
 end
 
 doc """
-Render a 500 error page with error message. For dev mode only.
+Render a 500 error page with error message.
+
+In dev mode this is the rich overlay including the error message.  In any
+other environment it degrades to a plain "Internal Server Error" page so
+exception details (paths, SQL, secrets in messages) never reach clients.
 """
 fn render_error_page(conn, err_msg : String) do
-  let session_id = Crypto.generate_token(16)
-  let html       = error_page_html(err_msg, session_id)
-  HttpServer.send_resp(conn, 500, html)
+  if Bastion.Dev.dev_env() do
+    let session_id = Crypto.generate_token(16)
+    let html       = error_page_html(err_msg, session_id)
+    HttpServer.send_resp(conn, 500, html)
+  else
+    HttpServer.send_resp(conn, 500, "Internal Server Error")
+  end
 end
 
 -- ---------------------------------------------------------------------------
