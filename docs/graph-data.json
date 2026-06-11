@@ -428,6 +428,39 @@
       "created_at": "2026-06-11T11:25:10.747401-04:00",
       "updated_at": "2026-06-11T11:25:10.747401-04:00",
       "metadata_json": "{\"branch\":\"claude/vigorous-moore-d0cffc\",\"commit\":\"9c5f990\",\"confidence\":95}"
+    },
+    {
+      "id": 40,
+      "change_id": "b1054fe3-9e55-45a3-b2aa-fceef3fa2d53",
+      "node_type": "action",
+      "title": "Dispatched 5 subagents: 3 fixers (test_conn / test_channel+test_auth / forge+small files), 2 reviewers (security, production-readiness)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-11T11:29:53.428288-04:00",
+      "updated_at": "2026-06-11T11:29:53.428288-04:00",
+      "metadata_json": "{\"branch\":\"claude/vigorous-moore-d0cffc\",\"confidence\":90}"
+    },
+    {
+      "id": 41,
+      "change_id": "ecfdcebb-69ea-480d-a9a6-b410bd74fc7d",
+      "node_type": "outcome",
+      "title": "March compiler: 3 whole-program fixes committed (b07172f, 02d212d) — pass-1 Type.Ctor keys, local-fns shadow bulk imports, entry stdlib shadowing, island-protocol decls check. Full suite green. Bastion lib: forge check+build+lint green (80 files); duplicate mod Auth removed (auth_middleware.march -> auth.march)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-11T12:10:15.128341-04:00",
+      "updated_at": "2026-06-11T12:10:15.128341-04:00",
+      "metadata_json": "{\"branch\":\"claude/vigorous-moore-d0cffc\",\"confidence\":95}"
+    },
+    {
+      "id": 42,
+      "change_id": "23f6756e-cfc3-4858-87b3-8ff4836d7a2b",
+      "node_type": "outcome",
+      "title": "Bastion committed 783b276: forge check/build/lint green (80 files); tests compile+run (1 known native codegen failure). Reviews in specs/reviews/. 4 follow-up task chips spawned (2 march codegen bugs, depot tests, security criticals)",
+      "description": null,
+      "status": "pending",
+      "created_at": "2026-06-11T12:35:37.953708-04:00",
+      "updated_at": "2026-06-11T12:35:37.953708-04:00",
+      "metadata_json": "{\"branch\":\"claude/vigorous-moore-d0cffc\",\"commit\":\"783b276\",\"confidence\":95}"
     }
   ],
   "edges": [
@@ -672,6 +705,61 @@
       "weight": 1.0,
       "rationale": "Compiler fix enabled depot green",
       "created_at": "2026-06-11T11:25:10.776408-04:00"
+    },
+    {
+      "id": 23,
+      "from_node_id": 36,
+      "to_node_id": 40,
+      "from_change_id": "2dcc8ce1-eee8-496e-a4a0-ff138a3f4112",
+      "to_change_id": "b1054fe3-9e55-45a3-b2aa-fceef3fa2d53",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Parallel fix + review phase",
+      "created_at": "2026-06-11T11:29:53.440783-04:00"
+    },
+    {
+      "id": 24,
+      "from_node_id": 38,
+      "to_node_id": 41,
+      "from_change_id": "091b59c3-4e41-4807-aded-41cdccff06fb",
+      "to_change_id": "ecfdcebb-69ea-480d-a9a6-b410bd74fc7d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Compiler fixes complete",
+      "created_at": "2026-06-11T12:10:15.142145-04:00"
+    },
+    {
+      "id": 25,
+      "from_node_id": 40,
+      "to_node_id": 41,
+      "from_change_id": "b1054fe3-9e55-45a3-b2aa-fceef3fa2d53",
+      "to_change_id": "ecfdcebb-69ea-480d-a9a6-b410bd74fc7d",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Agent fixes integrated",
+      "created_at": "2026-06-11T12:10:15.153265-04:00"
+    },
+    {
+      "id": 26,
+      "from_node_id": 40,
+      "to_node_id": 42,
+      "from_change_id": "b1054fe3-9e55-45a3-b2aa-fceef3fa2d53",
+      "to_change_id": "23f6756e-cfc3-4858-87b3-8ff4836d7a2b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "All agent fixes integrated and committed",
+      "created_at": "2026-06-11T12:35:37.976276-04:00"
+    },
+    {
+      "id": 27,
+      "from_node_id": 41,
+      "to_node_id": 42,
+      "from_change_id": "ecfdcebb-69ea-480d-a9a6-b410bd74fc7d",
+      "to_change_id": "23f6756e-cfc3-4858-87b3-8ff4836d7a2b",
+      "edge_type": "leads_to",
+      "weight": 1.0,
+      "rationale": "Compiler+source fixes landed",
+      "created_at": "2026-06-11T12:35:37.988520-04:00"
     }
   ]
 }
