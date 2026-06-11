@@ -99,8 +99,10 @@ mod Auth do
   cookie when there is no session user ID.  If the cookie is present,
   calls `remember_verifier(conn, token)` which should return
   `Ok(user_id_int)` for a valid token or `Error(_)` for an expired/invalid
-  one.  On success the session is re-established (session fixation rotation
-  is NOT done here — that only happens at `log_in`).
+  one.  On success a fresh session is written (clear + set user ID — the
+  same rotation `log_in` performs), so subsequent requests authenticate via
+  the short-lived session cookie instead of re-verifying the long-lived
+  remember token on every request.
 
       conn |> Auth.load_current_user_with_remember(
         fn conn id -> MyApp.Accounts.get_user(conn, id) end,
@@ -125,8 +127,14 @@ mod Auth do
           let conn2 = HttpServer.assign(conn, current_user_assign, "")
           Conn.delete_resp_cookie(conn2, remember_me_cookie)
         Ok(user_id) ->
-          -- Re-establish session from the remember-me token
-          let conn2 = Session.put(conn, user_id_session_key, int_to_string(user_id))
+          -- Re-establish a FRESH session from the remember-me token.
+          -- Clearing first mirrors log_in's fixation defense: any data an
+          -- attacker planted in the (user-less) session is discarded, and
+          -- the cleared+rewritten session is guaranteed dirty so a new
+          -- session cookie is committed with the response.
+          let conn2 =
+            Session.clear(conn)
+            |> Session.put(user_id_session_key, int_to_string(user_id))
           load_current_user(conn2, loader)
         end
       end

@@ -49,26 +49,68 @@ mod RateLimit do
   doc """
   Built-in key function: use the client IP address as the rate limit key.
 
-  Reads the `X-Forwarded-For` header (set by reverse proxies such as nginx or
-  Caddy) and falls back to the `X-Real-IP` header, then to a placeholder
-  `"unknown"` when neither is present.
+  Uses the transport-level peer address of the socket (`HttpServer.peer_addr`),
+  which cannot be spoofed by request headers.  Falls back to `"unknown"` when
+  no live socket backs the conn (e.g. in tests).
 
-  If your proxy sets a different header, provide your own key function:
-
-      fn my_key(conn) -> HttpServer.get_req_header(conn, "x-my-client-ip") |> Option.unwrap_or("unknown")
+  `X-Forwarded-For` is deliberately NOT consulted here: any direct-to-internet
+  client can send that header and would otherwise mint a fresh rate-limit
+  bucket per request, bypassing the limiter entirely.  If your app runs behind
+  a reverse proxy you trust, use `ip_key_forwarded/2` instead and list the
+  proxy addresses explicitly.
   """
   fn ip_key(conn) : String do
-    match HttpServer.get_req_header(conn, "x-forwarded-for") do
-    Some(v) ->
-      -- X-Forwarded-For may be "client, proxy1, proxy2" — take the first part
-      match String.split_first(v, ",") do
-      Some((ip, _)) -> String.trim(ip)
-      None          -> String.trim(v)
+    let peer = HttpServer.peer_addr(conn)
+    if String.is_empty(peer) do "unknown" else peer end
+  end
+
+  doc """
+  Key function for deployments behind trusted reverse proxies.
+
+  When (and only when) the socket peer is one of `trusted_proxies`, the
+  `X-Forwarded-For` chain is walked from the rightmost entry, skipping any
+  address in `trusted_proxies`; the first untrusted hop is the real client.
+  When every hop is trusted, the leftmost entry is used.  When the peer is
+  not a trusted proxy, or no `X-Forwarded-For` header is present, the peer
+  address itself is used — exactly like `ip_key/1`.
+
+      -- nginx on localhost terminates TLS and proxies to us:
+      let key_fn = fn conn -> RateLimit.ip_key_forwarded(conn, ["127.0.0.1"])
+      RateLimit.check(conn, rate_table, key_fn, 5, 60)
+  """
+  fn ip_key_forwarded(conn, trusted_proxies : List(String)) : String do
+    let peer = ip_key(conn)
+    match List.member(trusted_proxies, peer) do
+    false -> peer
+    true  ->
+      match HttpServer.get_req_header(conn, "x-forwarded-for") do
+      None    -> peer
+      Some(v) ->
+        let hops = List.filter(
+          List.map(String.split(v, ","), fn h -> String.trim(h)),
+          fn h -> not(String.is_empty(h))
+        )
+        match hops do
+        Nil -> peer
+        Cons(leftmost, _) ->
+          match first_untrusted(List.reverse(hops), trusted_proxies) do
+          Some(client) -> client
+          None         -> leftmost   -- whole chain is trusted proxies
+          end
+        end
       end
-    None ->
-      match HttpServer.get_req_header(conn, "x-real-ip") do
-      Some(v) -> String.trim(v)
-      None    -> "unknown"
+    end
+  end
+
+  -- Walk hops right-to-left (callers pass the reversed XFF list) and return
+  -- the first address that is not a trusted proxy.
+  pfn first_untrusted(hops_rev : List(String), trusted : List(String)) : Option(String) do
+    match hops_rev do
+    Nil -> None
+    Cons(h, rest) ->
+      match List.member(trusted, h) do
+      true  -> first_untrusted(rest, trusted)
+      false -> Some(h)
       end
     end
   end

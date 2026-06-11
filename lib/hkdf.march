@@ -1,0 +1,55 @@
+-- lib/hkdf.march — HKDF-SHA256 (RFC 5869) key derivation.
+--
+-- Built on the `hmac_sha256_bytes` builtin (Bytes -> Bytes -> Bytes) so the
+-- pseudorandom key stays raw bytes end-to-end: round-tripping key material
+-- through a String would UTF-8-encode bytes >= 0x80 and silently change it.
+--
+-- Used by Crypto.derive_key; call Crypto.hkdf_sha256 / Crypto.derive_key
+-- from application code rather than this module directly.
+
+mod Hkdf do
+
+  doc """
+  HKDF-SHA256 (RFC 5869): derive `len` bytes of output keying material from
+  input keying material `ikm`, a `salt`, and a context `info` string.
+
+      PRK  = HMAC-SHA256(salt, ikm)              -- extract
+      T(i) = HMAC-SHA256(PRK, T(i-1) ++ info ++ byte(i))
+      OKM  = first `len` bytes of T(1) ++ T(2) ++ …   -- expand
+
+  `len` must be at most 8160 (255 blocks x 32 bytes, the RFC limit).
+  """
+  fn hkdf_sha256(ikm : String, salt : String, info : String, len : Int) : Bytes do
+    let prk = extract(Bytes.from_string(salt), Bytes.from_string(ikm))
+    expand(prk, Bytes.from_string(info), len)
+  end
+
+  doc "RFC 5869 §2.2 extract step: PRK = HMAC-SHA256(salt, ikm)."
+  fn extract(salt : Bytes, ikm : Bytes) : Bytes do
+    hmac_sha256_bytes(salt, ikm)
+  end
+
+  doc """
+  RFC 5869 §2.3 expand step: stretch a pseudorandom key `prk` to `len`
+  bytes of output keying material, bound to the context string `info`.
+  """
+  fn expand(prk : Bytes, info : Bytes, len : Int) : Bytes do
+    expand_go(prk, info, len, Bytes(Nil), 1, Bytes(Nil))
+  end
+
+  -- Module-level recursion (not a nested closure) deliberately: march 0.1.0
+  -- native codegen miscompiles recursive module-nested closures.
+  pfn expand_go(prk : Bytes, info : Bytes, len : Int,
+                t_prev : Bytes, i : Int, acc : Bytes) : Bytes do
+    if Bytes.length(acc) >= len do
+      Bytes.slice(acc, 0, len)
+    else
+      let block = hmac_sha256_bytes(
+        prk,
+        Bytes.concat(Bytes.concat(t_prev, info), Bytes(Cons(i, Nil)))
+      )
+      expand_go(prk, info, len, block, i + 1, Bytes.concat(acc, block))
+    end
+  end
+
+end

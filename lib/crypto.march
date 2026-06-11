@@ -18,7 +18,8 @@
 --     hmac_sha256(key, data)       → String  (lowercase hex, key/data: String | Bytes)
 --
 --   Key derivation
---     derive_key(secret, context)  → String  (32-byte SHA-256-based derivation)
+--     hkdf_sha256(ikm, salt, info, len) → Bytes (HKDF-SHA256, RFC 5869)
+--     derive_key(secret, context)  → String  (32-byte HKDF-SHA256 derivation, hex)
 --
 --   Password hashing (PBKDF2-SHA256, 600 000 iterations, 16-byte random salt)
 --     hash_password(plain)         → String  ("pbkdf2:sha256:…" storable format)
@@ -37,6 +38,8 @@
 --     bytes_to_string(b)           → String  (bytes → String)
 
 mod Crypto do
+
+  import Hkdf
 
   -- ── Private helpers ───────────────────────────────────────────────────────
 
@@ -182,13 +185,37 @@ mod Crypto do
 
   -- ── Key derivation ────────────────────────────────────────────────────────
 
+  -- Versioned extract salt for derive_key.  Bump the version suffix if the
+  -- derivation scheme ever changes so old and new keys can never collide.
+  let hkdf_salt = "bastion.hkdf.v1"
+
   doc """
-  Derive a 32-byte key from `secret` and a `context` label via SHA-256.
+  HKDF-SHA256 (RFC 5869): derive `len` bytes of key material from input
+  keying material `ikm`, a `salt`, and a context `info` string.
+
+  Thin re-export of `Hkdf.hkdf_sha256` (the implementation lives in its own
+  module because Crypto's hex-string `hmac_sha256` shadows the Bytes-domain
+  builtin HKDF needs).  `len` must be at most 8160 (255 blocks x 32 bytes).
+
+      let okm = Crypto.hkdf_sha256(secret, "my-salt", "encryption", 32)
+  """
+  fn hkdf_sha256(ikm : String, salt : String, info : String, len : Int) : Bytes do
+    Hkdf.hkdf_sha256(ikm, salt, info, len)
+  end
+
+  doc """
+  Derive a 32-byte key from `secret` and a `context` label, returned as a
+  64-char lowercase hex string.
+
+  Uses HKDF-SHA256 (extract-then-expand, RFC 5869) with the versioned salt
+  "bastion.hkdf.v1" and `context` as the expand info, so keys derived for
+  different contexts are cryptographically independent — recovering one
+  derived key reveals nothing about the secret or any sibling key.
 
       let k = Crypto.derive_key(secret_key_base, "session_signing")
   """
   fn derive_key(secret : String, context : String) : String do
-    stdlib_sha256(secret ++ ":" ++ context)
+    bytes_to_hex(hkdf_sha256(secret, hkdf_salt, context, 32))
   end
 
   -- ── Password hashing ──────────────────────────────────────────────────────

@@ -1,5 +1,21 @@
 [
   {
+    "hash": "e8d8a5e9a3fda7b176d331ad7de8f78658353787",
+    "short_hash": "e8d8a5e",
+    "author": "Matthew Gilliam",
+    "date": "2026-06-11T13:50:22-04:00",
+    "message": "fix(security): resolve 3 critical + 3 high findings from 2026-06-11 review\n\nCritical:\n- rate_limit: ip_key now keys on the transport peer address\n  (HttpServer.peer_addr, new tcp_peer_addr builtin) instead of trusting\n  X-Forwarded-For; new ip_key_forwarded(conn, trusted_proxies) walks the\n  XFF chain right-to-left skipping trusted hops for proxy deployments.\n- session: Set-Cookie now includes Secure when MARCH_ENV=prod\n  (Config.is_prod), per specs/cookies.md.\n- crypto: derive_key is now HKDF-SHA256 (RFC 5869, new lib/hkdf.march on\n  the Bytes-domain hmac_sha256_bytes builtin) with versioned salt\n  bastion.hkdf.v1; replaces sha256(secret ++ \":\" ++ context). Verified\n  against RFC test vector A.1 in interp and native. NOTE: derived keys\n  change — existing signed/encrypted cookies are invalidated on deploy.\n\nHigh:\n- static: percent-decode (Uri.decode) BEFORE the traversal check so\n  %2e%2e cannot bypass the .. rejection; NUL bytes rejected; encoded\n  filenames now serve correctly.\n- error_overlay: /_bastion/debug/ plug and rich error page hard-gated on\n  Bastion.Dev.dev_env() at runtime (404 / generic 500 otherwise).\n- auth: remember-me re-auth now clears and rewrites the session\n  (fixation rotation, fresh session cookie) instead of bare Session.put.\n\nToolchain: march d07356d (tcp_peer_addr, hmac_sha256_bytes builtins),\nc69d877 (fix int tagging in C-built generic list cells).\n\nSecurity review: specs/reviews/2026-06-11-security-review.md (items 1-6).",
+    "files_changed": 7
+  },
+  {
+    "hash": "37312145e3081c8075ee81f046961a59f221009b",
+    "short_hash": "3731214",
+    "author": "Matthew Gilliam",
+    "date": "2026-06-11T12:36:54-04:00",
+    "message": "chore: sync deciduous graph exports",
+    "files_changed": 2
+  },
+  {
     "hash": "783b27667925b026de35fa0daf087897b247f69d",
     "short_hash": "783b276",
     "author": "Matthew Gilliam",
