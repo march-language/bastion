@@ -12,7 +12,8 @@ mod Request do
   doc """
   Parse the query string into a list of (key, value) pairs.
 
-  Returns an empty list if the query string is empty.
+  Keys and values are URL-decoded ("+" becomes space, %XX sequences are
+  percent-decoded).  Returns an empty list if the query string is empty.
 
   Example:
     -- For request "GET /search?q=hello&page=1"
@@ -92,6 +93,7 @@ mod Request do
   doc """
   Parse the request body as URL-encoded form data (application/x-www-form-urlencoded).
   Returns a list of (key, value) pairs — the same format as query_params.
+  Keys and values are URL-decoded ("+" becomes space, %XX percent-decoded).
 
   Example:
     -- POST body: "title=Hello&body=World"
@@ -124,7 +126,7 @@ mod Request do
     Some(i) -> do
       let k = String.slice_bytes(pair, 0, i)
       let v = String.slice_bytes(pair, i + 1, String.byte_size(pair) - i - 1)
-      Some((k, v))
+      Some((form_decode(k), form_decode(v)))
     end
     end
   end
@@ -132,8 +134,16 @@ mod Request do
   pfn parse_pair_no_eq(pair : String) : Option((String, String)) do
     match String.is_empty(pair) do
     true  -> None
-    false -> Some((pair, ""))
+    false -> Some((form_decode(pair), ""))
     end
+  end
+
+  -- Decode an application/x-www-form-urlencoded component: "+" means space,
+  -- %XX sequences are percent-decoded.  Applied to every key and value so
+  -- handlers and validators always see the literal characters the client
+  -- submitted (e.g. "a%26b" and "a&b" cannot be confused).
+  pfn form_decode(s : String) : String do
+    Uri.decode(String.replace_all(s, "+", "%20"))
   end
 
   pfn lookup(pairs : List((String, String)), key : String) : Option(String) do

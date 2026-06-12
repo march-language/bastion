@@ -263,19 +263,45 @@ mod Session do
     mac ++ "." ++ payload
   end
 
+  -- The "." delimiter is unambiguous because neither side can contain it:
+  -- the MAC is lowercase hex and the payload is standard base64
+  -- (A-Z a-z 0-9 + / =).  Both halves are still validated structurally
+  -- before any crypto runs so malformed cookies are rejected cheaply and
+  -- can never reach HMAC/decode with attacker-shaped input.
   pfn verify_and_decode(raw : String, secret : String) : String do
-    match String.split_first(raw, ".") do
-    None                 -> ""   -- malformed — no dot separator
-    Some((mac, payload)) ->
-      let signing_key = Crypto.derive_key(secret, "session_signing")
-      let expected    = Crypto.hmac_sha256(signing_key, payload)
-      if Crypto.secure_compare(mac, expected) do
-        match Crypto.base64_decode(payload) do
-        Ok(b)  -> Crypto.bytes_to_string(b)
-        Err(_) -> ""
+    -- Browsers cap cookies at ~4 KiB; anything larger is hostile or corrupt.
+    if String.byte_size(raw) > 8192 do ""
+    else
+      match String.split_first(raw, ".") do
+      None                 -> ""   -- malformed — no dot separator
+      Some((mac, payload)) ->
+        -- HMAC-SHA256 as lowercase hex is always exactly 64 characters.
+        if String.byte_size(mac) != 64 ||
+           not(all_hex(string_chars(mac))) ||
+           String.is_empty(payload) do
+          ""   -- malformed — MAC is not 64 hex chars or payload is empty
+        else
+          let signing_key = Crypto.derive_key(secret, "session_signing")
+          let expected    = Crypto.hmac_sha256(signing_key, payload)
+          if Crypto.secure_compare(mac, expected) do
+            match Crypto.base64_decode(payload) do
+            Ok(b)  -> Crypto.bytes_to_string(b)
+            Err(_) -> ""
+            end
+          else ""  -- HMAC mismatch — tampered or wrong secret
+          end
         end
-      else ""  -- HMAC mismatch — tampered or wrong secret
       end
+    end
+  end
+
+  pfn all_hex(cs : List(String)) : Bool do
+    match cs do
+    Nil -> true
+    Cons(c, rest) ->
+      let ok = char_is_digit(c) || c == "a" || c == "b" || c == "c" ||
+               c == "d" || c == "e" || c == "f"
+      if ok do all_hex(rest) else false end
     end
   end
 

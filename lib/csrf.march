@@ -128,7 +128,9 @@ mod CSRF do
 
   -- Extract the value of a named field from a URL-encoded form body.
   -- Body format: "key1=value1&key2=value2&..."
-  -- Returns None if the field is not present.
+  -- Keys and values are form-decoded ("+" means space, %XX percent-decoded)
+  -- so a token a strict client percent-encodes still compares equal to the
+  -- session token.  Returns None if the field is not present.
   pfn parse_form_field(body : String, field : String) : Option(String) do
     let pairs = String.split(body, "&")
     fn find(ps : List(String)) : Option(String) do
@@ -137,13 +139,18 @@ mod CSRF do
       Cons(pair, rest) ->
         match String.split_first(pair, "=") do
         Some((k, v)) ->
-          if k == field do Some(v)
+          if form_decode(k) == field do Some(form_decode(v))
           else find(rest) end
         None -> find(rest)
         end
       end
     end
     find(pairs)
+  end
+
+  -- Decode an application/x-www-form-urlencoded component.
+  pfn form_decode(s : String) : String do
+    Uri.decode(String.replace_all(s, "+", "%20"))
   end
 
   -- -----------------------------------------------------------------------

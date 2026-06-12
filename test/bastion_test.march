@@ -1562,6 +1562,150 @@ describe "ErrorView.render HTML escaping" do
   end
 end
 
+-- ── Security review regressions (2026-06-11, findings 8/9/11/13) ──
+
+describe "Request param URL decoding" do
+  test "query param decodes %XX sequences" do
+    let conn = make_get_qs("/", "q=a%26b%3Dc")
+    assert (opt_eq(get_query_param(conn, "q"), "a&b=c"))
+  end
+  test "query param decodes + as space" do
+    let conn = make_get_qs("/", "q=hello+world")
+    assert (opt_eq(get_query_param(conn, "q"), "hello world"))
+  end
+  test "query keys are decoded" do
+    let conn = make_get_qs("/", "a%5Bb%5D=1")
+    assert (opt_eq(get_query_param(conn, "a[b]"), "1"))
+  end
+  test "undecoded params are unchanged" do
+    let conn = make_get_qs("/", "q=hello")
+    assert (opt_eq(get_query_param(conn, "q"), "hello"))
+  end
+  test "body params are decoded" do
+    let ps = body_params(make_post_form("/", "title=Hello%20World"))
+    let ok = match ps do
+      Cons((k, v), Nil) -> k == "title" && v == "Hello World"
+      _                 -> false
+      end
+    assert (ok)
+  end
+end
+
+describe "CSRF.validate URL decoding" do
+  test "accepts a token the client percent-encoded" do
+    let conn  = make_post_form("/", "_csrf_token=tok%31%32%33")
+    let conn2 = HttpServer.assign(conn, "_csrf_token", "tok123")
+    assert (CSRF.validate(conn2))
+  end
+  test "decodes + as space in the submitted token" do
+    let conn  = make_post_form("/", "_csrf_token=a+b")
+    let conn2 = HttpServer.assign(conn, "_csrf_token", "a b")
+    assert (CSRF.validate(conn2))
+  end
+  test "still rejects a wrong token" do
+    let conn  = make_post_form("/", "_csrf_token=nope")
+    let conn2 = HttpServer.assign(conn, "_csrf_token", "tok123")
+    assert (!(CSRF.validate(conn2)))
+  end
+end
+
+describe "Cors.allow origin format validation" do
+  test "reflects a well-formed allowlisted origin" do
+    let cfg  = Cors.config_credentialed(["https://app.example.com"])
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("origin", "https://app.example.com"), Nil), "")
+    let hdrs = HttpServer.resp_headers(Cors.allow(conn, cfg))
+    let ok   = List.any(hdrs, fn h ->
+      match h do
+      Header(n, v) ->
+        String.to_lowercase(n) == "access-control-allow-origin" && v == "https://app.example.com"
+      end)
+    assert (ok)
+  end
+  test "does not reflect an origin containing a path" do
+    let cfg  = Cors.config_credentialed(["*"])
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("origin", "https://evil.example.com/path"), Nil), "")
+    let hdrs = HttpServer.resp_headers(Cors.allow(conn, cfg))
+    let has  = List.any(hdrs, fn h ->
+      match h do
+      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
+      end)
+    assert (!(has))
+  end
+  test "does not reflect a non-http scheme origin" do
+    let cfg  = Cors.config_credentialed(["*"])
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("origin", "javascript://evil.example.com"), Nil), "")
+    let hdrs = HttpServer.resp_headers(Cors.allow(conn, cfg))
+    let has  = List.any(hdrs, fn h ->
+      match h do
+      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
+      end)
+    assert (!(has))
+  end
+  test "does not reflect an origin with embedded whitespace" do
+    let cfg  = Cors.config_credentialed(["*"])
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("origin", "https://a.example.com evil"), Nil), "")
+    let hdrs = HttpServer.resp_headers(Cors.allow(conn, cfg))
+    let has  = List.any(hdrs, fn h ->
+      match h do
+      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
+      end)
+    assert (!(has))
+  end
+end
+
+describe "Session signed-cookie validation" do
+  test "cookie without dot separator yields empty session" do
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("cookie", "_session=garbage"), Nil), "")
+    let out  = Session.load(conn, "test_secret_key_base")
+    assert (opt_none(Session.get(out, "user_id")))
+  end
+  test "cookie with short MAC yields empty session" do
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("cookie", "_session=abc123.cGF5bG9hZA=="), Nil), "")
+    let out  = Session.load(conn, "test_secret_key_base")
+    assert (opt_none(Session.get(out, "user_id")))
+  end
+  test "cookie with non-hex MAC yields empty session" do
+    let mac  = String.repeat("z", 64)
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("cookie", "_session=" ++ mac ++ ".cGF5bG9hZA=="), Nil), "")
+    let out  = Session.load(conn, "test_secret_key_base")
+    assert (opt_none(Session.get(out, "user_id")))
+  end
+  test "oversized cookie yields empty session" do
+    let big  = String.repeat("a", 9000)
+    let conn = make_conn(:get, "/", "",
+      Cons(Header("cookie", "_session=" ++ big), Nil), "")
+    let out  = Session.load(conn, "test_secret_key_base")
+    assert (opt_none(Session.get(out, "user_id")))
+  end
+  test "valid signed cookie still roundtrips" do
+    let secret = "test_secret_key_base"
+    let conn   = Session.load(make_get("/"), secret)
+    let conn2  = Session.put(conn, "user_id", "42")
+    let conn3  = Session.commit(conn2, secret)
+    let hdrs   = HttpServer.resp_headers(conn3)
+    let cookie = List.fold_left(hdrs, "", fn (acc, h) ->
+      match h do
+      Header(n, v) ->
+        if String.to_lowercase(n) == "set-cookie" do
+          match String.split_first(v, ";") do
+          Some((c, _)) -> c
+          None         -> v
+          end
+        else acc end
+      end)
+    let conn4 = make_conn(:get, "/", "", Cons(Header("cookie", cookie), Nil), "")
+    let out   = Session.load(conn4, secret)
+    assert (opt_eq(Session.get(out, "user_id"), "42"))
+  end
+end
+
   -- ── Runner ────────────────────────────────────────────────────────
 
   fn run_all() : Unit do

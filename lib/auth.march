@@ -80,7 +80,16 @@ mod Auth do
       None     -> ""
       Some(id_str) ->
         match string_to_int(id_str) do
-        None    -> ""   -- malformed session value
+        None    ->
+          -- Malformed session value: the session is HMAC-signed, so a
+          -- non-integer user ID means an application bug or a signing-key
+          -- mix-up — surface it instead of silently treating the request
+          -- as anonymous.
+          let _ = Logger.log_with(Logger.Warn,
+            "Auth.load_current_user: session " ++ user_id_session_key ++
+            " is not an integer; treating request as unauthenticated",
+            [("value", id_str)])
+          ""
         Some(id) ->
           match loader(conn, id) do
           Ok(u)    -> u
