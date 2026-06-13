@@ -104,4 +104,4 @@ doc     = "Start an interactive console with app context"
 ".march.html" = "bastion lower"
 
 [deps]
-depot = { path = "/Users/80197052/code/depot" }
+depot = { git = "https://github.com/march-language/depot.git", branch = "main" }
