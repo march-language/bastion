@@ -87,7 +87,7 @@ content inside.  Use this in page templates.
 """
 fn ssr(state : State) : String do
   let state_json = encode_state(state)
-  let ssr_html   = render(state)
+  let ssr_html   = CounterIsland.render(state)
   Islands.wrap("CounterIsland", Islands.eager(), state_json, ssr_html)
 end
 
