@@ -272,7 +272,9 @@ pfn extract_name_chars(s : String, idx : Int) : String do
   if idx >= String.byte_size(s) do String.slice_bytes(s, 0, idx)
   else
     let ch = String.slice_bytes(s, idx, 1)
-    let is_delim = ch == " " || ch == ">" || ch == "/"
+    -- '=' terminates an attribute name (e.g. `label="x"`); tag names never
+    -- contain '=', so this is safe for tag-name extraction too.
+    let is_delim = ch == " " || ch == ">" || ch == "/" || ch == "="
     if is_delim do String.slice_bytes(s, 0, idx)
     else extract_name_chars(s, idx + 1) end
   end
