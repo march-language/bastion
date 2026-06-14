@@ -101,14 +101,11 @@ mod Bastion.Metrics do
     end
     -- Accumulate total milliseconds for average calculation
     let _ = Vault.incr(table, total_ms_key, entry.duration)
-    -- Ring buffer of recent requests
-    let recent = Vault.get_or(table, recent_key, [])
-    let trimmed = if List.length(recent) >= max_recent do
-      List.drop(recent, 1)
-    else
-      recent
-    end
-    Vault.set(table, recent_key, List.append(trimmed, [entry]))
+    -- Ring buffer of recent requests. Vault.push_capped appends and trims under
+    -- one shard lock, so concurrent requests can't clobber the buffer the way a
+    -- get + List.append + set would.
+    let _ = Vault.push_capped(table, recent_key, entry, max_recent)
+    ()
   end
 
   -- ── Queries ───────────────────────────────────────────────────────────────

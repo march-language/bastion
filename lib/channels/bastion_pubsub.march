@@ -52,11 +52,6 @@ pfn list_remove_first_loop(lst, elem, acc) do
   end
 end
 
--- Append elem to end of list (used for ordered inbox delivery).
-pfn list_append_one(lst, elem) do
-  List.reverse(Cons(elem, List.reverse(lst)))
-end
-
 -- ── Topic matching ──────────────────────────────────────────────────────────
 
 doc """
@@ -152,8 +147,10 @@ pfn deliver_to_subs(t, sub_ids, message, excluded_id) do
     let _ = if should_skip do ()
     else
       let ik = inbox_key(sid)
-      let inbox = Vault.get_or(t, ik, Nil)
-      Vault.set(t, ik, list_append_one(inbox, message))
+      -- Atomic append (max 0 = unbounded inbox): avoids the get -> append -> set
+      -- race that drops concurrent broadcasts to the same subscriber.
+      let _ = Vault.push_capped(t, ik, message, 0)
+      ()
     end
     deliver_to_subs(t, rest, message, excluded_id)
   end

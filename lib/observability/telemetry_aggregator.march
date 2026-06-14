@@ -174,9 +174,12 @@ mod Bastion.Telemetry.Aggregator do
 
   -- Append one EventEntry to the per-request list in the events table.
   pfn append_event(request_id : String, entry : EventEntry) do
-    let table    = Vault.new(events_table)
-    let existing = Vault.get_or(table, request_id, [])
-    Vault.set(table, request_id, List.append(existing, [entry]))
+    let table = Vault.new(events_table)
+    -- Atomic append (max 0 = keep all the request's events): avoids the
+    -- get -> List.append -> set race that drops concurrent events from a
+    -- request's waterfall.
+    let _ = Vault.push_capped(table, request_id, entry, 0)
+    ()
   end
 
   -- Insert or update the RequestSummary for this request_id in the ring buffer.
