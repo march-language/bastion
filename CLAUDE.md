@@ -64,26 +64,25 @@ bastion/
 ├── CLAUDE.md                  # this file
 ├── forge.toml                 # build config (deps, targets)
 ├── syntax_reference.md        # March language quick reference
-├── lib/                       # framework source (March)
-│   ├── bastion.march          # framework entry point
-│   ├── bastion_server.march   # HTTP server + supervisor
-│   ├── conn.march             # HTTP conn abstraction
-│   ├── conn_states.march      # typed conn state machine
-│   ├── router.march           # pattern-matched routing
-│   ├── middleware.march       # middleware pipeline
-│   ├── typed_middleware.march # type-tracked middleware
-│   ├── controller.march       # render/redirect helpers
-│   ├── islands.march          # island SSR + hydration
-│   ├── island_view.march      # island template helpers
-│   ├── island_assets.march    # WASM + CSS asset serving
-│   ├── island_css.march       # scoped CSS extraction
-│   ├── island_socket.march    # island↔server WebSocket glue
-│   ├── static.march           # static file serving
-│   ├── request.march          # HTTP request parsing
-│   ├── response.march         # HTTP response building
-│   ├── error_view.march       # default error pages
-│   ├── fallback_controller.march
-│   └── test.march             # testing helpers (conn builder)
+├── lib/                       # framework source (March), grouped by domain
+│   ├── bastion.march          # framework entry point (stays at lib/ root)
+│   ├── http/                  # request/response pipeline, routing, controllers
+│   │   ├── conn.march · conn_states.march · request.march · response.march
+│   │   ├── router.march · bastion_routes.march · bastion_server.march
+│   │   └── controller.march · fallback_controller.march
+│   ├── middleware/            # middleware.march, typed_middleware.march, depot_middleware.march
+│   ├── security/             # auth, gate, session, csrf, cors, crypto, hkdf,
+│   │                          #   security_headers, bastion_csp, rate_limit
+│   ├── islands/              # islands, island_view/_assets/_css/_server/_socket
+│   ├── channels/             # channel, channel_server, pubsub, bastion_pubsub
+│   ├── view/                 # html, css, js, form, flash, error_view, error_overlay
+│   ├── assets/               # static.march, upload.march
+│   ├── cache/                # cache, bastion_cache, idempotency, bastion_idempotency
+│   ├── observability/        # logger, metrics, otel, telemetry(+_aggregator), health
+│   ├── runtime/              # registry, pool, cmd(+_depot), bastion_depot,
+│   │                          #   bastion_hot_deploy, dev
+│   ├── testing/              # test, test_conn/_auth/_channel/_depot/_island
+│   └── forge/                # forge CLI tasks (gen.*, build.islands, depot.*, …)
 ├── priv/
 │   └── static/                # static assets (JS runtime, WASM bundles)
 ├── specs/                     # design specs (source of truth for unimplemented features)
@@ -116,6 +115,15 @@ bastion/
 ├── test/                      # framework tests
 └── examples/                  # example Bastion applications
 ```
+
+> **Module resolution & lib/ subfolders.** Modules are imported by name
+> (`import Conn`), and the compiler resolves `import X` to `x.march` by
+> filename. `forge` puts `lib/` **and all of its subdirectories** on the
+> module search path (`MARCH_LIB_PATH`), so modules can live in any subfolder
+> without changing a single `import`. Keep module filenames unique across the
+> whole `lib/` tree — two files with the same basename in different folders
+> would collide. (This subfolder support comes from a forge patch in the
+> March toolchain — see `specs/lib-reorganization.md`.)
 
 ---
 
