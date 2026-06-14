@@ -90,27 +90,17 @@ mod Bastion.Metrics do
 
   pfn do_record(entry : RequestEntry, status : Int) do
     let table = Vault.new(table_name)
-    -- Increment counters
-    let _ = Vault.update(table, total_key, fn n -> n + 1)
-    let _ = match Vault.get(table, total_key) do
-      None -> Vault.set(table, total_key, 1)
-      _    -> ()
-    end
+    -- Increment counters atomically. Vault.incr holds the shard lock across the
+    -- whole read-add-write, so concurrent requests cannot lose updates (a plain
+    -- get + set, or the non-atomic Vault.update, undercounts under load).
+    let _ = Vault.incr(table, total_key, 1)
     if status >= 500 do
-      let _ = Vault.update(table, error_key, fn n -> n + 1)
-      let _ = match Vault.get(table, error_key) do
-        None -> Vault.set(table, error_key, 1)
-        _    -> ()
-      end
+      let _ = Vault.incr(table, error_key, 1)
       ()
     else ()
     end
     -- Accumulate total milliseconds for average calculation
-    let _ = Vault.update(table, total_ms_key, fn ms -> ms + entry.duration)
-    let _ = match Vault.get(table, total_ms_key) do
-      None -> Vault.set(table, total_ms_key, entry.duration)
-      _    -> ()
-    end
+    let _ = Vault.incr(table, total_ms_key, entry.duration)
     -- Ring buffer of recent requests
     let recent = Vault.get_or(table, recent_key, [])
     let trimmed = if List.length(recent) >= max_recent do

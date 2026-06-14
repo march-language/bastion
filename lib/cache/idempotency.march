@@ -85,20 +85,30 @@ mod Bastion.Idempotency do
         let table = Vault.new(table_name)
         match Vault.get(table, key) do
         Some(cached) ->
-          -- Cache hit: replay the stored response
-          replay_cached(conn, cached)
-        None ->
-          -- Cache miss: execute and cache if successful
-          let result  = handler_fn(())
-          let status  = HttpServer.status(result)
-          if status >= 200 && status < 300 do
-            let body    = HttpServer.resp_body(result)
-            let headers = HttpServer.resp_headers(result)
-            let entry   = (status, headers, body)
-            let _       = Vault.set_ttl(table, key, entry, opts.ttl_secs)
-            result
+          -- Cache hit: replay the stored response, or 409 if it is still the
+          -- in-progress sentinel (a concurrent request is running the handler).
+          if is_in_progress(cached) do
+            in_progress_response(conn)
           else
-            result
+            replay_cached(conn, cached)
+          end
+        None ->
+          -- Cache miss: atomically claim the key with an in-progress sentinel.
+          -- Only the caller that wins the claim runs the handler, so concurrent
+          -- requests with the same key cannot double-execute it.
+          if Vault.put_new_ttl(table, key, in_progress_entry(), opts.ttl_secs) do
+            run_and_cache(handler_fn, table, key, opts)
+          else
+            -- Another request claimed the key between our get and put_new.
+            match Vault.get(table, key) do
+            Some(cached) ->
+              if is_in_progress(cached) do
+                in_progress_response(conn)
+              else
+                replay_cached(conn, cached)
+              end
+            None -> in_progress_response(conn)
+            end
           end
         end
       end
@@ -115,6 +125,43 @@ mod Bastion.Idempotency do
     )
     HttpServer.put_resp_header(with_headers, "x-idempotent-replayed", "true")
     |> HttpServer.send_resp(cached_status, cached_body)
+  end
+
+  -- ── In-progress claim ─────────────────────────────────────────────────────
+
+  -- A placeholder entry stored (atomically, via Vault.put_new_ttl) while the
+  -- handler runs, so a concurrent request with the same key is rejected with
+  -- 409 instead of double-executing. Distinguished from a real cached response
+  -- by a status of 0 (which a real handler never returns).
+  pfn in_progress_entry() do
+    (0, [], "")
+  end
+
+  pfn is_in_progress(entry) : Bool do
+    let (status, _, _) = entry
+    status == 0
+  end
+
+  pfn in_progress_response(conn) do
+    conn
+    |> HttpServer.send_resp(409,
+         "A request with this Idempotency-Key is already being processed.")
+  end
+
+  -- Run the handler exactly once (the caller holds the claim), then overwrite
+  -- the sentinel with the real response on success, or release the claim on
+  -- failure so the client can retry.
+  pfn run_and_cache(handler_fn : () -> Conn, table, key : String, opts : IdempotencyOpts) do
+    let result = handler_fn(())
+    let status = HttpServer.status(result)
+    if status >= 200 && status < 300 do
+      let entry = (status, HttpServer.resp_headers(result), HttpServer.resp_body(result))
+      let _ = Vault.set_ttl(table, key, entry, opts.ttl_secs)
+      result
+    else
+      let _ = Vault.drop(table, key)
+      result
+    end
   end
 
   -- ── Key construction ──────────────────────────────────────────────────────

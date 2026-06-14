@@ -193,23 +193,33 @@ pfn protect_with_key(conn, handler, vault_table, scope, ikey) do
     HttpServer.send_resp(c3, status, body)
   end
   None -> do
-    -- First request: mark in-progress, run handler, persist result.
-    Vault.set(tbl, cache_key, InProgress(0))
-    let result = handler(conn)
-    let result_status = HttpServer.status(result)
-    if result_status >= 500 do
-      -- Do not cache server errors; drop the InProgress sentinel.
-      Vault.drop(tbl, cache_key)
-      HttpServer.put_resp_header(result, "idempotency-key", ikey)
+    -- First request: atomically claim the key with an InProgress sentinel.
+    -- Vault.put_new is a single atomic test-and-set under the shard lock, so two
+    -- concurrent requests with the same key cannot both win the claim and run
+    -- the handler (a plain get + set leaves a TOCTOU gap between them).
+    if Vault.put_new(tbl, cache_key, InProgress(0)) do
+      let result = handler(conn)
+      let result_status = HttpServer.status(result)
+      if result_status >= 500 do
+        -- Do not cache server errors; drop the InProgress sentinel.
+        Vault.drop(tbl, cache_key)
+        HttpServer.put_resp_header(result, "idempotency-key", ikey)
+      else
+        -- Capture response headers so the next replay reproduces the original
+        -- Content-Type, Set-Cookie, Location, etc.  Previously this stored Nil
+        -- and every cached replay dropped every header the handler set.
+        let captured  = capture_headers(result)
+        let completed = Completed(result_status, captured, HttpServer.resp_body(result), 0)
+        Vault.set(tbl, cache_key, completed)
+        let r1 = HttpServer.put_resp_header(result, "idempotency-key", ikey)
+        HttpServer.put_resp_header(r1, "x-idempotent-replayed", "false")
+      end
     else
-      -- Capture response headers so the next replay reproduces the original
-      -- Content-Type, Set-Cookie, Location, etc.  Previously this stored Nil
-      -- and every cached replay dropped every header the handler set.
-      let captured  = capture_headers(result)
-      let completed = Completed(result_status, captured, HttpServer.resp_body(result), 0)
-      Vault.set(tbl, cache_key, completed)
-      let r1 = HttpServer.put_resp_header(result, "idempotency-key", ikey)
-      HttpServer.put_resp_header(r1, "x-idempotent-replayed", "false")
+      -- Lost the claim race: another request claimed the key between our read
+      -- and our write. Treat exactly like the InProgress case.
+      let c1 = HttpServer.put_resp_header(conn, "retry-after", "5")
+      let c2 = HttpServer.put_resp_header(c1, "idempotency-key", ikey)
+      HttpServer.send_resp(c2, 409, "{\"error\":\"request_in_progress\"}")
     end
   end
   end
