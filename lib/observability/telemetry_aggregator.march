@@ -228,6 +228,12 @@ mod Bastion.Telemetry.Aggregator do
       -- Prepend and trim to max
       let max     = get_max()
       let trimmed = List.take(ring, max - 1)
+      -- Evict the per-request event lists for the summaries that fall out of
+      -- the ring, so the events table doesn't grow without bound as the process
+      -- handles more and more distinct requests.
+      let evicted  = List.drop(ring, max - 1)
+      let ev_table = Vault.new(events_table)
+      let _ = List.map(evicted, fn s -> Vault.drop(ev_table, s.request_id))
       Vault.set(req_table, "ring", Cons(summary, trimmed))
     end
   end
