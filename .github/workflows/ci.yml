@@ -22,6 +22,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install blake3 (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libblake3-dev
+
+      - name: Install blake3 (macOS)
+        if: runner.os == 'macOS'
+        run: brew install blake3
+
       - name: Set up March
         uses: march-language/setup-march@main
 
