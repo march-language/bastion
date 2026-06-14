@@ -139,7 +139,14 @@ mod RateLimit do
     let window_ms  = window_secs * 1000
     let cutoff     = now_ms - window_ms
 
-    -- Read existing timestamps; prune expired ones; add current.
+    -- KNOWN RACE: this is a get → filter → append → set sequence across three
+    -- separate Vault operations and is not atomic.  Concurrent requests for the
+    -- same key can each read the pre-write list, both pass the limit check, and
+    -- both store a winning value — under high concurrency, up to N concurrent
+    -- requests can each count at most the requests the others haven't written yet.
+    -- The practical impact is slightly lenient limiting under burst load, not a
+    -- security hole.  A true fix needs either an atomic Vault closure primitive
+    -- (Vault.update_or_insert) or a per-bucket counter-based approach.
     let existing   = match Vault.get(table, k) do
       Some(ts) -> ts
       None     -> []

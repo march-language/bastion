@@ -129,14 +129,14 @@ mod IslandView do
     state_json — initial state JSON (derived from parent state)
   """
   fn island_child(name : String, parent_id : String, on_event : String, state_json : String) : String do
-    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"client\" data-march-hydrate=\"eager\" data-march-state='" ++ escape_attr(state_json) ++ "' data-march-parent=\"" ++ escape_attr(parent_id) ++ "\" data-march-on-event=\"" ++ escape_attr(on_event) ++ "\"></div>"
+    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"server\" data-march-hydrate=\"eager\" data-march-state='" ++ escape_attr(state_json) ++ "' data-march-parent=\"" ++ escape_attr(parent_id) ++ "\" data-march-on-event=\"" ++ escape_attr(on_event) ++ "\"></div>"
   end
 
   doc """
   Render a child island with server-rendered initial HTML.
   """
   fn island_child_ssr(name : String, parent_id : String, on_event : String, state_json : String, inner_html : String) : String do
-    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"client\" data-march-hydrate=\"eager\" data-march-state='" ++ escape_attr(state_json) ++ "' data-march-parent=\"" ++ escape_attr(parent_id) ++ "\" data-march-on-event=\"" ++ escape_attr(on_event) ++ "\">" ++ inner_html ++ "</div>"
+    "<div data-march-island=\"" ++ name ++ "\" data-march-dataflow=\"server\" data-march-hydrate=\"eager\" data-march-state='" ++ escape_attr(state_json) ++ "' data-march-parent=\"" ++ escape_attr(parent_id) ++ "\" data-march-on-event=\"" ++ escape_attr(on_event) ++ "\">" ++ inner_html ++ "</div>"
   end
 
   -- ── Dataflow helpers ──────────────────────────────────────────────────────

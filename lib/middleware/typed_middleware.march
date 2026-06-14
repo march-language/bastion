@@ -168,7 +168,7 @@ mod TypedMiddleware do
     let conn2 = match HttpServer.get_assign(conn, "current_user_id") do
       None     -> conn
       Some(id) -> match loader(conn, id) do
-        Ok(_)  -> HttpServer.assign(conn, "current_user", "loaded")
+        Ok(u)  -> HttpServer.assign(conn, "current_user", u)
         Err(_) -> conn
         end
     end
@@ -195,13 +195,12 @@ mod TypedMiddleware do
   """
   fn require_auth(tc : TypedConn(WithSession)) : Result(TypedConn(Authenticated), Conn) do
     let raw = unwrap(tc)
-    match HttpServer.get_assign(raw, "current_user_id") do
+    -- Only grant access when load_current_user successfully loaded a user.
+    -- Checking "current_user_id" alone would grant access even if the loader
+    -- returned Err (deleted user, DB error, etc.).
+    match HttpServer.get_assign(raw, "current_user") do
     Some(_) -> Ok(TypedConn(raw))
-    None    ->
-      match HttpServer.get_assign(raw, "current_user") do
-      Some(_) -> Ok(TypedConn(raw))
-      None    -> Err(raw |> HttpServer.send_resp(401, "Unauthorized") |> HttpServer.halt())
-      end
+    None    -> Err(raw |> HttpServer.send_resp(401, "Unauthorized") |> HttpServer.halt())
     end
   end
 

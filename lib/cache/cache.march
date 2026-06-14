@@ -149,7 +149,11 @@ mod Cache do
       )
       |> HttpServer.send_resp(cached_status, cached_body)
     None ->
-      -- Cache miss: run the generator
+      -- KNOWN RACE (thundering herd): multiple concurrent requests that all miss
+      -- the cache will each call generator(conn) independently.  The last write
+      -- wins and sets the same value, so correctness is preserved, but the
+      -- generator runs N times instead of once.  A true fix needs an InProgress
+      -- sentinel (like BastionIdempotency) or an atomic Vault.get_or_init.
       let result = generator(conn)
       let status = HttpServer.status(result)
       -- Only cache successful responses

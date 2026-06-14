@@ -86,6 +86,10 @@ If the subscriber is already registered for this topic, this is a no-op.
 fn subscribe(pubsub_name, topic, subscriber_id) do
   let t   = get_or_create_table(pubsub_name)
   let key = sub_key(topic)
+  -- KNOWN RACE: get → check → set is not atomic.  Two concurrent subscribes
+  -- for the same (topic, subscriber_id) can both read the same list, both miss
+  -- the duplicate check, and both prepend the ID — leading to a double entry.
+  -- Fix requires an atomic Vault closure primitive (Vault.update_or_insert).
   let current = Vault.get_or(t, key, Nil)
   if list_contains(current, subscriber_id) do ()
   else Vault.set(t, key, Cons(subscriber_id, current)) end
@@ -95,6 +99,9 @@ doc "Unsubscribe `subscriber_id` from `topic` in the named pubsub instance."
 fn unsubscribe(pubsub_name, topic, subscriber_id) do
   let t   = get_or_create_table(pubsub_name)
   let key = sub_key(topic)
+  -- KNOWN RACE: get → modify → set is not atomic.  A concurrent subscribe or
+  -- unsubscribe can interleave and cause the later writer to overwrite the
+  -- earlier change.  Fix requires an atomic Vault closure primitive.
   let current = Vault.get_or(t, key, Nil)
   let trimmed = list_remove_first(current, subscriber_id)
   match trimmed do

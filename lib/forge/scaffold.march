@@ -39,6 +39,7 @@ pfn main_source(pascal) do
   "mod " ++ pascal ++ " do\n\n" ++
   "  import HttpServer\n" ++
   "  import Router\n" ++
+  "  import Controller\n" ++
   "  import Middleware\n" ++
   "  import IslandSocket\n" ++
   "  import IslandAssets\n" ++
@@ -47,8 +48,8 @@ pfn main_source(pascal) do
   "  import Counter\n\n" ++
   "  pfn build_router() : Router do\n" ++
   "    Router.new()\n" ++
-  "    |> Router.action(Get, \"/\",      fn conn -> PageController.home(conn))\n" ++
-  "    |> Router.action(Get, \"/about\", fn conn -> PageController.about(conn))\n" ++
+  "    |> Router.action(:get, \"/\",      fn conn -> PageController.home(conn))\n" ++
+  "    |> Router.action(:get, \"/about\", fn conn -> PageController.about(conn))\n" ++
   "    |> Router.get(\"/health\", fn conn -> health(conn))\n" ++
   "  end\n\n" ++
   "  pfn health(conn : Conn) : Conn do\n" ++

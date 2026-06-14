@@ -22,13 +22,13 @@
 --     Router.new()
 --     |> Router.fallback(fn conn -> fn result ->
 --       match result do
---       Controller.Ok(c) -> c
---       Controller.Error(status, msg) ->
+--       ActionOk(c) -> c
+--       ActionError(status, msg) ->
 --         HttpServer.json(conn, status, "{\"error\":\"" ++ msg ++ "\"}")
 --       end
 --     )
---     |> Router.action(Get, "/",          fn conn -> PageController.home(conn))
---     |> Router.action(Get, "/users/:id", fn conn -> UserController.show(conn))
+--     |> Router.action(:get, "/",          fn conn -> PageController.home(conn))
+--     |> Router.action(:get, "/users/:id", fn conn -> UserController.show(conn))
 --     |> Router.get("/health",            fn conn -> health_check(conn))
 --
 -- Inside show, retrieve :id with HttpServer.get_assign(conn, "id").
