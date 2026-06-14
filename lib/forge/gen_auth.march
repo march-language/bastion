@@ -452,31 +452,32 @@ mod """ ++ pascal ++ """.Auth do
 alias """ ++ pascal ++ """.Accounts as Accounts
 alias HttpServer as H
 
-fn load_current_user(conn) do
-  match H.get_session(conn, "user_token") do
-  None ->
-    H.assign(conn, "current_user", None)
-  Some(token) ->
-    let user_opt = Accounts.get_user_by_session_token(token)
-    H.assign(conn, "current_user", user_opt)
+-- Resolve the current user from the session token. Returns Some(user) when
+-- logged in, None otherwise. Read the user this way from controllers
+-- (Auth.current_user(conn)) rather than from a conn assign — conn assigns
+-- store String values only, so a user record cannot live there.
+fn current_user(conn) do
+  match Session.get(conn, "user_token") do
+  None        -> None
+  Some(token) -> Accounts.get_user_by_session_token(token)
   end
 end
 
 fn require_authenticated_user(conn) do
-  match H.get_assign(conn, "current_user") do
-  Some(_) -> conn
+  match current_user(conn) do
+  Some(_user) -> conn
   None ->
     conn
-      |> H.put_flash("error", "You must log in to access this page.")
+      |> Flash.put("error", "You must log in to access this page.")
       |> H.redirect("/users/log_in")
       |> H.halt()
   end
 end
 
 fn redirect_if_authenticated(conn) do
-  match H.get_assign(conn, "current_user") do
+  match current_user(conn) do
   None -> conn
-  Some(_) ->
+  Some(_user) ->
     conn
       |> H.redirect("/")
       |> H.halt()
@@ -507,13 +508,13 @@ end
 
 fn create(conn) do
   match RateLimit.check(conn, rate_table, RateLimit.ip_key, 5, 600) do
-  Error(conn2) -> conn2
+  Err(conn2) -> conn2
   Ok(conn2) -> do
-    let params = H.body_params(conn2)
+    let params = Request.body_params(conn2)
     match Accounts.register_user(params) do
     Ok(_user) ->
       conn2
-        |> H.put_flash("info", "Account created! Please check your email to confirm your account.")
+        |> Flash.put("info", "Account created! Please check your email to confirm your account.")
         |> H.redirect("/users/log_in")
     Err(gate) ->
       H.html(conn2, 422, render_form(gate, ""))
@@ -559,9 +560,9 @@ end
 
 fn create(conn) do
   match RateLimit.check(conn, rate_table, RateLimit.ip_key, 10, 60) do
-  Error(conn2) -> conn2
+  Err(conn2) -> conn2
   Ok(conn2) -> do
-    let params = H.body_params(conn2)
+    let params = Request.body_params(conn2)
     let email_str = match List.filter_map(params, fn pair -> do
         let (k, v) = pair
         if k == "email" do Some(v) else None end
@@ -579,14 +580,14 @@ fn create(conn) do
     match Accounts.get_user_by_email_and_password(email_str, password_str) do
     None ->
       conn2
-        |> H.put_flash("error", "Invalid email or password.")
+        |> Flash.put("error", "Invalid email or password.")
         |> H.html(200, render_form("Invalid email or password."))
     Some(user) ->
       match Accounts.create_session_token(user) do
       Ok(token) ->
         conn2
-          |> H.put_session("user_token", token)
-          |> H.put_flash("info", "Welcome back!")
+          |> Session.put("user_token", token)
+          |> Flash.put("info", "Welcome back!")
           |> H.redirect("/")
       Err(_) ->
         H.html(conn2, 500, "Internal error")
@@ -597,13 +598,13 @@ fn create(conn) do
 end
 
 fn delete(conn) do
-  match H.get_session(conn, "user_token") do
+  match Session.get(conn, "user_token") do
   Some(token) -> Accounts.delete_session_token(token)
   None -> :ok
   end
   conn
-    |> H.clear_session()
-    |> H.put_flash("info", "Logged out successfully.")
+    |> Session.clear()
+    |> Flash.put("info", "Logged out successfully.")
     |> H.redirect("/")
 end
 
@@ -636,10 +637,11 @@ pfn user_settings_controller_source(pascal) do
 mod """ ++ pascal ++ """.Controllers.Auth.UserSettingsController do
 
 alias """ ++ pascal ++ """.Accounts as Accounts
+alias """ ++ pascal ++ """.Auth as Auth
 alias HttpServer as H
 
 fn edit(conn) do
-  match H.get_assign(conn, "current_user") do
+  match Auth.current_user(conn) do
   None ->
     conn |> H.redirect("/users/log_in") |> H.halt()
   Some(user) ->
@@ -650,15 +652,15 @@ fn edit(conn) do
 end
 
 fn update_email(conn) do
-  match H.get_assign(conn, "current_user") do
+  match Auth.current_user(conn) do
   None ->
     conn |> H.redirect("/users/log_in") |> H.halt()
   Some(user) ->
-    let params = H.body_params(conn)
+    let params = Request.body_params(conn)
     match Accounts.update_user_email(user, params) do
     Ok(_) ->
       conn
-        |> H.put_flash("info", "Email updated successfully.")
+        |> Flash.put("info", "Email updated successfully.")
         |> H.redirect("/users/settings")
     Err(gate) ->
       let pw_gate = Accounts.change_user_password(user)
@@ -668,15 +670,15 @@ fn update_email(conn) do
 end
 
 fn update_password(conn) do
-  match H.get_assign(conn, "current_user") do
+  match Auth.current_user(conn) do
   None ->
     conn |> H.redirect("/users/log_in") |> H.halt()
   Some(user) ->
-    let params = H.body_params(conn)
+    let params = Request.body_params(conn)
     match Accounts.update_user_password(user, params) do
     Ok(_) ->
       conn
-        |> H.put_flash("info", "Password updated. Please log in again.")
+        |> Flash.put("info", "Password updated. Please log in again.")
         |> H.redirect("/users/log_in")
     Err(gate) ->
       let email_gate = Accounts.User.update_email_gate(user, [])
@@ -719,6 +721,7 @@ pfn confirmation_controller_source(pascal) do
 mod """ ++ pascal ++ """.Controllers.Auth.ConfirmationController do
 
 alias """ ++ pascal ++ """.Accounts as Accounts
+alias """ ++ pascal ++ """.Auth as Auth
 alias HttpServer as H
 
 -- GET /users/confirm/:token — confirm the user's email address
@@ -730,18 +733,18 @@ fn confirm(conn) do
   end
   if token == "" do
     conn
-      |> H.put_flash("error", "Confirmation link is invalid or has expired.")
+      |> Flash.put("error", "Confirmation link is invalid or has expired.")
       |> H.redirect("/")
       |> H.halt()
   else
     match Accounts.confirm_user(token) do
     Ok(_) ->
       conn
-        |> H.put_flash("info", "Email confirmed successfully! You can now log in.")
+        |> Flash.put("info", "Email confirmed successfully! You can now log in.")
         |> H.redirect("/users/log_in")
     Err(_) ->
       conn
-        |> H.put_flash("error", "Confirmation link is invalid or has expired.")
+        |> Flash.put("error", "Confirmation link is invalid or has expired.")
         |> H.redirect("/")
     end
   end
@@ -749,10 +752,10 @@ end
 
 -- POST /users/confirm — resend the confirmation email
 fn resend(conn) do
-  match H.get_assign(conn, "current_user") do
+  match Auth.current_user(conn) do
   None ->
     conn
-      |> H.put_flash("error", "You must be logged in to resend confirmation.")
+      |> Flash.put("error", "You must be logged in to resend confirmation.")
       |> H.redirect("/users/log_in")
   Some(user) ->
     Accounts.deliver_user_confirmation_instructions(
@@ -760,7 +763,7 @@ fn resend(conn) do
       fn token -> "/users/confirm/" ++ token
     )
     conn
-      |> H.put_flash("info", "Confirmation email sent. Please check your inbox.")
+      |> Flash.put("info", "Confirmation email sent. Please check your inbox.")
       |> H.redirect("/")
   end
 end
@@ -790,9 +793,9 @@ end
 -- POST /users/reset_password — send the reset email (rate limited)
 fn create(conn) do
   match RateLimit.check(conn, rate_table, RateLimit.ip_key, 5, 60) do
-  Error(conn2) -> conn2
+  Err(conn2) -> conn2
   Ok(conn2) -> do
-    let params = H.body_params(conn2)
+    let params = Request.body_params(conn2)
     let email_str = match List.filter_map(params, fn pair -> do
         let (k, v) = pair
         if k == "email" do Some(v) else None end
@@ -810,7 +813,7 @@ fn create(conn) do
     None -> :ok
     end
     conn2
-      |> H.put_flash("info", "If your email is registered, you will receive reset instructions shortly.")
+      |> Flash.put("info", "If your email is registered, you will receive reset instructions shortly.")
       |> H.redirect("/users/log_in")
   end
   end
@@ -821,14 +824,14 @@ fn edit(conn) do
   let token = extract_token(H.path_info(conn))
   if token == "" do
     conn
-      |> H.put_flash("error", "Reset link is invalid or has expired.")
+      |> Flash.put("error", "Reset link is invalid or has expired.")
       |> H.redirect("/users/log_in")
       |> H.halt()
   else
     match Accounts.get_user_by_reset_password_token(token) do
     None ->
       conn
-        |> H.put_flash("error", "Reset link is invalid or has expired.")
+        |> Flash.put("error", "Reset link is invalid or has expired.")
         |> H.redirect("/users/log_in")
         |> H.halt()
     Some(_user) ->
@@ -843,15 +846,15 @@ fn update(conn) do
   match Accounts.get_user_by_reset_password_token(token) do
   None ->
     conn
-      |> H.put_flash("error", "Reset link is invalid or has expired.")
+      |> Flash.put("error", "Reset link is invalid or has expired.")
       |> H.redirect("/users/log_in")
       |> H.halt()
   Some(user) ->
-    let params = H.body_params(conn)
+    let params = Request.body_params(conn)
     match Accounts.reset_user_password(user, params) do
     Ok(_) ->
       conn
-        |> H.put_flash("info", "Password reset successfully. Please log in with your new password.")
+        |> Flash.put("info", "Password reset successfully. Please log in with your new password.")
         |> H.redirect("/users/log_in")
     Err(gate) ->
       H.html(conn, 422, render_reset_form(token, Depot.Gate.error_summary(gate)))
@@ -918,7 +921,7 @@ end
 
 fn user_fixture_attrs(overrides) do
   let defaults = [("email", unique_email()), ("password", "ValidPassword123!")]
-  List.fold_left(defaults, overrides, fn (acc, pair) -> do
+  List.fold_left(overrides, defaults, fn (acc, pair) -> do
     let (k, v) = pair
     List.filter(acc, fn entry -> do
       let (ek, _) = entry
@@ -1023,21 +1026,19 @@ fn run() do
   println("     (:get,  Cons(\"users\", Cons(\"reset_password\", Cons(_, Nil))))  -> " ++ pascal ++ ".Controllers.Auth.PasswordResetController.edit(conn)")
   println("     (:patch, Cons(\"users\", Cons(\"reset_password\", Cons(_, Nil)))) -> " ++ pascal ++ ".Controllers.Auth.PasswordResetController.update(conn)")
   println("")
-  println("2. Plug the auth middleware into your router pipeline:")
+  println("2. Protect routes that require a logged-in user (in your router pipeline):")
   println("")
   println("     alias " ++ pascal ++ ".Auth as Auth")
-  println("     let conn2 = Auth.load_current_user(conn)")
+  println("     let conn2 = Auth.require_authenticated_user(conn)")
+  println("")
+  println("   In controllers, read the current user with Auth.current_user(conn).")
   println("")
   println("3. Run the migrations:")
   println("")
   println("     forge depot migrate")
   println("")
-  println("4. (Optional) Protect routes that require authentication:")
-  println("")
-  println("     let conn3 = Auth.require_authenticated_user(conn2)")
-  println("")
-  println("5. Replace placeholder HTML in each controller with real ~H templates.")
-  println("6. Implement " ++ pascal ++ ".Accounts.UserNotifier to send real emails.")
+  println("4. Replace placeholder HTML in each controller with real ~H templates.")
+  println("5. Implement " ++ pascal ++ ".Accounts.UserNotifier to send real emails.")
 
   Ok(())
 end

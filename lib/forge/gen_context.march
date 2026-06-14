@@ -110,7 +110,7 @@ alias Depot.Gate as Gate
 alias Depot.Schema as Schema
 
 fn schema() do
-  Schema.define("users", {
+  Schema.define(""" ++ "\"" ++ table ++ "\"" ++ """, {
     fields = {
       id = ("UUID", { primary_key = true }),
 """ ++ field_lines ++ """      inserted_at = ("UtcDatetime", { null = false }),
@@ -223,7 +223,7 @@ pfn migration_source(table, fields, ts) do
 mod Migrations.Create""" ++ snake_to_pascal(table) ++ """ do
 
 fn up() do
-  Depot.Migration.create_table("users", {
+  Depot.Migration.create_table(""" ++ "\"" ++ table ++ "\"" ++ """, {
     id          = ("UUID",        { primary_key = true }),
 """ ++ field_lines ++ """    inserted_at = ("UtcDatetime", { null = false }),
     updated_at  = ("UtcDatetime", { null = false })
@@ -231,7 +231,7 @@ fn up() do
 end
 
 fn down() do
-  Depot.Migration.drop_table("users")
+  Depot.Migration.drop_table(""" ++ "\"" ++ table ++ "\"" ++ """)
 end
 
 fn version() do

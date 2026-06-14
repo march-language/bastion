@@ -46,12 +46,15 @@ forge check          # fast typecheck (use after every .march edit)
 forge build          # compile the project
 forge lint --strict  # run the linter
 forge test           # run all tests
-forge dev            # start dev server with live reload
-forge gen.handler    # generate a new handler
-forge gen.island     # generate a new WASM island
-forge gen.auth       # generate auth boilerplate
-forge gen.migration  # generate a Depot (Postgres) migration
+forge bastion.server        # start the dev server with live reload
+forge bastion.gen.handler   # generate a new request handler
+forge bastion.gen.island    # generate a new WASM island
+forge bastion.gen.auth      # generate auth boilerplate
+forge bastion.gen.migration # generate a Depot (Postgres) migration
 ```
+
+> The `bastion.*` tasks are the commands registered in `forge.toml` (see
+> `[archive.task.*]`). There is no bare `forge dev` / `forge gen.*`.
 
 **After editing any `.march` file, run `forge check` to typecheck the whole project quickly before proceeding.**
 
@@ -145,10 +148,19 @@ bastion/
 
 ## Current State
 
-The core request/response pipeline, routing, middleware, island SSR, and static file serving are implemented in `lib/`. Most other features (auth, channels, CSRF, Vault, `~H` templates, WASM compilation) are **specced in `specs/` but not yet implemented**.
+The core request/response pipeline, routing, middleware, island SSR, static file
+serving, **auth, sessions, CSRF, channels/PubSub, Vault, caching, security
+headers/CORS, observability, and the `forge bastion.*` generators** are
+implemented in `lib/`. The `~H` template system is handled by the
+`bastion lower` preprocessor (`.march.html` files); see `specs/features.md`
+for the precise status of `~H` sigils in plain `.march` files. The remaining
+gaps are mostly operational hardening (panic recovery, real OTLP export,
+config/TLS) and the WASM browser target.
 
 The biggest blockers:
-1. `~H` sigil — needs March lexer changes (see `specs/open-questions.md` §1)
-2. WASM browser target (`wasm32-unknown-unknown`) — Tier 4 in the March compiler roadmap
+1. WASM browser target (`wasm32-unknown-unknown`) — Tier 4 in the March compiler roadmap
+2. A `HttpServer.try_call` panic-recovery primitive — `safe_call_plug` and the
+   error-overlay crash REPL are no-ops without it
+3. A stdlib async `HttpClient` — blocks real OTLP export and outbound webhooks
 
 Check `specs/features.md` for the full picture before starting any feature work.

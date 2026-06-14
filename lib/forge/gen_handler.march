@@ -75,7 +75,7 @@ pfn action_source(action, pascal, plural) do
   "create" ->
     "-- POST /" ++ plural ++ "\n" ++
     "fn create(conn) do\n" ++
-    "  H.redirect(conn, 302, \"/" ++ plural ++ "\")\n" ++
+    "  H.redirect(conn, \"/" ++ plural ++ "\")\n" ++
     "end\n"
   "edit" ->
     "-- GET /" ++ plural ++ "/:id/edit\n" ++
@@ -85,12 +85,12 @@ pfn action_source(action, pascal, plural) do
   "update" ->
     "-- PUT /" ++ plural ++ "/:id\n" ++
     "fn update(conn, id) do\n" ++
-    "  H.redirect(conn, 302, \"/" ++ plural ++ "/\" ++ id)\n" ++
+    "  H.redirect(conn, \"/" ++ plural ++ "/\" ++ id)\n" ++
     "end\n"
   "delete" ->
     "-- DELETE /" ++ plural ++ "/:id\n" ++
     "fn delete(conn, id) do\n" ++
-    "  H.redirect(conn, 302, \"/" ++ plural ++ "\")\n" ++
+    "  H.redirect(conn, \"/" ++ plural ++ "\")\n" ++
     "end\n"
   other ->
     "fn " ++ other ++ "(conn) do\n" ++

@@ -145,6 +145,9 @@ mod IslandAssets do
   Returns 404 if the WASM file is not present.
   """
   fn serve_wasm_file(conn : Conn, filename : String) : Conn do
+    if is_unsafe_filename(filename) do
+      HttpServer.send_resp(conn, 404, "Not Found")
+    else
     let out_path = "priv/static/islands/" ++ filename
     -- Derive the module name from the filename (strip .wasm suffix).
     let module_name = match String.split_first(filename, ".") do
@@ -175,6 +178,17 @@ mod IslandAssets do
       |> HttpServer.send_resp(404, "Island WASM not found: " ++ filename)
     end
     end
+    end
+  end
+
+  -- Reject filenames that could escape the islands directory. Legitimate
+  -- island filenames are a single flat segment (e.g. "counter-a1b2c3d4.wasm"),
+  -- so any "/", "\", "..", or NUL is hostile path traversal.
+  pfn is_unsafe_filename(filename : String) : Bool do
+    String.contains(filename, "..")
+      || String.contains(filename, "/")
+      || String.contains(filename, "\\")
+      || String.contains(filename, char_from_int(0))
   end
 
   -- Recompile the island's WASM if the .wasm file doesn't exist yet.

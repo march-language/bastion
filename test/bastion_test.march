@@ -1594,17 +1594,17 @@ end
 describe "CSRF.validate URL decoding" do
   test "accepts a token the client percent-encoded" do
     let conn  = make_post_form("/", "_csrf_token=tok%31%32%33")
-    let conn2 = HttpServer.assign(conn, "_csrf_token", "tok123")
+    let conn2 = Session.put(conn, "_csrf_token","tok123")
     assert (CSRF.validate(conn2))
   end
   test "decodes + as space in the submitted token" do
     let conn  = make_post_form("/", "_csrf_token=a+b")
-    let conn2 = HttpServer.assign(conn, "_csrf_token", "a b")
+    let conn2 = Session.put(conn, "_csrf_token","a b")
     assert (CSRF.validate(conn2))
   end
   test "still rejects a wrong token" do
     let conn  = make_post_form("/", "_csrf_token=nope")
-    let conn2 = HttpServer.assign(conn, "_csrf_token", "tok123")
+    let conn2 = Session.put(conn, "_csrf_token","tok123")
     assert (!(CSRF.validate(conn2)))
   end
 end

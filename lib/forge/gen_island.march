@@ -83,12 +83,9 @@ pfn server_handler_template(pascal) do
   "--        " ++ pascal ++ "Handler.update,\n" ++
   "--        " ++ pascal ++ "Handler.render)\n\n" ++
   "mod " ++ pascal ++ "Handler do\n\n" ++
-  "pfn update_pair(pair : (String, String)) : String do\n" ++
-  "  match pair do\n" ++
-  "  (state_json, msg_json) -> " ++ pascal ++ ".update(state_json, msg_json)\n" ++
-  "  end\n" ++
+  "fn update(state_json : String, msg_json : String) : String do\n" ++
+  "  " ++ pascal ++ ".update(state_json, msg_json)\n" ++
   "end\n\n" ++
-  "fn update(pair : (String, String)) : String do update_pair(pair) end\n\n" ++
   "fn render(state_json : String) : String do\n" ++
   "  " ++ pascal ++ ".render(state_json)\n" ++
   "end\n\n" ++
@@ -218,7 +215,7 @@ fn run(args : List(String)) do
     println("")
     println("Wire up in your island socket registry:")
     println("  |> IslandSocket.register(\"" ++ name ++ "\",")
-    println("       fn pair -> " ++ name ++ ".update(pair),")
+    println("       " ++ name ++ ".update,")
     println("       " ++ name ++ ".render)")
     println("")
     println("Use in a page (server-rendered initial HTML):")

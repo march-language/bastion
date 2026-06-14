@@ -15,7 +15,7 @@ The most impactful unblocked work. These are preconditions for most other featur
 - [x] ~~**`[preprocessors]` hook in forge**~~ — Already in `forge.toml` as `[preprocessors] ".march.html" = "bastion lower"`.
 - [x] ~~**`bastion lower` CLI subcommand**~~ — Implemented in `lib/forge/lower.march`.
 - [x] ~~**`Html` runtime module**~~ — Implemented in `lib/html.march`.
-- [x] ~~**`IOList` runtime module**~~ — Implemented in `lib/io_list.march`.
+- [x] ~~**`IOList` runtime module**~~ — provided by the stdlib `IOList` module (no Bastion-local file; used directly, e.g. in `csrf.march` / `forge/lower.march`).
 - [x] ~~**`Css.style/1` helper**~~ — Implemented in `lib/css.march`.
 - [x] **Islands data flow implementation** — `lib/island_server.march` (`Bastion.IslandServer`): `push/2`, `push_from/3`, `subscriber_count/1`, `has_subscribers/1`; `IslandSocket` wired to `Bastion.PubSub`: `init`+channel subscribes instance, `destroy` unsubscribes, WS close calls `PubSub.unsubscribe_all`; `channel_push` forwarded to PubSub (LWW sync); JS `init` message now carries `channel` field; `Bastion.IslandServer.push/2` fans out to all connected instances via PubSub.
 - [x] **Kill `window.marchIslands.send` global bus** — The rewritten `march-islands.js` never exposed a global send bus; `window.__bastionIslands` is debug-only. Parent-child dispatch and channel push are the only send paths.
@@ -23,9 +23,9 @@ The most impactful unblocked work. These are preconditions for most other featur
 - [ ] **Auth/session/database stack** — See [auth-session-database.md](auth-session-database.md) for the full sequenced plan, API design, error handling, security checklist, and end-to-end example. Build in this order:
   - [x] Step 0: Conn prerequisites — `get_req_cookie`, `put_resp_cookie`, `delete_resp_cookie`, `register_after_send`, `get_form_param` added to `lib/conn.march`
   - [x] Step 0b: Wire `Conn.after_send_hooks` dispatch in `bastion_server.march`; call `Session.commit_from_conn` for "session_commit" hook
-  - [x] Step 1: `lib/crypto.march` — wraps stdlib `Crypto`; adds `hmac_sha256/2`, `derive_key/2`, `generate_token/1`, `bytes_to_string/1`; note: AES-256-GCM and true HKDF deferred pending runtime builtins
+  - [x] Step 1: `lib/crypto.march` — wraps stdlib `Crypto`; adds `hmac_sha256/2`, `derive_key/2`, `generate_token/1`, `bytes_to_string/1`; note: AES-256-GCM still deferred pending runtime builtins; HKDF-SHA256 is now implemented in `lib/security/hkdf.march` and used by `Crypto.derive_key`
   - [x] Step 1b: Upgrade `session.march` crypto — replace `stub_hmac` with `Crypto.hmac_sha256` + `Crypto.derive_key`; fix `base64_decode` to handle `Ok(Bytes)`; use `Crypto.secure_compare`
-  - [x] Step 2: Add Depot as a `[deps]` entry in Bastion's `forge.toml` — `depot = { path = "/Users/80197052/code/depot" }`
+  - [x] Step 2: Add Depot as a `[deps]` entry in Bastion's `forge.toml` — `depot = { git = "https://github.com/march-language/depot.git", branch = "main" }`
   - [x] Step 2b: `lib/depot_middleware.march` — `with_pool` checks out conn + registers "pool_checkin" hook; `get_conn`, `get_pool`, `checkin_from_conn`; BastionServer now dispatches "pool_checkin" → `Depot.Middleware.checkin_from_conn`
   - [x] Step 2c: Wire `Depot.Query` SQL generation — extended Query type with `sql_conds` 7th field; `where_eq/ne/gt/lt/gte/lte/like/ilike/is_null/is_not_null`; `to_sql/1`, `to_params/1`, `exec_sql/2` (exec_prepared + zip cols), `count_sql/2`
   - [x] Step 3: `lib/session.march` — cookie session API complete; real HMAC-SHA256 signing via `Crypto.hmac_sha256` + derived key
