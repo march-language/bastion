@@ -24,7 +24,9 @@ jobs:
 
       - name: Install blake3 (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y libblake3-dev
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libblake3-dev
 
       - name: Install blake3 (macOS)
         if: runner.os == 'macOS'
