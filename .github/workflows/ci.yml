@@ -22,22 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install blake3 (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          git clone --depth 1 https://github.com/BLAKE3-team/BLAKE3.git /tmp/blake3
-          cd /tmp/blake3/c
-          cc -shared -fPIC -O2 -o libblake3.so \
-            blake3.c blake3_dispatch.c blake3_portable.c \
-            blake3_sse2_x86-64_unix.S blake3_sse41_x86-64_unix.S \
-            blake3_avx2_x86-64_unix.S blake3_avx512_x86-64_unix.S
-          sudo install -m 755 libblake3.so /usr/local/lib/libblake3.so
-          sudo ldconfig
-
-      - name: Install blake3 (macOS)
-        if: runner.os == 'macOS'
-        run: brew install blake3
-
       - name: Set up March
         uses: march-language/setup-march@main
 
