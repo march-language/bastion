@@ -389,7 +389,7 @@ fn confirm_user(token_str) do
     match Repo.get(User.schema(), tok.user_id) do
     None -> Err("user not found")
     Some(user) ->
-      let now = UtcDatetime.now()
+      let now = DateTime.now()
       let gate = Gate.cast_record(user, { confirmed_at = now }, ["confirmed_at"])
       match Repo.update(User.schema(), gate) do
       Ok(confirmed_user) ->
@@ -857,7 +857,9 @@ fn update(conn) do
         |> Flash.put("info", "Password reset successfully. Please log in with your new password.")
         |> H.redirect("/users/log_in")
     Err(gate) ->
-      H.html(conn, 422, render_reset_form(token, Depot.Gate.error_summary(gate)))
+      let errs    = Depot.Gate.errors(gate)
+      let err_msg = String.join(List.map(errs, fn e -> do let (f, m) = e; f ++ " " ++ m end), ", ")
+      H.html(conn, 422, render_reset_form(token, err_msg))
     end
   end
 end
@@ -921,7 +923,7 @@ end
 
 fn user_fixture_attrs(overrides) do
   let defaults = [("email", unique_email()), ("password", "ValidPassword123!")]
-  List.fold_left(overrides, defaults, fn (acc, pair) -> do
+  List.fold_left(defaults, overrides, fn (acc, pair) -> do
     let (k, v) = pair
     List.filter(acc, fn entry -> do
       let (ek, _) = entry
@@ -936,7 +938,7 @@ fn user_fixture(overrides) do
   Ok(user) ->
     let confirm_gate = Depot.Gate.cast_record(
       user,
-      { confirmed_at = UtcDatetime.now() },
+      { confirmed_at = DateTime.now() },
       ["confirmed_at"]
     )
     match Depot.Repo.update(""" ++ pascal ++ """.Accounts.User.schema(), confirm_gate) do

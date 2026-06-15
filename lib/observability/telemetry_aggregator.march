@@ -87,7 +87,8 @@ mod Bastion.Telemetry.Aggregator do
   """
   fn recent_requests(limit : Int) : List(RequestSummary) do
     let table = Vault.new(requests_table)
-    let ids   = List.take(Vault.get_or(table, "ring", []), limit)
+    let all_ids = Vault.get_or(table, "ring", [])
+    let ids     = List.take(List.reverse(all_ids), limit)
     List.filter_map(ids, fn id -> Vault.get(table, summary_key(id)))
   end
 
@@ -231,7 +232,11 @@ mod Bastion.Telemetry.Aggregator do
       -- can identify which (if any) entry will be evicted from the far end.
       let max      = get_max()
       let old_ring = Vault.get_or(req_table, "ring", [])
-      let evicted  = List.drop(old_ring, max - 1)
+      -- push_capped will append then trim to max, dropping oldest (head) entries.
+      -- Compute how many head entries become stale so we can clean up their keys.
+      let n       = List.length(old_ring)
+      let to_drop = if n >= max do n - max + 1 else 0 end
+      let evicted = List.take(old_ring, to_drop)
       -- Atomically append the new ID and trim to max.
       let _ = Vault.push_capped(req_table, "ring", request_id, max)
       -- Store the new summary under its own key.

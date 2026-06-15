@@ -76,28 +76,27 @@ mod Auth do
       end)
   """
   fn load_current_user(conn, loader) do
-    let user_str = match Session.get(conn, user_id_session_key) do
-      None     -> ""
-      Some(id_str) ->
-        match string_to_int(id_str) do
-        None    ->
-          -- Malformed session value: the session is HMAC-signed, so a
-          -- non-integer user ID means an application bug or a signing-key
-          -- mix-up — surface it instead of silently treating the request
-          -- as anonymous.
-          let _ = Logger.log_with(Logger.Warn,
-            "Auth.load_current_user: session " ++ user_id_session_key ++
-            " is not an integer; treating request as unauthenticated",
-            [("value", id_str)])
-          ""
-        Some(id) ->
-          match loader(conn, id) do
-          Ok(u)    -> u
-          Err(_) -> ""   -- user deleted or invalid
-          end
+    match Session.get(conn, user_id_session_key) do
+    None -> conn
+    Some(id_str) ->
+      match string_to_int(id_str) do
+      None ->
+        -- Malformed session value: the session is HMAC-signed, so a
+        -- non-integer user ID means an application bug or a signing-key
+        -- mix-up — surface it instead of silently treating the request
+        -- as anonymous.
+        let _ = Logger.log_with(Logger.Warn,
+          "Auth.load_current_user: session " ++ user_id_session_key ++
+          " is not an integer; treating request as unauthenticated",
+          [("value", id_str)])
+        conn
+      Some(id) ->
+        match loader(conn, id) do
+        Ok(u)  -> HttpServer.assign(conn, current_user_assign, u)
+        Err(_) -> conn   -- user deleted or invalid; leave assign absent
         end
       end
-    HttpServer.assign(conn, current_user_assign, user_str)
+    end
   end
 
   doc """
@@ -128,13 +127,12 @@ mod Auth do
     else
       -- Try the remember-me cookie
       match Conn.get_req_cookie(conn, remember_me_cookie) do
-      None -> HttpServer.assign(conn, current_user_assign, "")
+      None -> conn
       Some(token) ->
         match remember_verifier(conn, token) do
         Err(_) ->
           -- Expired or invalid token — clear the stale cookie
-          let conn2 = HttpServer.assign(conn, current_user_assign, "")
-          Conn.delete_resp_cookie(conn2, remember_me_cookie)
+          Conn.delete_resp_cookie(conn, remember_me_cookie)
         Ok(user_id) ->
           -- Re-establish a FRESH session from the remember-me token.
           -- Clearing first mirrors log_in's fixation defense: any data an

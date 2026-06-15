@@ -122,13 +122,17 @@ fn lookup(vault_table_name, key, scope) do
 end
 
 doc """
-Mark a key as InProgress in the Vault cache.
-Should be called before the handler runs to prevent concurrent duplicates.
+Atomically claim a key as InProgress.  Returns true if this call won the
+race (the caller should run the handler), false if another request already
+claimed it (caller should respond 409).
+
+Uses Vault.put_new — a single test-and-set under the shard lock — so two
+concurrent requests cannot both see `true`.
 """
-fn mark_in_progress(vault_table_name, key, scope) do
+fn mark_in_progress(vault_table_name, key, scope) : Bool do
   let tbl       = get_cache_table(vault_table_name)
   let cache_key = make_cache_key(key, scope)
-  Vault.set(tbl, cache_key, InProgress(0))
+  Vault.put_new(tbl, cache_key, InProgress(0))
 end
 
 doc """

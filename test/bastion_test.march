@@ -1107,16 +1107,16 @@ describe "TypedMiddleware.require_auth" do
     let result = require_auth(tc)
     assert (HttpServer.status(auth_result_conn(result)) == 401)
   end
-  test "returns non-halted conn when current_user_id is set" do
+  test "returns non-halted conn when current_user is set" do
     let conn   = make_get("/protected")
-    let conn2  = set_current_user_id(conn, "42")
+    let conn2  = HttpServer.assign(conn, "current_user", "user_42")
     let tc     = TypedMiddleware.wrap(conn2) |> parse_body() |> load_session("")
     let result = require_auth(tc)
     assert (not (HttpServer.halted(auth_result_conn(result))))
   end
   test "authenticated conn preserves the path" do
     let conn   = make_get("/protected")
-    let conn2  = set_current_user_id(conn, "99")
+    let conn2  = HttpServer.assign(conn, "current_user", "user_99")
     let tc     = TypedMiddleware.wrap(conn2) |> parse_body() |> load_session("")
     let result = require_auth(tc)
     assert (HttpServer.path(auth_result_conn(result)) == "/protected")
