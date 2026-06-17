@@ -13,7 +13,6 @@
 mod TestIsland do
 
 import Islands
-import Html
 
 -- ── render_island ──────────────────────────────────────────────────────────
 
