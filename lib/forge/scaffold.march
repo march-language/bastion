@@ -304,7 +304,7 @@ pfn application_source(pascal) do
   ++ "end\n"
 end
 
-pfn repo_source(pascal, name) do
+pfn repo_source(pascal, _name) do
   "mod " ++ pascal ++ ".Repo do\n"
   ++ "\n"
   ++ "  -- Thin wrapper over the application's Depot connection pool.\n"
