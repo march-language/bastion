@@ -20,7 +20,7 @@
 --   fn update(state, msg) do
 --     match msg do
 --     Increment ->
---       ({ count = state.count + 1 }, Cmd.none())
+--       ({ count: state.count + 1 }, Cmd.none())
 --
 --     LoadUser(id) ->
 --       (state, Cmd.http_get("/api/users/" ++ String.from_int(id), fn resp ->

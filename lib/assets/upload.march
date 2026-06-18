@@ -79,10 +79,10 @@ mod Bastion.Upload do
   doc "Return default upload options (10MB max file, 10 files, 64KB fields, all types allowed)."
   fn default_opts() : UploadOpts do
     {
-      max_file_size  = 10000000,
-      max_files      = 10,
-      max_field_size = 65536,
-      allowed_types  = []
+      max_file_size: 10000000,
+      max_files: 10,
+      max_field_size: 65536,
+      allowed_types: []
     }
   end
 
@@ -213,7 +213,7 @@ mod Bastion.Upload do
     n_files : Int
   ) : Result(UploadResult, UploadError) do
     match parts do
-    []             -> Ok({ files = List.reverse(files), fields = List.reverse(fields) })
+    []             -> Ok({ files: List.reverse(files), fields: List.reverse(fields) })
     Cons(p, rest)  ->
       -- Each raw part starts with "\r\n" (after the delimiter)
       let part = strip_leading_crlf(p)
@@ -285,11 +285,11 @@ mod Bastion.Upload do
         Err(DisallowedType(fname, part_ct))
       else
         let uf = {
-          field_name   = name,
-          filename     = fname,
-          content_type = part_ct,
-          content      = part_body,
-          size         = size
+          field_name: name,
+          filename: fname,
+          content_type: part_ct,
+          content: part_body,
+          size: size
         }
         collect_parts(remaining, opts, Cons(uf, files), fields, n_files + 1)
       end

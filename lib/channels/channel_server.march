@@ -268,7 +268,7 @@ mod Bastion.ChannelServer do
         ChannelRoute(_, _, handle_in_fn) ->
           let new_cc = Bastion.Telemetry.span(
             ["bastion", "channel", "message"],
-            { event = event, topic = topic },
+            { event: event, topic: topic },
             fn () -> handle_in_fn(cc, event, payload_json)
           )
           replace_active(active_conns, topic, new_cc)

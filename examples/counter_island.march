@@ -33,7 +33,7 @@ type Msg = Increment | Decrement | Reset | SetValue(Int)
 
 doc "Return the default initial state for the counter island (count=0)."
 fn initial() : State do
-  { count = 0 }
+  { count: 0 }
 end
 
 doc """
@@ -46,10 +46,10 @@ Apply a message to the current state and return the next state.
 """
 fn update(state : State, msg : Msg) : State do
   match msg do
-  Increment    -> { count = state.count + 1 }
-  Decrement    -> { count = state.count - 1 }
-  Reset        -> { count = 0 }
-  SetValue(n)  -> { count = n }
+  Increment    -> { count: state.count + 1 }
+  Decrement    -> { count: state.count - 1 }
+  Reset        -> { count: 0 }
+  SetValue(n)  -> { count: n }
   end
 end
 
@@ -102,7 +102,7 @@ doc """
 Decode a State from a JSON string.
 
 Parses {\"count\":N} and returns a State record.
-Falls back to {count=0} if the JSON cannot be parsed.
+Falls back to {count:0} if the JSON cannot be parsed.
 """
 fn decode_state(json : String) : State do
   -- Split {"count":N} at ":" to isolate N
@@ -114,7 +114,7 @@ fn decode_state(json : String) : State do
       let digits = ci_collect_digits(after, "")
       ci_parse_int(digits)
     end
-  { count = count }
+  { count: count }
 end
 
 doc """

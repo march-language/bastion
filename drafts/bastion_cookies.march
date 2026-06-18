@@ -9,7 +9,7 @@
 -- that includes the purpose ("sign" vs "enc") and the cookie name, so
 -- a signing key cannot be used to forge an encryption cookie of the same name.
 --
--- Key rotation: pass a list of %{key, inserted_at} maps; newest key signs/
+-- Key rotation: pass a list of {key, inserted_at} maps; newest key signs/
 -- encrypts new cookies; all keys are tried on verification.  A telemetry
 -- event is emitted when a non-primary key is used.
 --

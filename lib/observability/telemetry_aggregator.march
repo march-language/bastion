@@ -109,9 +109,9 @@ mod Bastion.Telemetry.Aggregator do
     Some(events) ->
       let total = List.fold_left(events, 0, fn (acc, e) -> acc + e.duration_ms)
       Some({
-        request_id = request_id,
-        events     = events,
-        total_ms   = total
+        request_id: request_id,
+        events: events,
+        total_ms: total
       })
     end
   end
@@ -121,7 +121,7 @@ mod Bastion.Telemetry.Aggregator do
 
   Returns a record with:
     total           — total number of requests in the buffer
-    errors          — count of requests with error = true
+    errors          — count of requests with error: true
     avg_duration_ms — mean duration across all buffered requests
 
       let c = Bastion.Telemetry.Aggregator.counters()
@@ -137,7 +137,7 @@ mod Bastion.Telemetry.Aggregator do
     let errors = List.length(List.filter(all, fn r -> r.error))
     let sum_ms = List.fold_left(all, 0, fn (acc, r) -> acc + r.duration_ms)
     let avg    = if total > 0 do sum_ms / total else 0 end
-    { total = total, errors = errors, avg_duration_ms = avg }
+    { total: total, errors: errors, avg_duration_ms: avg }
   end
 
   doc "Clear all aggregator state — both event and request tables."
@@ -165,10 +165,10 @@ mod Bastion.Telemetry.Aggregator do
 
     -- Always append the event to the per-request events list
     let entry = {
-      name         = event_name,
-      duration_ms  = duration,
-      timestamp_ms = now_ms,
-      metadata     = meta_json
+      name: event_name,
+      duration_ms: duration,
+      timestamp_ms: now_ms,
+      metadata: meta_json
     }
     append_event(request_id, entry)
 
@@ -216,14 +216,14 @@ mod Bastion.Telemetry.Aggregator do
       -- Vault.update serialises concurrent stop/exception events for the same request_id.
       let _ = Vault.update(req_table, sk, fn s ->
         {
-          request_id   = s.request_id,
-          method       = s.method,
-          path         = s.path,
-          status       = pick_status(s.status, measurements),
-          duration_ms  = s.duration_ms + duration,
-          event_count  = s.event_count + 1,
-          error        = s.error || is_error,
-          timestamp_ms = s.timestamp_ms
+          request_id: s.request_id,
+          method: s.method,
+          path: s.path,
+          status: pick_status(s.status, measurements),
+          duration_ms: s.duration_ms + duration,
+          event_count: s.event_count + 1,
+          error: s.error || is_error,
+          timestamp_ms: s.timestamp_ms
         }
       )
       ()
@@ -244,14 +244,14 @@ mod Bastion.Telemetry.Aggregator do
       let path    = extract_path(metadata)
       let status  = pick_status(0, measurements)
       let new_summary = {
-        request_id   = request_id,
-        method       = method,
-        path         = path,
-        status       = status,
-        duration_ms  = duration,
-        event_count  = 1,
-        error        = is_error,
-        timestamp_ms = now_ms
+        request_id: request_id,
+        method: method,
+        path: path,
+        status: status,
+        duration_ms: duration,
+        event_count: 1,
+        error: is_error,
+        timestamp_ms: now_ms
       }
       Vault.set(req_table, sk, new_summary)
       -- Evict stale per-request data for IDs that just fell off the ring.

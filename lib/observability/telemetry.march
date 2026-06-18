@@ -28,8 +28,8 @@
 --   -- Emit an event from framework or application code:
 --   Bastion.Telemetry.execute(
 --     ["bastion", "request", "stop"],
---     { status = 200, duration_ms = 42 },
---     { conn = conn }
+--     { status: 200, duration_ms: 42 },
+--     { conn: conn }
 --   )
 --
 --   -- Detach when no longer needed:
@@ -94,8 +94,8 @@ mod Bastion.Telemetry do
   metadata     — record with contextual data (any shape)
 
       Bastion.Telemetry.execute(["bastion", "request", "stop"],
-        { status = 200, duration_ms = 42 },
-        { conn = conn })
+        { status: 200, duration_ms: 42 },
+        { conn: conn })
   """
   fn execute(event_name : List(String), measurements, metadata) do
     let fn_table   = Vault.new(table_name ++ "_fn")
@@ -130,11 +130,11 @@ mod Bastion.Telemetry do
   fn span(event_prefix : List(String), metadata, fn_) do
     let start_event = List.append(event_prefix, ["start"])
     let stop_event  = List.append(event_prefix, ["stop"])
-    execute(start_event, { duration_ms = 0 }, metadata)
+    execute(start_event, { duration_ms: 0 }, metadata)
     let start_ms = float_to_int(unix_time(()) *. 1000.0)
     let result   = fn_()
     let elapsed  = float_to_int(unix_time(()) *. 1000.0) - start_ms
-    execute(stop_event, { duration_ms = elapsed }, metadata)
+    execute(stop_event, { duration_ms: elapsed }, metadata)
     result
   end
 
@@ -148,8 +148,8 @@ mod Bastion.Telemetry do
   fn request_start(conn) do
     execute(
       ["bastion", "request", "start"],
-      { timestamp_ms = float_to_int(unix_time(()) *. 1000.0) },
-      { conn = conn }
+      { timestamp_ms: float_to_int(unix_time(()) *. 1000.0) },
+      { conn: conn }
     )
   end
 
@@ -161,8 +161,8 @@ mod Bastion.Telemetry do
   fn request_stop(conn, duration_ms : Int) do
     execute(
       ["bastion", "request", "stop"],
-      { duration_ms = duration_ms, status = HttpServer.status(conn) },
-      { conn = conn }
+      { duration_ms: duration_ms, status: HttpServer.status(conn) },
+      { conn: conn }
     )
   end
 

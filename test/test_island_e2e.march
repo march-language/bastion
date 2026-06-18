@@ -51,13 +51,13 @@ describe "CounterIsland init/update" do
   end
 
   test "Decrement decreases count by 1" do
-    let state  = { count = 5 }
+    let state  = { count: 5 }
     let state2 = apply_msg(state, Decrement)
     assert (CounterIsland.count_of(state2) == 4)
   end
 
   test "Reset returns count to 0" do
-    let state  = { count = 99 }
+    let state  = { count: 99 }
     let state2 = apply_msg(state, Reset)
     assert (CounterIsland.count_of(state2) == 0)
   end
@@ -95,7 +95,7 @@ describe "CounterIsland SSR output" do
   end
 
   test "render contains the count value in a span" do
-    let state = { count = 7 }
+    let state = { count: 7 }
     let html  = CounterIsland.render(state)
     assert_has(html, "<span class=\"count\">7</span>", "count in span")
   end
@@ -121,7 +121,7 @@ describe "CounterIsland SSR output" do
   end
 
   test "ssr with non-zero count embeds the correct count in render" do
-    let state = { count = 3 }
+    let state = { count: 3 }
     let html  = CounterIsland.ssr(state)
     assert_has(html, ">3<", "count 3 present in ssr output")
   end

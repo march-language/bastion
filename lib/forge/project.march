@@ -11,10 +11,10 @@
 --
 --   [deps]
 --   bastion       = "*"
---   some_lib      = { path = "../some_lib" }
---   other_lib     = { git = "https://...", tag = "v1.0" }
---   another_lib   = { git = "https://...", branch = "main" }
---   yet_another   = { git = "https://...", rev = "abc123" }
+--   some_lib      = { path: "../some_lib" }
+--   other_lib     = { git: "https://...", tag: "v1.0" }
+--   another_lib   = { git: "https://...", branch: "main" }
+--   yet_another   = { git: "https://...", rev: "abc123" }
 
 mod Forge.Project do
 
@@ -145,7 +145,7 @@ end
 
 -- ── Dep parser ───────────────────────────────────────────────────────────────
 
--- Parse an inline table dep like { path = "../lib" } or { git = "...", tag = "v1" }
+-- Parse an inline table dep like { path: "../lib" } or { git: "...", tag: "v1" }
 pfn parse_inline_dep(s) do
   match inline_get(s, "path") do
   Some(p) -> PathDep(p)
@@ -256,7 +256,7 @@ fn load() do
         None    -> "0.1.0"
       end
       let deps = parse_deps(lines)
-      Ok({ name = name, version = version, root = root, deps = deps })
+      Ok({ name: name, version: version, root: root, deps: deps })
     end
   end
 end

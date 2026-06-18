@@ -54,7 +54,7 @@ mod Bastion.Channel do
   accepted; user code does not normally need to call this directly.
   """
   fn new_conn(topic : String, conn_id : String, push_fn : String -> String -> ()) : ChannelConn do
-    { assigns = [], topic = topic, conn_id = conn_id, push_fn = push_fn }
+    { assigns: [], topic: topic, conn_id: conn_id, push_fn: push_fn }
   end
 
   -- ── Assigns ───────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ mod Bastion.Channel do
       let (k, _) = pair
       k != key
     )
-    { cc with assigns = Cons((key, value), pruned) }
+    { cc with assigns: Cons((key, value), pruned) }
   end
 
   doc """

@@ -486,8 +486,8 @@ end
 doc """
 Set a value in the session.  Values must be Strings.
 
-    conn = conn |> Session.put("user_id", "42")
-    conn = conn |> Session.put("role", "admin")
+    conn: conn |> Session.put("user_id", "42")
+    conn: conn |> Session.put("role", "admin")
 
 Changes are in-memory until `Session.save/1` is called.
 """
@@ -498,7 +498,7 @@ end
 doc """
 Remove a key from the session.  No-op if the key does not exist.
 
-    conn = conn |> Session.delete("user_id")
+    conn: conn |> Session.delete("user_id")
 """
 fn delete(conn, key) do
   set_session_pairs(conn, alist_delete(get_session_pairs(conn), key))
@@ -507,7 +507,7 @@ end
 doc """
 Clear all session data, including flash messages.
 
-    conn = conn |> Session.clear()
+    conn: conn |> Session.clear()
 """
 fn clear(conn) do
   set_session_pairs(conn, Nil)

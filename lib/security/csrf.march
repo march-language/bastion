@@ -62,7 +62,7 @@ mod CSRF do
   doc """
   Ensure the Conn has a CSRF token, generating one if absent.
 
-      conn = CSRF.ensure_token(conn)
+      conn: CSRF.ensure_token(conn)
 
   Returns an updated Conn with the token in assigns.  Idempotent: if the
   token already exists this is a no-op and the existing token is kept.

@@ -40,8 +40,8 @@ mod Pool do
 
   doc "Return a default PoolConfig (5 min / 20 max) for a given connection config."
   fn default_pool_config(conn_cfg : ConnConfig) : PoolConfig do
-    { min_size = 5, max_size = 20, idle_timeout_ms = 300000,
-      connect_timeout_ms = 5000, conn_config = conn_cfg }
+    { min_size: 5, max_size: 20, idle_timeout_ms: 300000,
+      connect_timeout_ms: 5000, conn_config: conn_cfg }
   end
 
   doc "Borrow a connection, run f(conn), return it automatically."

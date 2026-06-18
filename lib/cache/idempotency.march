@@ -41,12 +41,12 @@ mod Bastion.Idempotency do
 
   doc "Default options: 24-hour TTL, no scope prefix."
   fn default_opts() : IdempotencyOpts do
-    { ttl_secs = 86400, scope = "" }
+    { ttl_secs: 86400, scope: "" }
   end
 
   doc "Build custom options with a TTL and an optional scope prefix."
   fn opts(ttl_secs : Int, scope : String) : IdempotencyOpts do
-    { ttl_secs = ttl_secs, scope = scope }
+    { ttl_secs: ttl_secs, scope: scope }
   end
 
   -- ── Middleware ────────────────────────────────────────────────────────────

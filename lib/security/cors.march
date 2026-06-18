@@ -66,12 +66,12 @@ mod Cors do
   """
   fn config(origins) do
     {
-      origins     = origins,
-      methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      headers     = ["content-type", "authorization"],
-      expose      = [],
-      max_age     = 86400,
-      credentials = false
+      origins: origins,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      headers: ["content-type", "authorization"],
+      expose: [],
+      max_age: 86400,
+      credentials: false
     }
   end
 
@@ -83,31 +83,31 @@ mod Cors do
   """
   fn config_open() do
     {
-      origins     = ["*"],
-      methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      headers     = ["content-type", "authorization"],
-      expose      = [],
-      max_age     = 86400,
-      credentials = false
+      origins: ["*"],
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      headers: ["content-type", "authorization"],
+      expose: [],
+      max_age: 86400,
+      credentials: false
     }
   end
 
   doc """
   Credentialed CORS config for the given origins.
   Allows cookies and Authorization headers cross-origin.
-  Wildcard origins are not allowed with credentials=true per the spec;
+  Wildcard origins are not allowed with credentials:true per the spec;
   always pass explicit origins.
 
       Cors.config_credentialed(["https://app.myapp.com"])
   """
   fn config_credentialed(origins) do
     {
-      origins     = origins,
-      methods     = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      headers     = ["content-type", "authorization"],
-      expose      = [],
-      max_age     = 86400,
-      credentials = true
+      origins: origins,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      headers: ["content-type", "authorization"],
+      expose: [],
+      max_age: 86400,
+      credentials: true
     }
   end
 

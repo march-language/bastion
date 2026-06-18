@@ -111,10 +111,10 @@ alias Depot.Schema as Schema
 
 fn schema() do
   Schema.define(""" ++ "\"" ++ table ++ "\"" ++ """, {
-    fields = {
-      id = ("UUID", { primary_key = true }),
-""" ++ field_lines ++ """      inserted_at = ("UtcDatetime", { null = false }),
-      updated_at  = ("UtcDatetime", { null = false })
+    fields: {
+      id: ("UUID", { primary_key: true }),
+""" ++ field_lines ++ """      inserted_at = ("UtcDatetime", { null: false }),
+      updated_at: ("UtcDatetime", { null: false })
     }
   })
 end
@@ -139,7 +139,7 @@ pfn build_schema_fields(fields, acc) do
   Nil -> acc
   Cons((name, user_type), rest) ->
     let depot_type = field_type_to_depot(user_type)
-    let line = "      " ++ name ++ " = (\"" ++ depot_type ++ "\", { null = false }),\n"
+    let line = "      " ++ name ++ " = (\"" ++ depot_type ++ "\", { null: false }),\n"
     build_schema_fields(rest, acc ++ line)
   end
 end
@@ -224,9 +224,9 @@ mod Migrations.Create""" ++ snake_to_pascal(table) ++ """ do
 
 fn up() do
   Depot.Migration.create_table(""" ++ "\"" ++ table ++ "\"" ++ """, {
-    id          = ("UUID",        { primary_key = true }),
-""" ++ field_lines ++ """    inserted_at = ("UtcDatetime", { null = false }),
-    updated_at  = ("UtcDatetime", { null = false })
+    id: ("UUID",        { primary_key: true }),
+""" ++ field_lines ++ """    inserted_at = ("UtcDatetime", { null: false }),
+    updated_at: ("UtcDatetime", { null: false })
   })
 end
 
@@ -247,7 +247,7 @@ pfn build_migration_fields(fields, acc) do
   Nil -> acc
   Cons((name, user_type), rest) ->
     let depot_type = field_type_to_depot(user_type)
-    let line = "    " ++ name ++ " = (\"" ++ depot_type ++ "\", { null = false }),\n"
+    let line = "    " ++ name ++ " = (\"" ++ depot_type ++ "\", { null: false }),\n"
     build_migration_fields(rest, acc ++ line)
   end
 end

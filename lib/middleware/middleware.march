@@ -135,10 +135,10 @@ mod Middleware do
 
   actor IdCounter do
     state { n : Int }
-    init  { n = 0 }
+    init  { n: 0 }
     on Call(ref, msg) do
       let _ = Actor.reply(ref, state.n)
-      { state with n = state.n + 1 }
+      { state with n: state.n + 1 }
     end
   end
 

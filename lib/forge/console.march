@@ -22,7 +22,7 @@
 -- Example session:
 --
 --   iex(my_app)> MyApp.Accounts.list_users()
---   [%{id: 1, email: "alice@example.com"}, ...]
+--   [{id: 1, email: "alice@example.com"}, ...]
 --
 --   iex(my_app)> Vault.all(:response_cache) |> List.length()
 --   42
@@ -71,10 +71,10 @@ fn run(args : List(String)) do
   let imports  = read_console_imports()
 
   let config = {
-    app_name    = app_name,
-    with_server = with_server,
-    imports     = imports,
-    banner      = default_banner(app_name)
+    app_name: app_name,
+    with_server: with_server,
+    imports: imports,
+    banner: default_banner(app_name)
   }
 
   println(config.banner)

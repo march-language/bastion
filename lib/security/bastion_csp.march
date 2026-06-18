@@ -131,7 +131,7 @@ doc """
 Generate a fresh nonce (16 random bytes, base64-encoded) and assign it to
 the Conn under the key "csp_nonce".  Returns the updated Conn.
 
-    conn = BastionCSP.assign_nonce(conn)
+    conn: BastionCSP.assign_nonce(conn)
 """
 fn assign_nonce(conn) do
   -- generate_token(16) produces 16 random bytes rendered as a URL-safe

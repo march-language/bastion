@@ -57,7 +57,7 @@ mod Gate do
   kept as changes; all others are dropped.
 
       Gate.cast([("email", "me@example.com"), ("role", "admin")], ["email"])
-      -- Gate with changes = [("email", "me@example.com")]
+      -- Gate with changes: [("email", "me@example.com")]
       -- "role" dropped — not in permitted list
   """
   fn cast(params : List((String, String)), permitted : List(String)) : Gate do

@@ -35,10 +35,10 @@ pfn migration_source(pascal_name, ts_str) do
   "  -- TODO: implement migration\n" ++
   "  -- Example:\n" ++
   "  -- Depot.Migration.create_table(\"table_name\", {\n" ++
-  "  --   id         = (\"UUID\",        { primary_key = true }),\n" ++
-  "  --   name       = (\"String\",      { null = false }),\n" ++
-  "  --   inserted_at = (\"UtcDatetime\", { null = false }),\n" ++
-  "  --   updated_at  = (\"UtcDatetime\", { null = false })\n" ++
+  "  --   id         = (\"UUID\",        { primary_key: true }),\n" ++
+  "  --   name       = (\"String\",      { null: false }),\n" ++
+  "  --   inserted_at = (\"UtcDatetime\", { null: false }),\n" ++
+  "  --   updated_at  = (\"UtcDatetime\", { null: false })\n" ++
   "  -- })\n" ++
   "  ()\n" ++
   "end\n\n" ++

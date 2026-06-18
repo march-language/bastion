@@ -191,8 +191,8 @@ mod Bastion do
     "author = \"\"\n" ++
     "\n" ++
     "[deps]\n" ++
-    "bastion = { path = \"../bastion\" }\n" ++
-    "islands = { path = \"../islands\" }\n"
+    "bastion = { path: \"../bastion\" }\n" ++
+    "islands = { path: \"../islands\" }\n"
   end
 
   pfn editorconfig_tpl() : String do
@@ -368,13 +368,13 @@ mod Bastion do
     "  derive Json for State\n" ++
     "  derive Json for Msg\n\n" ++
     "  fn create(props : Props) : State do\n" ++
-    "    { count = props.initial }\n" ++
+    "    { count: props.initial }\n" ++
     "  end\n\n" ++
     "  fn update(st : State, msg : Msg) : State do\n" ++
     "    match msg do\n" ++
-    "    Increment -> { count = st.count + 1 }\n" ++
-    "    Decrement -> { count = st.count - 1 }\n" ++
-    "    Reset     -> { count = 0 }\n" ++
+    "    Increment -> { count: st.count + 1 }\n" ++
+    "    Decrement -> { count: st.count - 1 }\n" ++
+    "    Reset     -> { count: 0 }\n" ++
     "    end\n" ++
     "  end\n\n" ++
     "  fn render(st : State) : IOList do\n" ++

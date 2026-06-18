@@ -108,10 +108,10 @@ mod ${app_name}.${module_name} do
 
 fn schema() do
   Depot.Schema.define("${table_name}", {
-    fields = {
+    fields: {
 ${field_defs},
-      inserted_at = "UtcDatetime",
-      updated_at = "UtcDatetime"
+      inserted_at: "UtcDatetime",
+      updated_at: "UtcDatetime"
     }
   })
 end
@@ -135,7 +135,7 @@ pfn migration_source(module_name, table_name, fields) do
   let col_defs = fields
     |> List.map(fn f -> do
          let (name, typ) = f
-         "    " ++ name ++ " = (\"" ++ march_type_of(typ) ++ "\", { null = false })"
+         "    " ++ name ++ " = (\"" ++ march_type_of(typ) ++ "\", { null: false })"
        end)
     |> String.join(",\n")
   let timestamp = DateTime.now()
@@ -147,10 +147,10 @@ mod Migrations.${migration_mod} do
 
 fn up() do
   Depot.Migration.create_table("${table_name}", {
-    id = ("UUID", { primary_key = true }),
+    id: ("UUID", { primary_key: true }),
 ${col_defs},
-    inserted_at = ("UtcDatetime", { null = false }),
-    updated_at = ("UtcDatetime", { null = false })
+    inserted_at: ("UtcDatetime", { null: false }),
+    updated_at: ("UtcDatetime", { null: false })
   })
 end
 
@@ -234,7 +234,7 @@ fn show(conn, id) do
     Some(item) ->
       Conn.json(conn, 200, item)
     None ->
-      Conn.json(conn, 404, { error = "not found" })
+      Conn.json(conn, 404, { error: "not found" })
   end
 end
 
@@ -245,7 +245,7 @@ fn create(conn) do
     Ok(item) ->
       Conn.json(conn, 201, item)
     Err(gate) ->
-      Conn.json(conn, 422, { errors = Depot.Gate.errors(gate) })
+      Conn.json(conn, 422, { errors: Depot.Gate.errors(gate) })
   end
 end
 
@@ -253,14 +253,14 @@ end
 fn update(conn, id) do
   match """ ++ app_name ++ "." ++ context_name ++ ".get_" ++ lmod ++ """(id) do
     None ->
-      Conn.json(conn, 404, { error = "not found" })
+      Conn.json(conn, 404, { error: "not found" })
     Some(item) ->
       let params = Conn.json_params(conn)
       match """ ++ app_name ++ "." ++ context_name ++ ".update_" ++ lmod ++ """(item, params) do
         Ok(updated) ->
           Conn.json(conn, 200, updated)
         Err(gate) ->
-          Conn.json(conn, 422, { errors = Depot.Gate.errors(gate) })
+          Conn.json(conn, 422, { errors: Depot.Gate.errors(gate) })
       end
   end
 end
@@ -269,7 +269,7 @@ end
 fn delete(conn, id) do
   match """ ++ app_name ++ "." ++ context_name ++ ".get_" ++ lmod ++ """(id) do
     None ->
-      Conn.json(conn, 404, { error = "not found" })
+      Conn.json(conn, 404, { error: "not found" })
     Some(item) ->
       """ ++ app_name ++ "." ++ context_name ++ ".delete_" ++ lmod ++ """(item)
       Conn.json(conn, 204, {})
@@ -277,7 +277,7 @@ fn delete(conn, id) do
 end
 
 fn not_found(conn) do
-  Conn.json(conn, 404, { error = "not found" })
+  Conn.json(conn, 404, { error: "not found" })
 end
 
 end

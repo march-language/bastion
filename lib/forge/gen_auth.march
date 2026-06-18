@@ -63,12 +63,12 @@ alias Depot.Schema as Schema
 
 fn schema() do
   Schema.define("users", {
-    fields = {
-      email = "String",
-      hashed_password = "String",
-      confirmed_at = ("UtcDatetime", { null = true }),
-      inserted_at = "UtcDatetime",
-      updated_at = "UtcDatetime"
+    fields: {
+      email: "String",
+      hashed_password: "String",
+      confirmed_at: ("UtcDatetime", { null: true }),
+      inserted_at: "UtcDatetime",
+      updated_at: "UtcDatetime"
     }
   })
 end
@@ -140,12 +140,12 @@ let reset_validity_days        = 1
 
 fn schema() do
   Schema.define("user_tokens", {
-    fields = {
-      user_id     = "UUID",
-      token       = "String",
-      context     = "String",
-      sent_to     = ("String", { null = true }),
-      inserted_at = "UtcDatetime"
+    fields: {
+      user_id: "UUID",
+      token: "String",
+      context: "String",
+      sent_to: ("String", { null: true }),
+      inserted_at: "UtcDatetime"
     }
   })
 end
@@ -220,14 +220,14 @@ mod Migrations.CreateUsers do
 
 fn up() do
   Depot.Migration.create_table("users", {
-    id              = ("UUID",        { primary_key = true }),
-    email           = ("String",      { null = false }),
-    hashed_password = ("String",      { null = false }),
-    confirmed_at    = ("UtcDatetime", { null = true }),
-    inserted_at     = ("UtcDatetime", { null = false }),
-    updated_at      = ("UtcDatetime", { null = false })
+    id: ("UUID",        { primary_key: true }),
+    email: ("String",      { null: false }),
+    hashed_password: ("String",      { null: false }),
+    confirmed_at: ("UtcDatetime", { null: true }),
+    inserted_at: ("UtcDatetime", { null: false }),
+    updated_at: ("UtcDatetime", { null: false })
   })
-  Depot.Migration.create_index("users", ["email"], { unique = true })
+  Depot.Migration.create_index("users", ["email"], { unique: true })
 end
 
 fn down() do
@@ -249,14 +249,14 @@ mod Migrations.CreateUserTokens do
 
 fn up() do
   Depot.Migration.create_table("user_tokens", {
-    id          = ("UUID",        { primary_key = true }),
-    user_id     = ("UUID",        { null = false }),
-    token       = ("String",      { null = false }),
-    context     = ("String",      { null = false }),
-    sent_to     = ("String",      { null = true }),
-    inserted_at = ("UtcDatetime", { null = false })
+    id: ("UUID",        { primary_key: true }),
+    user_id: ("UUID",        { null: false }),
+    token: ("String",      { null: false }),
+    context: ("String",      { null: false }),
+    sent_to: ("String",      { null: true }),
+    inserted_at: ("UtcDatetime", { null: false })
   })
-  Depot.Migration.create_index("user_tokens", ["token"],              { unique = true })
+  Depot.Migration.create_index("user_tokens", ["token"],              { unique: true })
   Depot.Migration.create_index("user_tokens", ["context", "sent_to"], {})
   -- Foreign key: deleting a user cascades to their tokens
   Depot.Migration.execute("ALTER TABLE user_tokens ADD CONSTRAINT user_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE")
@@ -293,11 +293,11 @@ fn get_user(id) do
 end
 
 fn get_user_by_email(email) do
-  Repo.get_by(User.schema(), { email = email })
+  Repo.get_by(User.schema(), { email: email })
 end
 
 fn get_user_by_email_and_password(email, password) do
-  match Repo.get_by(User.schema(), { email = email }) do
+  match Repo.get_by(User.schema(), { email: email }) do
   None -> None
   Some(user) ->
     if User.valid_password(user, password) do
@@ -356,14 +356,14 @@ fn create_session_token(user) do
 end
 
 fn get_user_by_session_token(token) do
-  match Repo.get_by(UserToken.schema(), { token = token, context = "session" }) do
+  match Repo.get_by(UserToken.schema(), { token: token, context: "session" }) do
   None -> None
   Some(tok) -> Repo.get(User.schema(), tok.user_id)
   end
 end
 
 fn delete_session_token(token) do
-  match Repo.get_by(UserToken.schema(), { token = token, context = "session" }) do
+  match Repo.get_by(UserToken.schema(), { token: token, context: "session" }) do
   None -> :ok
   Some(tok) ->
     Repo.delete(UserToken.schema(), tok.id)
@@ -383,14 +383,14 @@ end
 
 fn confirm_user(token_str) do
   let hashed = Crypto.sha256(token_str)
-  match Repo.get_by(UserToken.schema(), { token = hashed, context = "confirm" }) do
+  match Repo.get_by(UserToken.schema(), { token: hashed, context: "confirm" }) do
   None -> Err("invalid or expired confirmation token")
   Some(tok) ->
     match Repo.get(User.schema(), tok.user_id) do
     None -> Err("user not found")
     Some(user) ->
       let now = DateTime.now()
-      let gate = Gate.cast_record(user, { confirmed_at = now }, ["confirmed_at"])
+      let gate = Gate.cast_record(user, { confirmed_at: now }, ["confirmed_at"])
       match Repo.update(User.schema(), gate) do
       Ok(confirmed_user) ->
         Repo.delete(UserToken.schema(), tok.id)
@@ -413,7 +413,7 @@ end
 
 fn get_user_by_reset_password_token(token_str) do
   let hashed = Crypto.sha256(token_str)
-  match Repo.get_by(UserToken.schema(), { token = hashed, context = "reset_password" }) do
+  match Repo.get_by(UserToken.schema(), { token: hashed, context: "reset_password" }) do
   None -> None
   Some(tok) -> Repo.get(User.schema(), tok.user_id)
   end
@@ -938,7 +938,7 @@ fn user_fixture(overrides) do
   Ok(user) ->
     let confirm_gate = Depot.Gate.cast_record(
       user,
-      { confirmed_at = DateTime.now() },
+      { confirmed_at: DateTime.now() },
       ["confirmed_at"]
     )
     match Depot.Repo.update(""" ++ pascal ++ """.Accounts.User.schema(), confirm_gate) do

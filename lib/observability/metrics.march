@@ -65,7 +65,7 @@ mod Bastion.Metrics do
       let status  = HttpServer.status(result)
       let method  = HttpServer.method_to_string(HttpServer.method(conn))
       let path    = HttpServer.path(conn)
-      let entry   = { method = method, path = path, status = status, duration = elapsed }
+      let entry   = { method: method, path: path, status: status, duration: elapsed }
       do_record(entry, status)
       result
     end
@@ -83,7 +83,7 @@ mod Bastion.Metrics do
   fn record(conn) do
     let method = HttpServer.method_to_string(HttpServer.method(conn))
     let path   = HttpServer.path(conn)
-    let entry  = { method = method, path = path, status = 0, duration = 0 }
+    let entry  = { method: method, path: path, status: 0, duration: 0 }
     do_record(entry, 0)
     conn
   end
@@ -126,7 +126,7 @@ mod Bastion.Metrics do
     let total_ms = Vault.get_or(table, total_ms_key, 0)
     let avg_ms  = if total > 0 do total_ms / total else 0 end
     let recent  = Vault.get_or(table, recent_key, [])
-    { total = total, errors = errors, avg_ms = avg_ms, recent = recent }
+    { total: total, errors: errors, avg_ms: avg_ms, recent: recent }
   end
 
   doc "Return the total number of requests recorded."

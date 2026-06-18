@@ -74,7 +74,7 @@ pfn parse_comment_routes(lines) do
       match String.split_first(rest, " ") do
       Some((meth, path)) ->
         let handler = find_handler(lines, i + 1)
-        Some({ method_str = String.to_uppercase(meth), path = path, handler = handler })
+        Some({ method_str: String.to_uppercase(meth), path: path, handler: handler })
       None -> None
       end
     else
@@ -256,7 +256,7 @@ pfn parse_arm_line(line, lines, line_idx) do
             end
           None -> find_handler(lines, line_idx + 1)
         end
-        Some({ method_str = meth, path = path, handler = handler })
+        Some({ method_str: meth, path: path, handler: handler })
       end
     end
   end

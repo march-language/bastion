@@ -36,7 +36,7 @@ mod SecurityHeaders do
     x-content-type-options: nosniff
     x-xss-protection: 0   (disabled; rely on CSP instead)
     referrer-policy: strict-origin-when-cross-origin
-    permissions-policy: camera=(), microphone=(), geolocation=()
+    permissions-policy: camera=(), microphone:(), geolocation:()
     cross-origin-opener-policy: same-origin
     cross-origin-embedder-policy: require-corp
 
@@ -48,7 +48,7 @@ mod SecurityHeaders do
     |> HttpServer.put_resp_header("x-content-type-options", "nosniff")
     |> HttpServer.put_resp_header("x-xss-protection", "0")
     |> HttpServer.put_resp_header("referrer-policy", "strict-origin-when-cross-origin")
-    |> HttpServer.put_resp_header("permissions-policy", "camera=(), microphone=(), geolocation=()")
+    |> HttpServer.put_resp_header("permissions-policy", "camera=(), microphone:(), geolocation:()")
     |> HttpServer.put_resp_header("cross-origin-opener-policy", "same-origin")
     |> HttpServer.put_resp_header("cross-origin-embedder-policy", "require-corp")
   end
@@ -164,7 +164,7 @@ mod SecurityHeaders do
   Override the permissions-policy header.
   Pass a semicolon-separated list of feature directives.
 
-      conn |> SecurityHeaders.permissions_policy("camera=(), microphone=(self)")
+      conn |> SecurityHeaders.permissions_policy("camera=(), microphone:(self)")
   """
   fn permissions_policy(conn, value) do
     HttpServer.put_resp_header(conn, "permissions-policy", value)
