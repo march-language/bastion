@@ -12,6 +12,8 @@ mod BastionServer do
   import HttpServer
   import Router
   import Bastion
+  import Bastion.Session
+  alias Bastion.Session as Session
 
   doc """
   Start the Bastion server with the given router and options.

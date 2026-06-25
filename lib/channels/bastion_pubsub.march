@@ -17,6 +17,7 @@
 -- every stored subscription key for a pattern match.
 
 mod BastionPubSub do
+  needs IO.Mut
 
   import Vault
 

@@ -20,7 +20,8 @@
 mod Bastion.Test.Auth do
 
   import Auth
-  import Session
+  import Bastion.Session
+  alias Bastion.Session as Session
   import Conn
 
   -- Default test secret (not used in production — for test conn signing only)

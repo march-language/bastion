@@ -22,6 +22,8 @@
 mod CSRF do
 
   import Crypto
+  import Bastion.Session
+  alias Bastion.Session as Session
 
   -- -----------------------------------------------------------------------
   -- Token generation

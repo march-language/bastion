@@ -26,6 +26,9 @@
 
 mod Flash do
 
+  import Bastion.Session
+  alias Bastion.Session as Session
+
   -- Separator between key and value within one flash entry.
   -- \x01 (SOH) is safe — never appears in user-supplied flash messages
   -- because we HTML-escape all values before storing them.

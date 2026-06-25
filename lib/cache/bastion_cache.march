@@ -19,6 +19,7 @@
 --   end)
 
 mod BastionCache do
+  needs IO.Mut
 
   import Vault
 

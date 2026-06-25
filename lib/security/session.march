@@ -39,8 +39,11 @@
 --
 --   conn |> Session.commit(secret_key_base)
 
-mod Session do
+mod Bastion.Session do
 
+  import Conn
+  import HttpServer
+  import Crypto
 
   -- Assigns key where the secret_key_base is stored for the commit hook.
   let secret_assign = "_session_secret"
