@@ -37,7 +37,6 @@
 mod Bastion.ChannelServer do
 
   import HttpServer
-  import Bastion.Channel
   alias Bastion.Channel as Channel
   alias Bastion.PubSub as PubSub
 
@@ -52,18 +51,18 @@ mod Bastion.ChannelServer do
   -- Multiple routes are tried in the order they were added; the first prefix
   -- match wins.
 
-  type ChannelRoute = ChannelRoute(
+  type ChannelRoute(cc) = ChannelRoute(
     String,                                                                    -- topic prefix
-    ChannelConn -> String -> String -> Result(ChannelConn, String),  -- join_fn
-    ChannelConn -> String -> String -> ChannelConn   -- handle_in_fn
+    cc -> String -> String -> Result(cc, String),  -- join_fn
+    cc -> String -> String -> cc   -- handle_in_fn
   )
 
-  type ChannelRoutes = ChannelRoutes(List(ChannelRoute))
+  type ChannelRoutes(cc) = ChannelRoutes(List(ChannelRoute(cc)))
 
   -- ── Route builders ────────────────────────────────────────────────────────
 
   doc "Create an empty route table."
-  fn new_routes() : ChannelRoutes do
+  fn new_routes() : ChannelRoutes(cc) do
     ChannelRoutes([])
   end
 
@@ -82,11 +81,11 @@ mod Bastion.ChannelServer do
       |> ChannelServer.add_route("system:", MyApp.SysChannel.join,  MyApp.SysChannel.handle_in)
   """
   fn add_route(
-    routes : ChannelRoutes,
+    routes : ChannelRoutes(cc),
     prefix : String,
-    join_fn : ChannelConn -> String -> String -> Result(ChannelConn, String),
-    handle_in_fn : ChannelConn -> String -> String -> ChannelConn
-  ) : ChannelRoutes do
+    join_fn : cc -> String -> String -> Result(cc, String),
+    handle_in_fn : cc -> String -> String -> cc
+  ) : ChannelRoutes(cc) do
     match routes do
     ChannelRoutes(rs) ->
       ChannelRoutes(List.append(rs, [ChannelRoute(prefix, join_fn, handle_in_fn)]))
@@ -101,7 +100,7 @@ mod Bastion.ChannelServer do
 
   Requests to any other path pass through unchanged.
   """
-  fn plug(routes : ChannelRoutes) do
+  fn plug(routes : ChannelRoutes(cc)) do
     plug_at("/_bastion/channel", routes)
   end
 
@@ -110,7 +109,7 @@ mod Bastion.ChannelServer do
 
       HttpServer.plug(ChannelServer.plug_at("/socket/websocket", routes))
   """
-  fn plug_at(path : String, routes : ChannelRoutes) do
+  fn plug_at(path : String, routes : ChannelRoutes(cc)) do
     fn conn -> do
       if HttpServer.path(conn) == path do
         WebSocket.upgrade(conn, fn ws_sock ->
@@ -131,8 +130,8 @@ mod Bastion.ChannelServer do
 
   pfn channel_loop(
     ws_sock,
-    active_conns : List((String, ChannelConn)),
-    routes : ChannelRoutes,
+    active_conns : List((String, cc)),
+    routes : ChannelRoutes(cc),
     conn_id : String
   ) do
     match WebSocket.recv(ws_sock) do
@@ -154,10 +153,10 @@ mod Bastion.ChannelServer do
   pfn handle_frame(
     ws_sock,
     text : String,
-    active_conns : List((String, ChannelConn)),
-    routes : ChannelRoutes,
+    active_conns : List((String, cc)),
+    routes : ChannelRoutes(cc),
     conn_id : String
-  ) : List((String, ChannelConn)) do
+  ) : List((String, cc)) do
     match Json.parse(text) do
     Err(_) -> active_conns
     Ok(msg) ->
@@ -184,10 +183,10 @@ mod Bastion.ChannelServer do
     topic : String,
     params_json : String,
     ref : String,
-    active_conns : List((String, ChannelConn)),
-    routes : ChannelRoutes,
+    active_conns : List((String, cc)),
+    routes : ChannelRoutes(cc),
     conn_id : String
-  ) : List((String, ChannelConn)) do
+  ) : List((String, cc)) do
     -- Already joined — idempotent OK
     match find_active(active_conns, topic) do
     Some(_) ->
@@ -230,9 +229,9 @@ mod Bastion.ChannelServer do
     ws_sock,
     topic : String,
     ref : String,
-    active_conns : List((String, ChannelConn)),
+    active_conns : List((String, cc)),
     conn_id : String
-  ) : List((String, ChannelConn)) do
+  ) : List((String, cc)) do
     -- Use a synthetic ChannelConn just to build the sub_id
     let dummy_push = fn (_, _) -> ()
     let dummy_cc   = Channel.new_conn(topic, conn_id, dummy_push)
@@ -252,9 +251,9 @@ mod Bastion.ChannelServer do
     event : String,
     payload_json : String,
     ref : String,
-    active_conns : List((String, ChannelConn)),
-    routes : ChannelRoutes
-  ) : List((String, ChannelConn)) do
+    active_conns : List((String, cc)),
+    routes : ChannelRoutes(cc)
+  ) : List((String, cc)) do
     match find_active(active_conns, topic) do
     None ->
       -- Not joined; send error reply and leave conn unchanged
@@ -279,13 +278,13 @@ mod Bastion.ChannelServer do
 
   -- ── Route lookup ──────────────────────────────────────────────────────────
 
-  pfn find_route(routes : ChannelRoutes, topic : String) : Option(ChannelRoute) do
+  pfn find_route(routes : ChannelRoutes(cc), topic : String) : Option(ChannelRoute(cc)) do
     match routes do
     ChannelRoutes(rs) -> find_in_routes(rs, topic)
     end
   end
 
-  pfn find_in_routes(rs : List(ChannelRoute), topic : String) : Option(ChannelRoute) do
+  pfn find_in_routes(rs : List(ChannelRoute(cc)), topic : String) : Option(ChannelRoute(cc)) do
     match rs do
     []              -> None
     Cons(r, rest)   ->
@@ -301,9 +300,9 @@ mod Bastion.ChannelServer do
   -- ── Active-conn helpers ───────────────────────────────────────────────────
 
   pfn find_active(
-    active_conns : List((String, ChannelConn)),
+    active_conns : List((String, cc)),
     topic : String
-  ) : Option(ChannelConn) do
+  ) : Option(cc) do
     match active_conns do
     []                    -> None
     Cons((t, cc), rest)   ->
@@ -312,10 +311,10 @@ mod Bastion.ChannelServer do
   end
 
   pfn replace_active(
-    active_conns : List((String, ChannelConn)),
+    active_conns : List((String, cc)),
     topic : String,
-    new_cc : ChannelConn
-  ) : List((String, ChannelConn)) do
+    new_cc : cc
+  ) : List((String, cc)) do
     List.map(active_conns, fn pair ->
       let (t, cc) = pair
       if t == topic do (topic, new_cc) else (t, cc) end

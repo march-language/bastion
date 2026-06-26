@@ -9,10 +9,11 @@
 
 mod BastionServer do
 
+  needs IO.Console
+
   import HttpServer
   import Router
   import Bastion
-  import Bastion.Session
   alias Bastion.Session as Session
 
   doc """

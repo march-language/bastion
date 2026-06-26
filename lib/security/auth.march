@@ -45,7 +45,6 @@
 mod Auth do
 
   import Conn
-  import Bastion.Session
   alias Bastion.Session as Session
 
   -- ── Session keys / cookie names ───────────────────────────────────────────

@@ -11,6 +11,8 @@
 
 mod Forge.DepotMigrate do
 
+  needs IO.Console
+
   fn main() do
     match CmdDepot.migrate() do
     Ok(_)    -> ()

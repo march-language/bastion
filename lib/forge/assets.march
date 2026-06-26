@@ -20,6 +20,8 @@
 
 mod Forge.Assets do
 
+  needs IO.Console
+
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 -- List all regular files immediately inside dir (non-recursive).

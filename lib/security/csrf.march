@@ -21,8 +21,9 @@
 
 mod CSRF do
 
+  needs IO.Random
+
   import Crypto
-  import Bastion.Session
   alias Bastion.Session as Session
 
   -- -----------------------------------------------------------------------

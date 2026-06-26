@@ -24,6 +24,7 @@
 --   end
 
 mod Bastion.Test.Channel do
+
   needs IO.Mut
 
   import Bastion.Channel

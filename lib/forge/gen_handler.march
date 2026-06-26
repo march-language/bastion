@@ -17,6 +17,8 @@
 
 mod Forge.GenHandler do
 
+  needs IO.Console
+
 -- ── Name helpers ─────────────────────────────────────────────────────────────
 
 pfn capitalize(s) do

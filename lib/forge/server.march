@@ -14,6 +14,8 @@
 
 mod Forge.Server do
 
+  needs IO.Console
+
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 -- Locate the `march` binary in PATH.

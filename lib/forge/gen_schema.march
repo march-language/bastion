@@ -12,6 +12,8 @@
 
 mod Forge.GenSchema do
 
+  needs IO.Console
+
 -- ── Helpers ───────────────────────────────────────────────────────────────────
 
 -- Capitalise the first character of a string.

@@ -26,7 +26,6 @@
 
 mod Flash do
 
-  import Bastion.Session
   alias Bastion.Session as Session
 
   -- Separator between key and value within one flash entry.

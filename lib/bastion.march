@@ -18,6 +18,8 @@
 
 mod Bastion do
 
+  needs IO.Console
+
   -- Server configuration options.
   --
   -- Fields (positional):

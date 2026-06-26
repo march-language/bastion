@@ -13,6 +13,8 @@
 
 mod Forge.GenChannel do
 
+  needs IO.Console
+
 -- ── Name helpers ─────────────────────────────────────────────────────────────
 
 pfn capitalize(s) do

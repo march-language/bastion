@@ -14,6 +14,8 @@
 
 mod Forge.Routes do
 
+  needs IO.Console
+
 -- A single recognised route (named ParsedRoute to avoid collision with Router.Route).
 type ParsedRoute = { method_str: String, path: String, handler: String }
 

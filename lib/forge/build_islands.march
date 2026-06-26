@@ -22,6 +22,8 @@
 
 mod Forge.BuildIslands do
 
+  needs IO.Console
+
 -- ── Name helpers ─────────────────────────────────────────────────────────────
 
 fn pascal_to_snake(s) do

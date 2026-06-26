@@ -12,6 +12,8 @@
 
 mod Forge.DepotReset do
 
+  needs IO.Console
+
   fn main() do
     match CmdDepot.reset() do
     Ok(_)    -> ()

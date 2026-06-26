@@ -21,6 +21,9 @@
 
 mod Bastion.ErrorOverlay do
 
+  needs IO.Console
+  needs IO.Clock
+
   import HttpServer
   import Bastion.Dev
 

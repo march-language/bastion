@@ -39,6 +39,8 @@
 
 mod Crypto do
 
+  needs IO.Random
+
   import Hkdf
 
   -- ── Private helpers ───────────────────────────────────────────────────────

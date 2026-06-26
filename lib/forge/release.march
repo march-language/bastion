@@ -28,6 +28,8 @@
 
 mod Forge.Release do
 
+  needs IO.Console
+
   -- ── Helpers ──────────────────────────────────────────────────────────────────
 
   pfn app_name() do

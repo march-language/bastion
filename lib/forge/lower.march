@@ -17,6 +17,8 @@
 
 mod Forge.Lower do
 
+  needs IO.Console
+
 -- ── Token types ──────────────────────────────────────────────────────────────
 
 type Token =

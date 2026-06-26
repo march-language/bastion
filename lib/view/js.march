@@ -44,6 +44,8 @@
 
 mod Bastion.JS do
 
+  needs IO.Foreign
+
   -- ── Types ──────────────────────────────────────────────────────────────────
 
   -- An opaque handle to a JavaScript value held in the JS-side object table.

@@ -10,6 +10,8 @@
 
 mod Forge.DepotMigrations do
 
+  needs IO.Console
+
   fn main() do
     match CmdDepot.migrations() do
     Ok(_)    -> ()

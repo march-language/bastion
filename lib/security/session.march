@@ -41,6 +41,8 @@
 
 mod Bastion.Session do
 
+  needs IO.Random
+
   import Conn
   import HttpServer
   import Crypto

@@ -37,6 +37,8 @@
 
 mod Bastion.Telemetry do
 
+  needs IO.Clock
+
   -- Vault table storing registered handlers
   let table_name = "_bastion_telemetry"
 

@@ -48,9 +48,9 @@ mod Islands do
   -- Server and Client map to the same semantics as ServerOwned and ClientOwned.
   type DataFlow = Server | Client
 
-  -- Event — a named event with a JSON payload, dispatched from a child island upward.
-  type Event = Event(String, String)
-  -- Event(event_name, payload_json)
+  -- IslandEvent — a named event with a JSON payload, dispatched from a child island upward.
+  type IslandEvent = IslandEvent(String, String)
+  -- IslandEvent(event_name, payload_json)
 
   -- FormConfig — channel and redirect configuration for form islands.
   type FormConfig = FormConfig(String, String)
@@ -75,8 +75,8 @@ mod Islands do
   fn client_mode()    do ClientOwned end
   doc "Return the Server dataflow mode."
   fn server_mode()    do ServerOwned end
-  doc "Construct an Event value."
-  fn new_event(name : String, payload : String) do Event(name, payload) end
+  doc "Construct an IslandEvent value."
+  fn new_event(name : String, payload : String) do IslandEvent(name, payload) end
   doc "Construct a FormConfig value."
   fn new_form_config(channel : String, redirect : String) do FormConfig(channel, redirect) end
 
@@ -143,24 +143,24 @@ mod Islands do
 
   -- ── DataFlow helpers (spec-aligned) ────────────────────────────────────
 
-  doc "Get the event name from an Event."
-  fn event_name(evt : Event) : String do
+  doc "Get the event name from an IslandEvent."
+  fn event_name(evt : IslandEvent) : String do
     match evt do
-    Event(name, _payload) -> name
+    IslandEvent(name, _payload) -> name
     end
   end
 
-  doc "Get the JSON payload from an Event."
-  fn event_payload(evt : Event) : String do
+  doc "Get the JSON payload from an IslandEvent."
+  fn event_payload(evt : IslandEvent) : String do
     match evt do
-    Event(_name, payload) -> payload
+    IslandEvent(_name, payload) -> payload
     end
   end
 
-  doc "Encode an Event as a JSON string."
-  fn event_to_json(evt : Event) : String do
+  doc "Encode an IslandEvent as a JSON string."
+  fn event_to_json(evt : IslandEvent) : String do
     match evt do
-    Event(name, payload) ->
+    IslandEvent(name, payload) ->
       "{\"event\":\"" ++ json_esc(name) ++ "\",\"payload\":" ++ payload ++ "}"
     end
   end

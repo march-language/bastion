@@ -19,6 +19,7 @@
 
 mod Bastion.OpenTelemetry do
 
+  needs IO.Clock
 
   -- ── Types ─────────────────────────────────────────────────────────────────
 
