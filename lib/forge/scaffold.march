@@ -5,6 +5,8 @@
 
 mod Forge.Scaffold do
 
+  needs IO.Console
+
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
 -- Capitalise the first character of a string.
