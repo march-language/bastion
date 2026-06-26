@@ -133,7 +133,7 @@ end
 -- ── Public commands ───────────────────────────────────────────────────────────
 
 doc "forge assets build — dev bundle with sourcemaps, no minification."
-fn build() do
+fn build() : Result((), String) do
   match Forge.Project.load() do
   Err(msg) -> Err(msg)
   Ok(proj) ->
