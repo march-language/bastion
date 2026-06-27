@@ -28,6 +28,10 @@
 
 mod Depot.Middleware do
 
+  needs IO.NetConnect
+  needs IO.Random
+  needs IO.Spawn
+
   import Pool
 
   -- Assign keys used internally (string marker in assigns)
