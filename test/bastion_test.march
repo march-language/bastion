@@ -1,6 +1,6 @@
 mod BastionTest do
 
-needs IO.File, IO.Dir, IO.Process
+needs IO.File, IO.Dir, IO.Process, IO.Random
 
 import Router
 import Middleware
@@ -16,6 +16,7 @@ import IslandCss
 import IslandAssets
 import Islands
 import Test
+import Bastion.Session
 
 -- ── Conn construction helpers (for Router / Middleware / etc. tests) ──
 --
@@ -932,7 +933,7 @@ describe "Middleware.compose" do
     let conn     = make_get("/")
     let a        = fn c -> HttpServer.assign(c, "a", "1")
     let b        = fn c -> HttpServer.assign(c, "b", "2")
-    let composed = compose(a, b)
+    let composed = Middleware.compose(a, b)
     let out      = composed(conn)
     assert (opt_eq(HttpServer.get_assign(out, "a"), "1"))
     assert (opt_eq(HttpServer.get_assign(out, "b"), "2"))
@@ -941,7 +942,7 @@ describe "Middleware.compose" do
     let conn     = make_get("/")
     let a        = fn c -> HttpServer.halt(c)
     let b        = fn c -> HttpServer.assign(c, "b", "bad")
-    let composed = compose(a, b)
+    let composed = Middleware.compose(a, b)
     let out      = composed(conn)
     assert (HttpServer.halted(out))
     assert (opt_none(HttpServer.get_assign(out, "b")))

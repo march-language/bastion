@@ -13,6 +13,8 @@
 
 mod TestIslandsDataflow do
 
+needs IO.Mut
+
 import Islands
 import IslandView
 import IslandSocket

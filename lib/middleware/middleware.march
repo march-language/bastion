@@ -24,13 +24,12 @@ mod Middleware do
   Calls a(conn), then b on the result only if the conn is not halted.
   """
   fn compose(a : Conn -> Conn, b : Conn -> Conn) : Conn -> Conn do
-    fn conn -> do
+    fn conn ->
       let c = a(conn)
       match HttpServer.halted(c) do
       true  -> c
       false -> b(c)
       end
-    end
   end
 
   -- ── Built-in middleware ───────────────────────────────────────────
