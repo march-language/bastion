@@ -22,7 +22,6 @@
 
 mod Bastion.Test.Depot do
 
-  import Depot.Test
   alias Depot.Test as DepotTest
 
   doc """
