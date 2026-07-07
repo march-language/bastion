@@ -85,7 +85,12 @@
       }
     }
 
-    /** True if this is a Server-mode island (read-only, no event listeners). */
+    /**
+     * True if this is a Server-mode island (server owns state; no local
+     * WASM module is loaded). Server-owned islands can still dispatch
+     * DOM events — see dispatch() — the events are sent to the server
+     * for authoritative update+render instead of being applied locally.
+     */
     isServer() {
       return this.dataflow === 'server';
     }
@@ -136,13 +141,18 @@
      *   3. If a channel is wired, push state to the channel topic.
      *   4. Also send to the WebSocket server for persistence.
      *
-     * For Server-mode islands: this should never be called (no event listeners).
+     * For Server-mode islands: there is no local wasmModule, so step 1-3
+     * above are skipped naturally (the `if (this.wasmModule)` guard below
+     * is false). Only step 4 runs: the message is sent to the server, which
+     * runs the authoritative update+render and pushes a "render" message
+     * back — handled by _handleMessage's morph() call, independent of
+     * wasmModule. This is the "Server-authoritative" pattern from
+     * specs/islands.md: update only runs server-side, but the client still
+     * originates the event.
      *
      * @param {string|Object} msgPayload
      */
     dispatch(msgPayload) {
-      if (this.isServer()) return;  // defensive: Server islands have no events
-
       if (this.wasmModule) {
         // Use updateWithCmd if available (islands that return (State, Cmd) tuples).
         // Falls back to plain update() for islands that just return State.
@@ -686,7 +696,7 @@
         if (onClickEl) {
           e.preventDefault();
           const instance = this._findIslandForElement(onClickEl);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             instance.dispatch({ tag: onClickEl.dataset.onClick });
           }
           return;
@@ -697,7 +707,7 @@
         if (msgEl) {
           e.preventDefault();
           const instance = this._findIslandForElement(msgEl);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             let msg = msgEl.dataset.msg;
             try { msg = JSON.parse(msg); } catch (_) { msg = { tag: msg }; }
             instance.dispatch(msg);
@@ -712,7 +722,7 @@
         // New style: data-on-input
         if (target.dataset.onInput) {
           const instance = this._findIslandForElement(target);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             instance.dispatch({ tag: target.dataset.onInput, value: target.value });
           }
           return;
@@ -721,7 +731,7 @@
         // Legacy: data-msg-input
         if (target.dataset.msgInput) {
           const instance = this._findIslandForElement(target);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             instance.dispatch({ type: target.dataset.msgInput, value: target.value });
           }
         }
@@ -734,7 +744,7 @@
         // New style: data-on-change
         if (target.dataset.onChange) {
           const instance = this._findIslandForElement(target);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             const value = target.type === 'checkbox' ? target.checked : target.value;
             instance.dispatch({ tag: target.dataset.onChange, value: value });
           }
@@ -744,7 +754,7 @@
         // Legacy: data-msg-change
         if (target.dataset.msgChange) {
           const instance = this._findIslandForElement(target);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             const value = target.type === 'checkbox' ? target.checked : target.value;
             instance.dispatch({ type: target.dataset.msgChange, value: value });
           }
@@ -760,7 +770,7 @@
           const formData = new FormData(onSubmitForm);
           const data = Object.fromEntries(formData.entries());
           const instance = this._findIslandForElement(onSubmitForm);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             instance.dispatch({ tag: onSubmitForm.dataset.onSubmit, data: data });
           }
           return;
@@ -773,7 +783,7 @@
           const formData = new FormData(msgForm);
           const data = Object.fromEntries(formData.entries());
           const instance = this._findIslandForElement(msgForm);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             instance.dispatch({ type: msgForm.dataset.msgSubmit, data: data });
           }
         }
@@ -788,7 +798,7 @@
           const keyFilter = target.dataset.onKeydownKey;
           if (keyFilter && e.key !== keyFilter) return;
           const instance = this._findIslandForElement(target);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             instance.dispatch({ tag: target.dataset.onKeydown, key: e.key, value: target.value || '' });
           }
           return;
@@ -799,7 +809,7 @@
           const keyFilter = target.dataset.msgKeydownKey;
           if (keyFilter && e.key !== keyFilter) return;
           const instance = this._findIslandForElement(target);
-          if (instance && !instance.isServer()) {
+          if (instance) {
             instance.dispatch({ type: target.dataset.msgKeydown, key: e.key, value: target.value || '' });
           }
         }
