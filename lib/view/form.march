@@ -22,7 +22,7 @@
 
 mod Form do
 
-  import Gate
+  import Depot.Gate
 
   -- ── Low-level tag builders ────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ mod Form do
   doc """
   Render an error <span> for a field, or empty string if no error.
 
-      Form.error_tag(Gate.error_for(gate, "email"))
+      Form.error_tag(Depot.Gate.error_for(gate, "email"))
   """
   fn error_tag(error : Option(String)) : String do
     match error do
@@ -114,7 +114,7 @@ mod Form do
   `input_html` is the pre-rendered input element.
   `error` is the optional error message.
 
-      Form.field_tag("email", "Email", input_html, Gate.error_for(gate, "email"))
+      Form.field_tag("email", "Email", input_html, Depot.Gate.error_for(gate, "email"))
   """
   fn field_tag(name : String, label_text : String, input_html : String, error : Option(String)) : String do
     let label_html = if String.is_empty(label_text) do ""
@@ -201,23 +201,23 @@ mod Form do
     Used in .march.html templates as:
       <.Form.Input name="email" type_="email" label="Email" gate={gate} />
 
-    If `gate` is supplied, the current value is read from Gate.get_field and
-    the error from Gate.error_for. A `value` prop overrides the gate value.
+    If `gate` is supplied, the current value is read from Depot.Gate.get_field and
+    the error from Depot.Gate.error_for. A `value` prop overrides the gate value.
     If `required` is true, a required marker (*) is appended to the label.
     """
     fn render(name : String, type_ : String, label : String,
-              gate : Option(Gate), value : String \\ "",
+              gate, value : String \\ "",
               required : Bool \\ false, class : String \\ "") : IOList do
       let actual_value = match gate do
         Some(g) ->
-          match Gate.get_field(g, name) do
+          match Depot.Gate.get_field(g, name) do
           Some(v) -> v
           None    -> value
           end
         None -> value
         end
       let error = match gate do
-        Some(g) -> Gate.error_for(g, name)
+        Some(g) -> Depot.Gate.error_for(g, name)
         None    -> None
         end
       let label_text = if required do label ++ " *" else label end
@@ -235,18 +235,18 @@ mod Form do
       <.Form.Textarea name="body" label="Body" gate={gate} />
     """
     fn render(name : String, label : String,
-              gate : Option(Gate), value : String \\ "",
+              gate, value : String \\ "",
               required : Bool \\ false, class : String \\ "") : IOList do
       let actual_value = match gate do
         Some(g) ->
-          match Gate.get_field(g, name) do
+          match Depot.Gate.get_field(g, name) do
           Some(v) -> v
           None    -> value
           end
         None -> value
         end
       let error = match gate do
-        Some(g) -> Gate.error_for(g, name)
+        Some(g) -> Depot.Gate.error_for(g, name)
         None    -> None
         end
       let label_text = if required do label ++ " *" else label end
@@ -265,18 +265,18 @@ mod Form do
     `options` is a List((String, String)) — (display label, value) pairs.
     """
     fn render(name : String, label : String, options : List((String, String)),
-              gate : Option(Gate), value : String \\ "",
+              gate, value : String \\ "",
               required : Bool \\ false, class : String \\ "") : IOList do
       let selected = match gate do
         Some(g) ->
-          match Gate.get_field(g, name) do
+          match Depot.Gate.get_field(g, name) do
           Some(v) -> v
           None    -> value
           end
         None -> value
         end
       let error = match gate do
-        Some(g) -> Gate.error_for(g, name)
+        Some(g) -> Depot.Gate.error_for(g, name)
         None    -> None
         end
       let label_text = if required do label ++ " *" else label end
@@ -297,9 +297,9 @@ mod Form do
       <!-- write your custom <input type="file" ...> around this component -->
     """
     fn render(name : String, label : String,
-              gate : Option(Gate), required : Bool \\ false) : IOList do
+              gate, required : Bool \\ false) : IOList do
       let error = match gate do
-        Some(g) -> Gate.error_for(g, name)
+        Some(g) -> Depot.Gate.error_for(g, name)
         None    -> None
         end
       let label_text = if required do label ++ " *" else label end
@@ -323,9 +323,9 @@ mod Form do
 
       <.Form.Error gate={gate} field="email" />
     """
-    fn render(gate : Option(Gate), field : String) : IOList do
+    fn render(gate, field : String) : IOList do
       let error = match gate do
-        Some(g) -> Gate.error_for(g, field)
+        Some(g) -> Depot.Gate.error_for(g, field)
         None    -> None
         end
       IOList.from_string(Form.error_tag(error))
