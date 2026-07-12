@@ -117,6 +117,48 @@ mod RateLimit do
     end
   end
 
+  -- ── Bounded key tracking ─────────────────────────────────────────────────
+  --
+  -- Bounds the number of DISTINCT keys any one rate-limit table tracks, so a
+  -- high-cardinality key_fn (real per-visitor IPs, e.g. via a trusted
+  -- CF-Connecting-IP/X-Forwarded-For lookup) can't grow the table's Vault
+  -- bucket chains without bound. March's Vault runtime never reclaims a
+  -- TTL-expired entry on its own — only an explicit `Vault.drop` frees a
+  -- node (`march_vault_set_ttl` always mallocs a new node for an unseen key;
+  -- `march_vault_get`'s lookup treats an expired node as logically absent
+  -- but never unlinks/frees it) — so `check/5`'s original always-`set_ttl`,
+  -- never-`drop` write pattern is a permanent leak once the key space is
+  -- unbounded/high-cardinality: every distinct key seen even once mints a
+  -- node that lives forever, and the table degrades into an ever-longer O(n)
+  -- scan under Vault's global per-table mutex. (This is the exact mechanism
+  -- behind a real ~6h production outage in a Vault-backed identity cache
+  -- keyed by request_id — see the forgepm incident writeup.) `ip_key` alone
+  -- (the transport peer address) was never high-cardinality behind a single
+  -- reverse proxy/tunnel, which is presumably why this went unnoticed.
+  --
+  -- Fix: an LRU ring of the MAX_TRACKED_KEYS most-recently-touched keys,
+  -- stored under a fixed sentinel key in the SAME table (a single reused
+  -- key, not itself a leak risk). Touching a key moves it to the front;
+  -- evicting the least-recently-used key past the cap issues an explicit
+  -- `Vault.drop` so its bucket entry is actually freed. Bounded cost per
+  -- call (O(MAX_TRACKED_KEYS) list work, not O(total requests ever)).
+  pfn rl_lru_sentinel() do "__rl_lru_keys__" end
+  pfn rl_max_tracked_keys() do 2000 end
+
+  pfn touch_lru(table, k) do
+    let sentinel  = rl_lru_sentinel()
+    let current   = match Vault.get(table, sentinel) do Some(ks) -> ks | None -> [] end
+    let without_k = List.filter(current, fn x -> x != k)
+    let touched   = Cons(k, without_k)
+    if List.length(touched) > rl_max_tracked_keys() do
+      let evicted = List.last(touched)
+      let _ = Vault.drop(table, evicted)
+      Vault.set(table, sentinel, List.drop_last(touched))
+    else
+      Vault.set(table, sentinel, touched)
+    end
+  end
+
   -- ── Core check ────────────────────────────────────────────────────────────
 
   doc """
@@ -157,7 +199,10 @@ mod RateLimit do
     let updated    = List.append(live, [now_ms])
     let count      = List.length(updated)
 
-    -- Write back with TTL so entries for quiet clients expire automatically.
+    -- Write back with TTL so entries for quiet clients expire automatically
+    -- (in the sense of no longer counting toward the limit — the node itself
+    -- is only actually freed by touch_lru's eviction, see above).
+    let _ = touch_lru(table, k)
     Vault.set_ttl(table, k, updated, window_secs + 1)
 
     let remaining  = if count > limit do 0 else limit - count end
