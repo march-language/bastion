@@ -19,6 +19,9 @@
 
 mod Bastion.Test.Auth do
 
+  needs IO.Random
+
+  needs IO.NetListen
   import Auth
   import Bastion.Session
   alias Bastion.Session as Session
