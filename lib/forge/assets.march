@@ -109,7 +109,7 @@ pfn digest_assets(root) do
     match File.rename(filepath, hashed_p) do
     Ok(_)  -> Some((filename, hashed))
     Err(e) ->
-      println("warning: could not rename " ++ filename ++ ": " ++ e)
+      println("warning: could not rename " ++ filename ++ ": " ++ to_string(e))
       Some((filename, hashed))
     end
   end)

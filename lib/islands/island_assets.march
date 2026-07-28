@@ -31,6 +31,7 @@
 
 mod IslandAssets do
 
+  needs IO.NetListen
   import HttpServer
 
   -- AssetConfiguration for the asset server.

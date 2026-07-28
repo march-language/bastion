@@ -22,7 +22,7 @@
 mod Bastion.Metrics do
 
   needs IO.Clock
-
+  needs IO.NetListen
   import HttpServer
 
   let table_name    = "_bastion_metrics"

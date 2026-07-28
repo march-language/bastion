@@ -82,7 +82,7 @@ end
 pfn collect_headers(hs, acc) do
   match hs do
   Nil -> list_reverse(acc, Nil)
-  Cons(Header(n, v), rest) ->
+  Cons(Http.Header(n, v), rest) ->
     let lname = String.to_lowercase(n)
     if lname == "idempotency-key" || lname == "x-idempotent-replayed" do
       collect_headers(rest, acc)

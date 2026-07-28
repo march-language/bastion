@@ -28,7 +28,7 @@ mod Bastion.Dev do
 
   needs IO.Console
   needs IO.Clock
-
+  needs IO.NetListen
   import HttpServer
   import Bastion.Metrics
 
@@ -185,7 +185,7 @@ mod Bastion.Dev do
     println("[Bastion.Dev] " ++ HttpServer.method_to_string(method) ++ " " ++ path)
     List.each(headers, fn pair ->
       match pair do
-      Header(k, v) -> println("  " ++ k ++ ": " ++ v)
+      Http.Header(k, v) -> println("  " ++ k ++ ": " ++ v)
       end
     )
     conn

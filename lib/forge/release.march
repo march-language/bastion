@@ -180,7 +180,7 @@ mod Forge.Release do
       println("  Dockerfile: " ++ path)
       Ok(())
     end
-    Err(msg) -> Err("failed to write Dockerfile: " ++ msg)
+    Err(msg) -> Err("failed to write Dockerfile: " ++ to_string(msg))
     end
   end
 

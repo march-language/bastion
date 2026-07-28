@@ -568,8 +568,8 @@ fn run_gen() do
         let out_path  = proj.root ++ "/lib/" ++ proj.name ++ "_routes.march"
         match File.write(out_path, src) do
         Err(msg) ->
-          println("Error writing " ++ out_path ++ ": " ++ msg)
-          Err(msg)
+          println("Error writing " ++ out_path ++ ": " ++ to_string(msg))
+          Err(to_string(msg))
         Ok(_) -> do
           println("Generated " ++ out_path ++ " (" ++ String.from_int(List.length(routes)) ++ " routes)")
           println("")

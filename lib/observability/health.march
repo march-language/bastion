@@ -28,6 +28,7 @@
 
 mod Bastion.Health do
 
+  needs IO.NetListen
   import HttpServer
 
   let health_table = "_bastion_health"

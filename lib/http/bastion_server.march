@@ -10,7 +10,7 @@
 mod BastionServer do
 
   needs IO.Console
-
+  needs IO.NetListen
   import HttpServer
   import Router
   import Bastion

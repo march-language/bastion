@@ -28,6 +28,7 @@
 
 mod Bastion.Idempotency do
 
+  needs IO.NetListen
   import HttpServer
 
   let table_name = "_bastion_idempotency"

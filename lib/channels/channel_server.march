@@ -36,6 +36,7 @@
 
 mod Bastion.ChannelServer do
 
+  needs IO.NetListen
   import HttpServer
   alias Bastion.Channel as Channel
   alias Bastion.PubSub as PubSub

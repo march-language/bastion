@@ -26,6 +26,7 @@
 
 mod Static do
 
+  needs IO.NetListen
   import HttpServer
 
   -- StaticConfiguration for the static file server.

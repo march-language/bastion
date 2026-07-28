@@ -32,6 +32,7 @@
 
 mod Bastion.Upload do
 
+  needs IO.NetListen
   import Conn
 
   -- ── Types ─────────────────────────────────────────────────────────────────
