@@ -171,12 +171,17 @@ mod Form do
     The CSRF hidden input is automatically injected as the first child of the
     <form> element.  Do not add it manually.
     """
+    -- render_inner precedes the defaulted params: a REQUIRED parameter after
+    -- defaulted ones does not type-check (the reduced-arity desugaring matches
+    -- the trailing argument against the first default's type), and this
+    -- ordering keeps the natural `Form.render(conn, action, fn -> ...)` call
+    -- working while still allowing the optional attributes.
     fn render(conn : Conn, action : String,
+              render_inner,
               method  : String \\ "post",
               class   : String \\ "",
               id      : String \\ "",
-              enctype : String \\ "",
-              render_inner) : IOList do
+              enctype : String \\ "") : IOList do
       let csrf_token = CSRF.tag_string(conn)
       let method_str = if String.is_empty(method) do "post" else String.to_lowercase(method) end
       let class_attr  = if String.is_empty(class)   do "" else " class=\""   ++ Html.escape(class)   ++ "\"" end
