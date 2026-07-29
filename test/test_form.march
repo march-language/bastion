@@ -3,6 +3,10 @@
 
 mod TestForm do
 
+  needs IO.NetListen
+  needs IO.Clock
+  import Bastion.Test.Conn
+
 -- ── Form.input_tag ────────────────────────────────────────────────────────────
 
 describe "Form.input_tag" do
@@ -230,7 +234,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "post", "", "", "")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "<form"))
     assert (string_contains(html, "action=\"/login\""))
@@ -242,7 +246,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "post", "", "", "")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "name=\"_csrf_token\""))
     assert (string_contains(html, "type=\"hidden\""))
@@ -253,7 +257,7 @@ describe "Form.Wrapper.render" do
                       |> CSRF.ensure_token()
     let token       = CSRF.token(conn)
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "post", "", "", "")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "value=\"" ++ token ++ "\""))
   end
@@ -262,7 +266,7 @@ describe "Form.Wrapper.render" do
     let conn          = Bastion.Test.Conn.build_conn("GET", "/")
                         |> CSRF.ensure_token()
     let content_inner = fn () -> IOList.from_string("<input name=\"email\" />")
-    let iol           = Form.Wrapper.render(conn, "/users", "post", "", "", "", content_inner)
+    let iol           = Form.Wrapper.render(conn, "/users", content_inner, "post", "", "", "")
     let html          = IOList.to_string(iol)
     assert (string_contains(html, "<input name=\"email\" />"))
     -- CSRF should come before inner content
@@ -283,7 +287,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "post", "login-form", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "post", "login-form", "", "")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "class=\"login-form\""))
   end
@@ -292,7 +296,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "post", "", "", "")
     let html        = IOList.to_string(iol)
     assert (!string_contains(html, "class="))
   end
@@ -301,7 +305,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "my-form", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "post", "", "my-form", "")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "id=\"my-form\""))
   end
@@ -310,7 +314,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/upload", "post", "", "", "multipart/form-data", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/upload", empty_inner, "post", "", "", "multipart/form-data")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "enctype=\"multipart/form-data\""))
   end
@@ -319,7 +323,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/path?a=1&b=2", "post", "", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/path?a=1&b=2", empty_inner, "post", "", "", "")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "action=\"/path?a=1&amp;b=2\""))
   end
@@ -328,7 +332,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "", "", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "", "", "", "")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "method=\"post\""))
   end
@@ -337,7 +341,7 @@ describe "Form.Wrapper.render" do
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
                       |> CSRF.ensure_token()
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "POST", "", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "POST", "", "", "")
     let html        = IOList.to_string(iol)
     assert (string_contains(html, "method=\"post\""))
   end
@@ -347,7 +351,7 @@ describe "Form.Wrapper.render" do
     -- Wrapper should still render (token will be empty string).
     let conn        = Bastion.Test.Conn.build_conn("GET", "/")
     let empty_inner = fn () -> IOList.from_string("")
-    let iol         = Form.Wrapper.render(conn, "/login", "post", "", "", "", empty_inner)
+    let iol         = Form.Wrapper.render(conn, "/login", empty_inner, "post", "", "", "")
     let html        = IOList.to_string(iol)
     -- Should still have the hidden input, just with empty value
     assert (string_contains(html, "name=\"_csrf_token\""))

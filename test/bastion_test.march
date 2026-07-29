@@ -1,4 +1,5 @@
 mod BastionTest do
+  needs IO.NetListen
 
 needs IO.File, IO.Dir, IO.Process, IO.Random
 
@@ -57,13 +58,13 @@ end
 
 pfn make_post(path_, body) do
   make_conn(:post, path_, "",
-    Cons(Header("content-type", "application/json"), Nil),
+    Cons(Http.Header("content-type", "application/json"), Nil),
     body)
 end
 
 pfn make_post_form(path_, body) do
   make_conn(:post, path_, "",
-    Cons(Header("content-type", "application/x-www-form-urlencoded"), Nil),
+    Cons(Http.Header("content-type", "application/x-www-form-urlencoded"), Nil),
     body)
 end
 
@@ -962,12 +963,12 @@ describe "Middleware.cors" do
   test "echoes Origin back when on the allowlist" do
     let plug = cors(["https://app.example.com"])
     let conn = make_conn(:get, "/", "",
-      Cons(Header("origin", "https://app.example.com"), Nil), "")
+      Cons(Http.Header("origin", "https://app.example.com"), Nil), "")
     let out  = plug(conn)
     let hdrs = HttpServer.resp_headers(out)
     let ok   = List.any(hdrs, fn h ->
       match h do
-      Header(n, v) ->
+      Http.Header(n, v) ->
         String.to_lowercase(n) == "access-control-allow-origin" && v == "https://app.example.com"
       end)
     assert (ok)
@@ -975,24 +976,24 @@ describe "Middleware.cors" do
   test "omits Access-Control-Allow-Origin when Origin is not allowlisted" do
     let plug = cors(["https://app.example.com"])
     let conn = make_conn(:get, "/", "",
-      Cons(Header("origin", "https://evil.example.com"), Nil), "")
+      Cons(Http.Header("origin", "https://evil.example.com"), Nil), "")
     let out  = plug(conn)
     let hdrs = HttpServer.resp_headers(out)
     let has_ao = List.any(hdrs, fn h ->
       match h do
-      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
+      Http.Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
       end)
     assert (!(has_ao))
   end
   test "never emits wildcard Access-Control-Allow-Origin" do
     let plug = cors(["https://a.example.com"])
     let conn = make_conn(:get, "/", "",
-      Cons(Header("origin", "https://a.example.com"), Nil), "")
+      Cons(Http.Header("origin", "https://a.example.com"), Nil), "")
     let out  = plug(conn)
     let hdrs = HttpServer.resp_headers(out)
     let has_star = List.any(hdrs, fn h ->
       match h do
-      Header(n, v) ->
+      Http.Header(n, v) ->
         String.to_lowercase(n) == "access-control-allow-origin" && v == "*"
       end)
     assert (!(has_star))
@@ -1004,7 +1005,7 @@ describe "Middleware.cors" do
     let hdrs = HttpServer.resp_headers(out)
     let ok   = List.any(hdrs, fn h ->
       match h do
-      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-methods"
+      Http.Header(n, _) -> String.to_lowercase(n) == "access-control-allow-methods"
       end)
     assert (ok)
   end
@@ -1015,7 +1016,7 @@ describe "Middleware.cors" do
     let hdrs = HttpServer.resp_headers(out)
     let ok   = List.any(hdrs, fn h ->
       match h do
-      Header(n, v) ->
+      Http.Header(n, v) ->
         String.to_lowercase(n) == "vary" && v == "Origin"
       end)
     assert (ok)
@@ -1057,7 +1058,7 @@ end
 describe "Middleware.request_id" do
   test "uses x-request-id header value when present" do
     let conn = make_conn(:get, "/", "",
-      Cons(Header("x-request-id", "my-id"), Nil), "")
+      Cons(Http.Header("x-request-id", "my-id"), Nil), "")
     let out  = request_id(conn)
     assert (opt_eq(HttpServer.get_assign(out, "request_id"), "my-id"))
   end
@@ -1614,11 +1615,11 @@ describe "Cors.allow origin format validation" do
   test "reflects a well-formed allowlisted origin" do
     let cfg  = Cors.config_credentialed(["https://app.example.com"])
     let conn = make_conn(:get, "/", "",
-      Cons(Header("origin", "https://app.example.com"), Nil), "")
+      Cons(Http.Header("origin", "https://app.example.com"), Nil), "")
     let hdrs = HttpServer.resp_headers(Cors.allow(conn, cfg))
     let ok   = List.any(hdrs, fn h ->
       match h do
-      Header(n, v) ->
+      Http.Header(n, v) ->
         String.to_lowercase(n) == "access-control-allow-origin" && v == "https://app.example.com"
       end)
     assert (ok)
@@ -1626,33 +1627,33 @@ describe "Cors.allow origin format validation" do
   test "does not reflect an origin containing a path" do
     let cfg  = Cors.config_credentialed(["*"])
     let conn = make_conn(:get, "/", "",
-      Cons(Header("origin", "https://evil.example.com/path"), Nil), "")
+      Cons(Http.Header("origin", "https://evil.example.com/path"), Nil), "")
     let hdrs = HttpServer.resp_headers(Cors.allow(conn, cfg))
     let has  = List.any(hdrs, fn h ->
       match h do
-      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
+      Http.Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
       end)
     assert (!(has))
   end
   test "does not reflect a non-http scheme origin" do
     let cfg  = Cors.config_credentialed(["*"])
     let conn = make_conn(:get, "/", "",
-      Cons(Header("origin", "javascript://evil.example.com"), Nil), "")
+      Cons(Http.Header("origin", "javascript://evil.example.com"), Nil), "")
     let hdrs = HttpServer.resp_headers(Cors.allow(conn, cfg))
     let has  = List.any(hdrs, fn h ->
       match h do
-      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
+      Http.Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
       end)
     assert (!(has))
   end
   test "does not reflect an origin with embedded whitespace" do
     let cfg  = Cors.config_credentialed(["*"])
     let conn = make_conn(:get, "/", "",
-      Cons(Header("origin", "https://a.example.com evil"), Nil), "")
+      Cons(Http.Header("origin", "https://a.example.com evil"), Nil), "")
     let hdrs = HttpServer.resp_headers(Cors.allow(conn, cfg))
     let has  = List.any(hdrs, fn h ->
       match h do
-      Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
+      Http.Header(n, _) -> String.to_lowercase(n) == "access-control-allow-origin"
       end)
     assert (!(has))
   end
@@ -1661,27 +1662,27 @@ end
 describe "Session signed-cookie validation" do
   test "cookie without dot separator yields empty session" do
     let conn = make_conn(:get, "/", "",
-      Cons(Header("cookie", "_session=garbage"), Nil), "")
+      Cons(Http.Header("cookie", "_session=garbage"), Nil), "")
     let out  = Session.load(conn, "test_secret_key_base")
     assert (opt_none(Session.get(out, "user_id")))
   end
   test "cookie with short MAC yields empty session" do
     let conn = make_conn(:get, "/", "",
-      Cons(Header("cookie", "_session=abc123.cGF5bG9hZA=="), Nil), "")
+      Cons(Http.Header("cookie", "_session=abc123.cGF5bG9hZA=="), Nil), "")
     let out  = Session.load(conn, "test_secret_key_base")
     assert (opt_none(Session.get(out, "user_id")))
   end
   test "cookie with non-hex MAC yields empty session" do
     let mac  = String.repeat("z", 64)
     let conn = make_conn(:get, "/", "",
-      Cons(Header("cookie", "_session=" ++ mac ++ ".cGF5bG9hZA=="), Nil), "")
+      Cons(Http.Header("cookie", "_session=" ++ mac ++ ".cGF5bG9hZA=="), Nil), "")
     let out  = Session.load(conn, "test_secret_key_base")
     assert (opt_none(Session.get(out, "user_id")))
   end
   test "oversized cookie yields empty session" do
     let big  = String.repeat("a", 9000)
     let conn = make_conn(:get, "/", "",
-      Cons(Header("cookie", "_session=" ++ big), Nil), "")
+      Cons(Http.Header("cookie", "_session=" ++ big), Nil), "")
     let out  = Session.load(conn, "test_secret_key_base")
     assert (opt_none(Session.get(out, "user_id")))
   end
@@ -1693,7 +1694,7 @@ describe "Session signed-cookie validation" do
     let hdrs   = HttpServer.resp_headers(conn3)
     let cookie = List.fold_left(hdrs, "", fn (acc, h) ->
       match h do
-      Header(n, v) ->
+      Http.Header(n, v) ->
         if String.to_lowercase(n) == "set-cookie" do
           match String.split_first(v, ";") do
           Some((c, _)) -> c
@@ -1701,7 +1702,7 @@ describe "Session signed-cookie validation" do
           end
         else acc end
       end)
-    let conn4 = make_conn(:get, "/", "", Cons(Header("cookie", cookie), Nil), "")
+    let conn4 = make_conn(:get, "/", "", Cons(Http.Header("cookie", cookie), Nil), "")
     let out   = Session.load(conn4, secret)
     assert (opt_eq(Session.get(out, "user_id"), "42"))
   end

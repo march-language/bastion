@@ -3,6 +3,8 @@
 
 mod TestHtmlCss do
 
+  import Css
+
 -- ── Html.escape ──────────────────────────────────────────────────────────────
 
 describe "Html.escape" do
