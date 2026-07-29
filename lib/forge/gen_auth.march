@@ -988,24 +988,24 @@ fn run() do
   let _ = Dir.mkdir_p(mig_dir)
   let _ = Dir.mkdir_p(support_dir)
 
-  let write = fn path -> fn content -> do
+  let write = fn (path, content) -> do
     let _ = File.write(path, content)
     println("* creating " ++ path)
   end
 
-  write(accounts_dir ++ "/user.march")(user_schema_source(pascal))
-  write(accounts_dir ++ "/user_token.march")(user_token_schema_source(pascal))
-  write(accounts_dir ++ "/user_notifier.march")(user_notifier_source(pascal))
-  write(lib_dir ++ "/accounts.march")(accounts_context_source(pascal))
-  write(lib_dir ++ "/auth.march")(auth_middleware_source(pascal))
-  write(auth_ctrl_dir ++ "/registration_controller.march")(registration_controller_source(pascal))
-  write(auth_ctrl_dir ++ "/session_controller.march")(session_controller_source(pascal))
-  write(auth_ctrl_dir ++ "/user_settings_controller.march")(user_settings_controller_source(pascal))
-  write(auth_ctrl_dir ++ "/confirmation_controller.march")(confirmation_controller_source(pascal))
-  write(auth_ctrl_dir ++ "/password_reset_controller.march")(password_reset_controller_source(pascal))
-  write(mig_dir ++ "/" ++ String.from_int(ts)  ++ "_create_users.march")(users_migration_source(ts))
-  write(mig_dir ++ "/" ++ String.from_int(ts2) ++ "_create_user_tokens.march")(user_tokens_migration_source(ts2))
-  write(support_dir ++ "/accounts_fixtures.march")(accounts_fixtures_source(pascal))
+  write(accounts_dir ++ "/user.march", user_schema_source(pascal))
+  write(accounts_dir ++ "/user_token.march", user_token_schema_source(pascal))
+  write(accounts_dir ++ "/user_notifier.march", user_notifier_source(pascal))
+  write(lib_dir ++ "/accounts.march", accounts_context_source(pascal))
+  write(lib_dir ++ "/auth.march", auth_middleware_source(pascal))
+  write(auth_ctrl_dir ++ "/registration_controller.march", registration_controller_source(pascal))
+  write(auth_ctrl_dir ++ "/session_controller.march", session_controller_source(pascal))
+  write(auth_ctrl_dir ++ "/user_settings_controller.march", user_settings_controller_source(pascal))
+  write(auth_ctrl_dir ++ "/confirmation_controller.march", confirmation_controller_source(pascal))
+  write(auth_ctrl_dir ++ "/password_reset_controller.march", password_reset_controller_source(pascal))
+  write(mig_dir ++ "/" ++ String.from_int(ts)  ++ "_create_users.march", users_migration_source(ts))
+  write(mig_dir ++ "/" ++ String.from_int(ts2) ++ "_create_user_tokens.march", user_tokens_migration_source(ts2))
+  write(support_dir ++ "/accounts_fixtures.march", accounts_fixtures_source(pascal))
 
   let lower_app = String.to_lowercase(pascal)
 
