@@ -10,6 +10,7 @@
 
 mod Conn do
 
+  needs IO.NetListen
   import HttpServer
 
   -- ── Request accessors ──────────────────────────────────────────────

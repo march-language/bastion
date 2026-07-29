@@ -244,7 +244,7 @@ fn load() do
   Some(root) ->
     let toml_path = root ++ "/forge.toml"
     match File.read(toml_path) do
-    Err(e) -> Err("could not read " ++ toml_path ++ ": " ++ e)
+    Err(e) -> Err("could not read " ++ toml_path ++ ": " ++ to_string(e))
     Ok(src) ->
       let lines = String.split(src, "\n")
       let name    = match get_section_value(lines, "package", "name") do

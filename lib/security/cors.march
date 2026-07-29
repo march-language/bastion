@@ -29,6 +29,7 @@
 
 mod Cors do
 
+  needs IO.NetListen
   import HttpServer
 
   -- ── Config type ─────────────────────────────────────────────────────────────

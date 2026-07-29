@@ -35,6 +35,7 @@
 
 mod Router do
 
+  needs IO.NetListen
   import HttpServer
   import ErrorView
 

@@ -44,6 +44,12 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install blake3
 
+      # `forge build` does not resolve dependencies — with an empty CAS on a
+      # fresh runner, depot is simply absent and every module it provides
+      # reports as unknown ("Unknown module `Pool`. Did you mean `Plot`?").
+      - name: Resolve dependencies
+        run: forge deps
+
       - name: Build
         run: forge build
 

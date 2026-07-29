@@ -800,7 +800,7 @@ fn lower_file(input_path : String, output_march : String, output_spans : String)
     let _ = File.write(output_spans, spans)
     Ok("Lowered " ++ input_path ++ " -> " ++ output_march)
   end
-  Err(e) -> Err("Failed to read " ++ input_path ++ ": " ++ e)
+  Err(e) -> Err("Failed to read " ++ input_path ++ ": " ++ to_string(e))
   end
 end
 

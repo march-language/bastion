@@ -37,7 +37,7 @@
 mod Cache do
 
   needs IO.Mut
-
+  needs IO.NetListen
   import HttpServer
   import Vault
 

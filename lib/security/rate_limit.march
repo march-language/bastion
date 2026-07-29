@@ -43,7 +43,7 @@
 mod RateLimit do
 
   needs IO.Clock
-
+  needs IO.NetListen
   import Conn
 
   -- ── Key helpers ───────────────────────────────────────────────────────────

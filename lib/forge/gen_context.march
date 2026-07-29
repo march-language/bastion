@@ -293,7 +293,7 @@ fn run(args) do
         let _ = Dir.mkdir_p(lib_dir)
         let _ = Dir.mkdir_p(mig_dir)
 
-        let write = fn path -> fn content -> do
+        let write = fn (path, content) -> do
           let _ = File.write(path, content)
           println("  Created  " ++ path)
         end
@@ -302,9 +302,9 @@ fn run(args) do
         let context_file = "lib/" ++ app_snake ++ "/" ++ ctx_snake ++ ".march"
         let mig_file     = mig_dir ++ "/" ++ String.from_int(ts) ++ "_create_" ++ table ++ ".march"
 
-        write(schema_file)(schema_source(app_name, context, schema, table, fields))
-        write(context_file)(context_source(app_name, context, schema, table, fields))
-        write(mig_file)(migration_source(table, fields, ts))
+        write(schema_file, schema_source(app_name, context, schema, table, fields))
+        write(context_file, context_source(app_name, context, schema, table, fields))
+        write(mig_file, migration_source(table, fields, ts))
 
         println("")
         println("Done!  Context generated.")

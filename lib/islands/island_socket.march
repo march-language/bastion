@@ -50,7 +50,7 @@
 mod IslandSocket do
 
   needs IO.Mut
-
+  needs IO.NetListen
   import HttpServer
   alias Bastion.PubSub as PubSub
   import Vault

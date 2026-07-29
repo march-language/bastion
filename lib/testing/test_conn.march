@@ -28,6 +28,8 @@
 
 mod Bastion.Test.Conn do
 
+  needs IO.NetListen
+  needs IO.Clock
   import HttpServer
 
   -- ── Conn construction ─────────────────────────────────────────────────────
@@ -72,9 +74,9 @@ mod Bastion.Test.Conn do
   fn put_req_header(conn : Conn, key : String, value : String) : Conn do
     let lower_key = String.to_lowercase(key)
     match conn do
-    Conn(fd, m, p, pi, qs, rh, rb, s, rhs, rbody, h, a, u) ->
-      Conn(fd, m, p, pi, qs,
-        Cons(Header(lower_key, value), remove_header(rh, lower_key)),
+    HttpServer.Conn(fd, m, p, pi, qs, rh, rb, s, rhs, rbody, h, a, u) ->
+      HttpServer.Conn(fd, m, p, pi, qs,
+        Cons(Http.Header(lower_key, value), remove_header(rh, lower_key)),
         rb, s, rhs, rbody, h, a, u)
     end
   end
@@ -86,8 +88,8 @@ mod Bastion.Test.Conn do
   """
   fn put_req_body(conn : Conn, body : String) : Conn do
     let with_body = match conn do
-      Conn(fd, m, p, pi, qs, rh, _, s, rhs, rbody, h, a, u) ->
-        Conn(fd, m, p, pi, qs, rh, body, s, rhs, rbody, h, a, u)
+      HttpServer.Conn(fd, m, p, pi, qs, rh, _, s, rhs, rbody, h, a, u) ->
+        HttpServer.Conn(fd, m, p, pi, qs, rh, body, s, rhs, rbody, h, a, u)
       end
     put_req_header(with_body, "content-length", String.from_int(String.byte_size(body)))
   end
@@ -119,8 +121,8 @@ mod Bastion.Test.Conn do
   fn put_query_params(conn : Conn, params : List((String, String))) : Conn do
     let qs = encode_query_params(params)
     match conn do
-    Conn(fd, m, p, pi, _, rh, rb, s, rhs, rbody, h, a, u) ->
-      Conn(fd, m, p, pi, qs, rh, rb, s, rhs, rbody, h, a, u)
+    HttpServer.Conn(fd, m, p, pi, _, rh, rb, s, rhs, rbody, h, a, u) ->
+      HttpServer.Conn(fd, m, p, pi, qs, rh, rb, s, rhs, rbody, h, a, u)
     end
   end
 
@@ -289,7 +291,7 @@ mod Bastion.Test.Conn do
   -- Construct a fresh request Conn with a dummy fd and no response state.
   pfn make_conn(meth : Atom, path : String, qs : String) : Conn do
     let segments = List.filter(String.split(path, "/"), fn s -> !(String.is_empty(s)))
-    Conn(0, meth, path, segments, qs, Nil, "", 0, Nil, "", false, Nil, NoUpgrade)
+    HttpServer.Conn(0, meth, path, segments, qs, Nil, "", 0, Nil, "", false, Nil, HttpServer.NoUpgrade)
   end
 
   -- Convert an HTTP method string (any case) to its request atom.
@@ -312,7 +314,7 @@ mod Bastion.Test.Conn do
   pfn remove_header(headers : List(Header), lower_name : String) : List(Header) do
     List.filter(headers, fn hd ->
       match hd do
-      Header(n, _) -> String.to_lowercase(n) != lower_name
+      Http.Header(n, _) -> String.to_lowercase(n) != lower_name
       end
     )
   end

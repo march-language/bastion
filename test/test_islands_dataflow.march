@@ -12,6 +12,7 @@
 --   8. IslandSocket dataflow-aware registry
 
 mod TestIslandsDataflow do
+  needs IO.NetListen
 
 needs IO.Mut
 
