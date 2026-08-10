@@ -34,7 +34,7 @@ mod Hkdf do
   bytes of output keying material, bound to the context string `info`.
   """
   fn expand(prk : Bytes, info : Bytes, len : Int) : Bytes do
-    expand_go(prk, info, len, Bytes(Nil), 1, Bytes(Nil))
+    expand_go(prk, info, len, Bytes.empty(), 1, Bytes.empty())
   end
 
   -- Module-level recursion (not a nested closure) deliberately: march 0.1.0
@@ -46,7 +46,7 @@ mod Hkdf do
     else
       let block = hmac_sha256_bytes(
         prk,
-        Bytes.concat(Bytes.concat(t_prev, info), Bytes(Cons(i, Nil)))
+        Bytes.concat(Bytes.concat(t_prev, info), Bytes.from_list([i]))
       )
       expand_go(prk, info, len, block, i + 1, Bytes.concat(acc, block))
     end

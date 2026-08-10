@@ -65,17 +65,17 @@ mod Crypto do
     hex_nibble(n / 16) ++ hex_nibble(n % 16)
   end
 
+  -- Bytes.to_list rather than destructuring `Bytes(xs)`: the constructor's
+  -- payload is private and its type changed with march#247 (a cons list became
+  -- a contiguous String). The accessor is stable across both representations.
   pfn bytes_to_hex(b) do
-    match b do
-    Bytes(xs) ->
-      fn go(bs, acc) do
-        match bs do
-        Nil -> string_join(rev_list(acc), "")
-        Cons(n, rest) -> go(rest, Cons(byte_to_hex(n), acc))
-        end
+    fn go(bs, acc) do
+      match bs do
+      Nil -> string_join(rev_list(acc), "")
+      Cons(n, rest) -> go(rest, Cons(byte_to_hex(n), acc))
       end
-      go(xs, Nil)
     end
+    go(Bytes.to_list(b), Nil)
   end
 
   pfn hex_char_val(c) do
@@ -255,7 +255,7 @@ mod Crypto do
         match hex_str_to_bytes(salt_hex) do
         None -> false
         Some(byte_list) ->
-          let salt_bytes = Bytes(byte_list)
+          let salt_bytes = Bytes.from_list(byte_list)
           match pbkdf2_sha256(plain, salt_bytes, iters, pw_dklen) do
           Ok(new_bytes) ->
             let new_hex = bytes_to_hex(new_bytes)
@@ -321,16 +321,10 @@ mod Crypto do
 
   doc "Convert a `Bytes` value to a `String` (each byte treated as a raw octet)."
   fn bytes_to_string(b : Bytes) : String do
-    match b do
-    Bytes(xs) ->
-      fn go(cs, acc) do
-        match cs do
-        Nil -> string_join(rev_list(acc), "")
-        Cons(n, rest) -> go(rest, Cons(char_from_int(n), acc))
-        end
-      end
-      go(xs, Nil)
-    end
+    -- This is exactly what Bytes.to_string does, and since march#247 it is a
+    -- single buffer read rather than a per-byte walk. Kept as a named function
+    -- because callers across bastion refer to it.
+    Bytes.to_string(b)
   end
 
 end
