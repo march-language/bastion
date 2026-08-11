@@ -8,6 +8,7 @@
 --   end
 
 mod BastionServer do
+  needs IO.Process
 
   needs IO.Console
   needs IO.NetListen

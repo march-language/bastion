@@ -21,6 +21,9 @@
 --   }
 
 mod Forge.BuildIslands do
+  needs IO.FileRead
+  needs IO.FileWrite
+  needs IO.Process
 
   needs IO.Console
 
