@@ -25,6 +25,7 @@
 --   |> HttpServer.listen()
 
 mod Static do
+  needs IO.FileRead
 
   needs IO.NetListen
   import HttpServer

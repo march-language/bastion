@@ -17,6 +17,9 @@
 --   end
 
 mod Bastion do
+  needs IO.FileRead
+  needs IO.FileWrite
+  needs IO.Process
 
   needs IO.Console
 

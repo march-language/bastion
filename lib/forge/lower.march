@@ -16,6 +16,9 @@
 -- The generated .march file is a build artifact — never committed.
 
 mod Forge.Lower do
+  needs IO.FileRead
+  needs IO.FileWrite
+  needs IO.Process
 
   needs IO.Console
 

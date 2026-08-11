@@ -1,7 +1,10 @@
 mod BastionTest do
+  needs IO.FileRead
+  needs IO.FileWrite
   needs IO.NetListen
+  needs IO.Console
 
-needs IO.File, IO.Dir, IO.Process, IO.Random
+needs IO.Process, IO.Random
 
 import Router
 import Middleware
