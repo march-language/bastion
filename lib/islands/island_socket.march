@@ -48,6 +48,10 @@
 -- See also: island_view.march, island_assets.march, islands.march.
 
 mod IslandSocket do
+  -- march main enforces the capability ceiling at codegen: a module's
+  -- emitted code must stay within its own `needs`. Declared here so
+  -- downstream projects can `forge build` against a current toolchain.
+  needs IO.WebSocket
 
   needs IO.Mut
   needs IO.NetListen
