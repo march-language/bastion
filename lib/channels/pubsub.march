@@ -23,6 +23,10 @@
 --   Bastion.PubSub.broadcast_from(conn_id, "room:42", "typing", "{}")
 
 mod Bastion.PubSub do
+  -- march main enforces the capability ceiling at codegen: a module's
+  -- emitted code must stay within its own `needs`. Declared here so
+  -- downstream projects can `forge build` against a current toolchain.
+  needs IO.Mut
 
   -- Vault table: "topic:sub_id" → send_fn (String -> String -> ())
   let table_name = "_bastion_pubsub"

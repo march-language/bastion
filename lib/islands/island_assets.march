@@ -30,6 +30,11 @@
 --   end
 
 mod IslandAssets do
+  -- march main enforces the capability ceiling at codegen: a module's
+  -- emitted code must stay within its own `needs`. Declared here so
+  -- downstream projects can `forge build` against a current toolchain.
+  needs IO.FileRead
+  needs IO.Process
 
   needs IO.NetListen
   import HttpServer
