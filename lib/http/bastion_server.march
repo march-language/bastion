@@ -12,6 +12,8 @@ mod BastionServer do
 
   needs IO.Console
   needs IO.NetListen
+  needs IO.FileRead
+  needs IO.FileWrite
   import HttpServer
   import Router
   import Bastion
