@@ -219,7 +219,13 @@
       if (typeof Idiomorph !== 'undefined' && Idiomorph.morph) {
         Idiomorph.morph(this.el, newHTML, {
           morphStyle: 'innerHTML',
-          ignoreActiveValue: true
+          ignoreActiveValue: true,
+          callbacks: {
+            // A user-toggled <details> keeps its open state across server pushes.
+            // The server may still *add* open; only removals are ignored.
+            beforeAttributeUpdated: (attr, node, mutationType) =>
+              !(attr === 'open' && mutationType === 'remove' && node.tagName === 'DETAILS')
+          }
         });
       } else {
         this.el.innerHTML = newHTML;

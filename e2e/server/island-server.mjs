@@ -66,6 +66,7 @@ const handlers = {
         `<p data-testid="count">${state.count}</p>`,
         `<button data-on-click="Increment" data-testid="inc">+</button>`,
         `<button data-on-click="Decrement" data-testid="dec">-</button>`,
+        `<details><summary>more</summary>x</details>`,
       ].join('');
     },
   },

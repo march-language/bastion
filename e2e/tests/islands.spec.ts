@@ -148,6 +148,42 @@ test.describe('Server-mode Counter', () => {
     await expect(page.getByTestId('count')).toHaveText('7');
   });
 
+  test('user-opened <details> stays open across a server push', async ({ page }) => {
+    await page.goto('/server-counter');
+    await waitForWsReady(page);
+
+    // User opens the <details> in the island (idiomorph must not clobber this).
+    await page.locator('details').evaluate((el: HTMLDetailsElement) => { el.open = true; });
+    await expect(page.locator('details')).toHaveJSProperty('open', true);
+
+    const islandId = await page.evaluate(() => {
+      const m = (window as any).__bastionIslands;
+      for (const [id] of m.instances) return id;
+      return null;
+    });
+    expect(islandId).toBeTruthy();
+
+    // Server pushes a re-render (the server-side HTML always has <details> closed).
+    await page.evaluate(async ({ id }) => {
+      await fetch('/admin/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          islandId: id,
+          state: { count: 7 },
+          html: '<p data-testid="count">7</p>' +
+                '<button data-on-click="Increment" data-testid="inc">+</button>' +
+                '<button data-on-click="Decrement" data-testid="dec">-</button>' +
+                '<details><summary>more</summary>x</details>',
+        }),
+      });
+    }, { id: islandId });
+
+    await expect(page.getByTestId('count')).toHaveText('7');
+    // The user's open state survives the morph.
+    await expect(page.locator('details')).toHaveJSProperty('open', true);
+  });
+
   test('server-mode island ignores click events (no dispatch)', async ({ page }) => {
     await page.goto('/server-counter');
     await waitForWsReady(page);
