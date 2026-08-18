@@ -139,23 +139,30 @@ mod Cache do
     Vault.new(response_table)
   end
 
+  -- HttpServer.resp_headers returns List(Header), not List((String, String)).
+  -- Kept as a named helper rather than an inline lambda: the caller below is
+  -- already inside a `match` arm, and a nested `match ... end` there runs into
+  -- the arm-boundary ambiguity.
+  pfn put_header(c, hdr) do
+    match hdr do
+    Header(hk, hv) -> HttpServer.put_resp_header(c, hk, hv)
+    end
+  end
+
   fn cached(conn, key, ttl_secs, generator) do
     let table = open_response_table()
     match Vault.get(table, key) do
     Some(entry) ->
       -- Cache hit: replay the stored response
       let (cached_status, cached_headers, cached_body) = entry
-      List.fold_left(cached_headers, conn, fn (c, pair) ->
-        let (hk, hv) = pair
-        HttpServer.put_resp_header(c, hk, hv)
-      )
+      List.fold_left(cached_headers, conn, put_header)
       |> HttpServer.send_resp(cached_status, cached_body)
     None ->
       -- KNOWN RACE (thundering herd): multiple concurrent requests that all miss
       -- the cache will each call generator(conn) independently.  The last write
       -- wins and sets the same value, so correctness is preserved, but the
       -- generator runs N times instead of once.  A true fix needs an InProgress
-      -- sentinel (like BastionIdempotency) or an atomic Vault.get_or_init.
+      -- sentinel (like Bastion.Idempotency) or an atomic Vault.get_or_init.
       let result = generator(conn)
       let status = HttpServer.status(result)
       -- Only cache successful responses

@@ -29,7 +29,12 @@ mod Bastion.Metrics do
   needs IO.NetListen
   import HttpServer
 
-  let table_name    = "_bastion_metrics"
+  -- Two tables, not one. A Vault handle is `Vault(v)`, phantom in the type of
+  -- the values it holds: `Vault.incr` requires `Vault(Int)` and
+  -- `Vault.push_capped` requires `Vault(List(e))`, so the Int counters and the
+  -- RequestEntry ring buffer cannot share a table.
+  let table_name        = "_bastion_metrics"          -- Vault(Int) counters
+  let recent_table_name = "_bastion_metrics_recent"   -- Vault(List(RequestEntry))
   let total_key     = "total"
   let error_key     = "errors"
   let total_ms_key  = "total_ms"
@@ -110,7 +115,7 @@ mod Bastion.Metrics do
     -- Ring buffer of recent requests. Vault.push_capped appends and trims under
     -- one shard lock, so concurrent requests can't clobber the buffer the way a
     -- get + List.append + set would.
-    let _ = Vault.push_capped(table, recent_key, entry, max_recent)
+    let _ = Vault.push_capped(Vault.new(recent_table_name), recent_key, entry, max_recent)
     ()
   end
 
@@ -131,7 +136,7 @@ mod Bastion.Metrics do
     let errors  = Vault.get_or(table, error_key, 0)
     let total_ms = Vault.get_or(table, total_ms_key, 0)
     let avg_ms  = if total > 0 do total_ms / total else 0 end
-    let recent  = Vault.get_or(table, recent_key, [])
+    let recent  = Vault.get_or(Vault.new(recent_table_name), recent_key, [])
     { total: total, errors: errors, avg_ms: avg_ms, recent: recent }
   end
 
@@ -149,7 +154,7 @@ mod Bastion.Metrics do
 
   doc "Return the last N recorded requests (up to 100)."
   fn recent_requests() : List(RequestEntry) do
-    let table = Vault.new(table_name)
+    let table = Vault.new(recent_table_name)
     Vault.get_or(table, recent_key, [])
   end
 
@@ -157,6 +162,9 @@ mod Bastion.Metrics do
   fn reset() do
     let table = Vault.new(table_name)
     let _ = List.map(Vault.keys(table), fn k -> Vault.drop(table, k))
+    -- The ring buffer lives in its own table; clear it too.
+    let recent = Vault.new(recent_table_name)
+    let _ = List.map(Vault.keys(recent), fn k -> Vault.drop(recent, k))
   end
 
 end

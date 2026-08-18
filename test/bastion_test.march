@@ -1767,7 +1767,7 @@ end
     println("All BastionTest tests passed.")
   end
 
-  fn main() do
+  fn main(_cap_console : Cap(IO.Console), _cap_fileread : Cap(IO.FileRead)) do
     run_all()
   end
 

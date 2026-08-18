@@ -20,11 +20,18 @@ mod Bastion.Telemetry.Aggregator do
 
   import Vault
 
-  -- Vault table names
+  -- Vault table names.
+  --
+  -- The per-request summaries and the ring of request IDs live in two separate
+  -- tables on purpose. A Vault handle is `Vault(v)`, phantom in the type of the
+  -- values it holds, so one table cannot hold both `RequestSummary` (keyed by
+  -- summary_key/1) and the `List(String)` ring.
   let events_table   = "_bastion_agg_events"
-  let requests_table = "_bastion_agg_requests"
+  let requests_table = "_bastion_agg_requests"       -- Vault(RequestSummary)
+  let ring_table     = "_bastion_agg_requests_ring"  -- Vault(List(String))
   let config_table   = "_bastion_agg_config"
   let max_key        = "_max_requests"
+  let ring_key       = "ring"
 
   -- ── Types ─────────────────────────────────────────────────────────────────
 
@@ -89,7 +96,7 @@ mod Bastion.Telemetry.Aggregator do
   """
   fn recent_requests(limit : Int) : List(RequestSummary) do
     let table = Vault.new(requests_table)
-    let all_ids = Vault.get_or(table, "ring", [])
+    let all_ids = Vault.get_or(Vault.new(ring_table), ring_key, [])
     let ids     = List.take(List.reverse(all_ids), limit)
     List.filter_map(ids, fn id -> Vault.get(table, summary_key(id)))
   end
@@ -133,7 +140,7 @@ mod Bastion.Telemetry.Aggregator do
   """
   fn counters() : CounterSummary do
     let table = Vault.new(requests_table)
-    let ids   = Vault.get_or(table, "ring", [])
+    let ids   = Vault.get_or(Vault.new(ring_table), ring_key, [])
     let all   = List.filter_map(ids, fn id -> Vault.get(table, summary_key(id)))
     let total = List.length(all)
     let errors = List.length(List.filter(all, fn r -> r.error))
@@ -146,8 +153,10 @@ mod Bastion.Telemetry.Aggregator do
   fn reset() do
     let ev_table  = Vault.new(events_table)
     let req_table = Vault.new(requests_table)
+    let rg_table  = Vault.new(ring_table)
     let _ = List.map(Vault.keys(ev_table),  fn k -> Vault.drop(ev_table,  k))
     let _ = List.map(Vault.keys(req_table), fn k -> Vault.drop(req_table, k))
+    let _ = List.map(Vault.keys(rg_table),  fn k -> Vault.drop(rg_table,  k))
     ()
   end
 
@@ -193,9 +202,9 @@ mod Bastion.Telemetry.Aggregator do
 
   -- Insert or update the RequestSummary for this request_id.
   --
-  -- Storage layout (all in requests_table):
-  --   "ring"             → List(String)        — request_ids, newest at tail
-  --   "summary:{id}"     → RequestSummary      — one entry per request_id
+  -- Storage layout (two tables — a Vault(v) holds one value type):
+  --   ring_table     "ring"         → List(String)   — request_ids, newest at tail
+  --   requests_table "summary:{id}" → RequestSummary — one entry per request_id
   --
   -- The ring of IDs is maintained by Vault.push_capped, which atomically
   -- appends and trims under one shard lock — eliminating the concurrent-write
@@ -233,14 +242,15 @@ mod Bastion.Telemetry.Aggregator do
       -- First event for this request_id.  Read the ring before pushing so we
       -- can identify which (if any) entry will be evicted from the far end.
       let max      = get_max()
-      let old_ring = Vault.get_or(req_table, "ring", [])
+      let rg_table = Vault.new(ring_table)
+      let old_ring = Vault.get_or(rg_table, ring_key, [])
       -- push_capped will append then trim to max, dropping oldest (head) entries.
       -- Compute how many head entries become stale so we can clean up their keys.
       let n       = List.length(old_ring)
       let to_drop = if n >= max do n - max + 1 else 0 end
       let evicted = List.take(old_ring, to_drop)
       -- Atomically append the new ID and trim to max.
-      let _ = Vault.push_capped(req_table, "ring", request_id, max)
+      let _ = Vault.push_capped(rg_table, ring_key, request_id, max)
       -- Store the new summary under its own key.
       let method  = extract_method(metadata)
       let path    = extract_path(metadata)

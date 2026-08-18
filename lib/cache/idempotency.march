@@ -120,9 +120,11 @@ mod Bastion.Idempotency do
 
   pfn replay_cached(conn, cached) do
     let (cached_status, cached_headers, cached_body) = cached
-    let with_headers = List.fold_left(cached_headers, conn, fn (c, pair) ->
-      let (hk, hv) = pair
-      HttpServer.put_resp_header(c, hk, hv)
+    -- HttpServer.resp_headers returns List(Header), not List((String, String)).
+    let with_headers = List.fold_left(cached_headers, conn, fn (c, hdr) ->
+      match hdr do
+      Header(hk, hv) -> HttpServer.put_resp_header(c, hk, hv)
+      end
     )
     HttpServer.put_resp_header(with_headers, "x-idempotent-replayed", "true")
     |> HttpServer.send_resp(cached_status, cached_body)

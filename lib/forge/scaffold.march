@@ -5,7 +5,11 @@
 
 mod Forge.Scaffold do
 
+  -- Scaffolding creates a project tree and shells out to git/forge.
   needs IO.Console
+  needs IO.FileRead
+  needs IO.FileWrite
+  needs IO.Process
 
 -- ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,7 +32,10 @@ end
 -- Produce a literal ${name} placeholder for use inside generated source files.
 -- Needed because March triple-quoted strings evaluate ${...} at compile time.
 pfn iv(_name) do
-  "${" ++ _name ++ "}"
+  -- "$" and "{" must stay in separate string literals: a literal "${"
+  -- inside one string token triggers March's own ${...} interpolation
+  -- scanner, which then swallows the following source as the "expression".
+  "$" ++ "{" ++ _name ++ "}"
 end
 
 -- ── Templates ────────────────────────────────────────────────────────────────
@@ -39,6 +46,12 @@ end
 
 pfn main_source(pascal) do
   "mod " ++ pascal ++ " do\n\n" ++
+  "  needs IO.Console\n" ++
+  "  needs IO.NetListen\n" ++
+  "  needs IO.Mut\n" ++
+  "  needs IO.WebSocket\n" ++
+  "  needs IO.FileRead\n" ++
+  "  needs IO.Process\n\n" ++
   "  import HttpServer\n" ++
   "  import Router\n" ++
   "  import Controller\n" ++
@@ -60,7 +73,11 @@ pfn main_source(pascal) do
   "  pfn build_island_registry() : IslandSocket.Registry do\n" ++
   "    IslandSocket.new_registry()\n" ++
   "    |> IslandSocket.register(\"Counter\",\n" ++
-  "         fn (state, msg) -> Counter.update_json(state, msg),\n" ++
+  "         fn pair -> do\n" ++
+  "           match pair do\n" ++
+  "           (state, msg) -> Counter.update_json(state, msg)\n" ++
+  "           end\n" ++
+  "         end,\n" ++
   "         fn state -> Counter.render_json(state))\n" ++
   "  end\n\n" ++
   "  fn main() : Unit do\n" ++
@@ -70,26 +87,38 @@ pfn main_source(pascal) do
   "    let island_ws     = IslandSocket.plug(IslandSocket.default_config(), registry)\n" ++
   "    let island_assets = IslandAssets.plug(IslandAssets.default_config())\n" ++
   "    let static_files  = Static.serve(\"public\")\n\n" ++
-  "    let app = fn conn -> do\n" ++
+  "    let handler = fn conn -> do\n" ++
   "      let c = island_ws(conn)\n" ++
-  "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
-  "      let c = island_assets(c)\n" ++
-  "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
-  "      let c = static_files(c)\n" ++
-  "      match HttpServer.halted(c) do true -> c | false -> do\n" ++
-  "      let c = Middleware.logger(c)\n" ++
-  "      let c = Middleware.request_id(c)\n" ++
-  "      -- CORS is not enabled by default; configure an explicit origin\n" ++
-  "      -- allowlist instead:  let c = Middleware.cors([\"https://example.com\"])(c)\n" ++
   "      match HttpServer.halted(c) do\n" ++
-  "      true  -> c\n" ++
-  "      false -> plug(c)\n" ++
+  "      true -> c\n" ++
+  "      false -> do\n" ++
+  "        let c = island_assets(c)\n" ++
+  "        match HttpServer.halted(c) do\n" ++
+  "        true -> c\n" ++
+  "        false -> do\n" ++
+  "          let c = static_files(c)\n" ++
+  "          match HttpServer.halted(c) do\n" ++
+  "          true -> c\n" ++
+  "          false -> do\n" ++
+  "            let c = Middleware.logger(c)\n" ++
+  "            let c = Middleware.request_id(c)\n" ++
+  "            -- CORS is not enabled by default; configure an explicit origin\n" ++
+  "            -- allowlist instead:  let c = Middleware.cors([\"https://example.com\"])(c)\n" ++
+  "            match HttpServer.halted(c) do\n" ++
+  "            true  -> c\n" ++
+  "            false -> plug(c)\n" ++
+  "            end\n" ++
+  "          end\n" ++
+  "          end\n" ++
+  "        end\n" ++
+  "        end\n" ++
   "      end\n" ++
-  "      end end end\n" ++
+  "      end\n" ++
   "    end\n\n" ++
-  "    println(\"" ++ pascal ++ " listening on http://localhost:4000\")\n" ++
-  "    HttpServer.new(4000)\n" ++
-  "    |> HttpServer.plug(app)\n" ++
+  "    let port = Config.port()\n" ++
+  "    println(\"" ++ pascal ++ " listening on http://localhost:\" ++ int_to_string(port))\n" ++
+  "    HttpServer.new(port)\n" ++
+  "    |> HttpServer.plug(handler)\n" ++
   "    |> HttpServer.listen()\n" ++
   "  end\n\n" ++
   "end\n"
@@ -98,28 +127,29 @@ end
 pfn page_controller_source(pascal) do
   let q = "\"\"\""
   "mod PageController do\n\n" ++
+  "  needs IO.NetListen\n\n" ++
   "  import HttpServer\n" ++
   "  import Controller\n" ++
   "  import Response\n\n" ++
   "  fn home(conn : Conn) : Controller.ActionResult do\n" ++
-  "    let html = layout(\"Home\", ~H" ++ q ++ "\n" ++
+  "    let html = layout(\"Home\", IOList.to_string(~H" ++ q ++ "\n" ++
   "      <h1>Welcome to " ++ pascal ++ "!</h1>\n" ++
   "      <p>Edit <code>lib/page_controller.march</code> to get started.</p>\n" ++
   "      <p><a href=\"/about\">About</a></p>\n" ++
   "      <h2>Interactive Counter (Island)</h2>\n" ++
   "      <div data-march-island=\"Counter\" data-march-state='{\"count\":0}'></div>\n" ++
-  "    " ++ q ++ ")\n" ++
+  "    " ++ q ++ "))\n" ++
   "    Controller.ActionOk(Response.html(conn, 200, html))\n" ++
   "  end\n\n" ++
   "  fn about(conn : Conn) : Controller.ActionResult do\n" ++
-  "    let html = layout(\"About\", ~H" ++ q ++ "\n" ++
+  "    let html = layout(\"About\", IOList.to_string(~H" ++ q ++ "\n" ++
   "      <h1>About</h1>\n" ++
   "      <p>Built with <a href=\"https://github.com/march-lang/bastion\">Bastion</a>.</p>\n" ++
-  "    " ++ q ++ ")\n" ++
+  "    " ++ q ++ "))\n" ++
   "    Controller.ActionOk(Response.html(conn, 200, html))\n" ++
   "  end\n\n" ++
   "  pfn layout(title : String, body : String) : String do\n" ++
-  "    ~H" ++ q ++ "\n" ++
+  "    IOList.to_string(~H" ++ q ++ "\n" ++
   "    <!DOCTYPE html>\n" ++
   "    <html lang=\"en\">\n" ++
   "    <head>\n" ++
@@ -134,7 +164,7 @@ pfn page_controller_source(pascal) do
   "      <script src=\"/_bastion/islands.js\"></script>\n" ++
   "    </body>\n" ++
   "    </html>\n" ++
-  "    " ++ q ++ "\n" ++
+  "    " ++ q ++ ")\n" ++
   "  end\n\n" ++
   "end\n"
 end
@@ -239,18 +269,18 @@ end
 
 pfn config_prod() do
   "mod Config.Prod do\n"
-  ++ "  let port         : Int    = match Process.env(\"PORT\") do Some(p) -> string_to_int(p) | None -> 4000 end\n"
+  ++ "  let port         : Int    = match Process.env(\"PORT\") do Some(p) -> (match string_to_int(p) do Some(n) -> n | None -> 4000 end) | None -> 4000 end\n"
   ++ "  let debug        : Bool   = false\n"
   ++ "  let log_level    : String = Env.get(\"LOG_LEVEL\", \"info\")\n"
   ++ "  let log_format   : String = \"json\"\n"
   ++ "  let database_url : String = Env.get(\"DATABASE_URL\", \"\")\n"
   ++ "  let db_host      : String = Env.get(\"DB_HOST\", \"localhost\")\n"
-  ++ "  let db_port      : Int    = match Process.env(\"DB_PORT\") do Some(p) -> string_to_int(p) | None -> 5432 end\n"
+  ++ "  let db_port      : Int    = match Process.env(\"DB_PORT\") do Some(p) -> (match string_to_int(p) do Some(n) -> n | None -> 5432 end) | None -> 5432 end\n"
   ++ "  let db_name      : String = Env.get(\"DB_NAME\", \"\")\n"
   ++ "  let db_user      : String = Env.get(\"DB_USER\", \"postgres\")\n"
   ++ "  let db_password  : String = Env.get(\"DB_PASSWORD\", \"\")\n"
-  ++ "  let db_pool_min  : Int    = match Process.env(\"DB_POOL_MIN\") do Some(p) -> string_to_int(p) | None -> 5 end\n"
-  ++ "  let db_pool_max  : Int    = match Process.env(\"DB_POOL_MAX\") do Some(p) -> string_to_int(p) | None -> 20 end\n"
+  ++ "  let db_pool_min  : Int    = match Process.env(\"DB_POOL_MIN\") do Some(p) -> (match string_to_int(p) do Some(n) -> n | None -> 5 end) | None -> 5 end\n"
+  ++ "  let db_pool_max  : Int    = match Process.env(\"DB_POOL_MAX\") do Some(p) -> (match string_to_int(p) do Some(n) -> n | None -> 20 end) | None -> 20 end\n"
   ++ "end\n"
 end
 
