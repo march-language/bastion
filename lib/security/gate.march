@@ -137,7 +137,6 @@ mod Gate do
           if len <= n do g
           else add_error(g, field, "is too long (maximum is " ++ int_to_string(n) ++ " characters)")
           end
-        _ -> g
         end
       )
     end
@@ -168,7 +167,6 @@ mod Gate do
             if n <= max do g
             else add_error(g, field, "must be less than or equal to " ++ int_to_string(max))
             end
-          _ -> g
           end
         )
       end
