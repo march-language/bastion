@@ -174,10 +174,18 @@ mod Static do
   -- Long-lived immutable cache for fingerprinted files; 1 hour otherwise.
   pfn cache_control_for(file_path : String) : String do
     let segments = String.split(file_path, "/")
-    let filename  = List.last(segments)
+    let filename  = last_segment(segments)
     match looks_fingerprinted(filename) do
     true  -> "public, max-age=31536000, immutable"
     false -> "public, max-age=3600"
+    end
+  end
+
+  pfn last_segment(segments) do
+    match segments do
+    Nil -> ""
+    Cons(segment, Nil) -> segment
+    Cons(_, rest) -> last_segment(rest)
     end
   end
 
@@ -198,7 +206,7 @@ mod Static do
     match List.length(parts) > 1 do
     false -> false
     true -> do
-      let last_part = List.last(parts)
+      let last_part = last_segment(parts)
       match String.split_first(last_part, ".") do
       None -> false
       Some((hash_part, _)) -> String.byte_size(hash_part) == 8

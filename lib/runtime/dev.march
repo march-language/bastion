@@ -29,6 +29,8 @@ mod Bastion.Dev do
   needs IO.Console
   needs IO.Clock
   needs IO.NetListen
+  -- Bastion.Metrics writes to a Vault, so importing it pulls IO.Mut into this
+  -- module's capability ceiling.
   needs IO.Mut
   import HttpServer
   import Bastion.Metrics

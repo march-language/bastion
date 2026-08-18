@@ -42,6 +42,27 @@ mod Bastion.Telemetry do
   -- Vault table storing registered handlers
   let table_name = "_bastion_telemetry"
 
+  -- The `: Vault(v)` return annotation is deliberate, and is Telemetry's
+  -- documented opt-out from Vault's typed handles (the same one
+  -- stdlib/config.march uses). A telemetry handler is called as
+  -- `handler_fn(event_name, measurements, metadata)`, and `measurements` is a
+  -- different record shape per event — `{ duration_ms }` for a span,
+  -- `{ timestamp_ms }` for request_start, `{ duration_ms, status }` for
+  -- request_stop. An unannotated handle factory is monomorphic, which would
+  -- pin every event in the program to one measurements shape.
+  --
+  -- These MUST be called inline (`fn_table()`), not bound with `let t =
+  -- fn_table()`: a block let is one of the handle-demotion sites, and binding
+  -- re-pins the element type. The consequence is that handler payloads are
+  -- element-erased; use a real Vault(v) handle when you want the check.
+  pfn fn_table() : Vault(v) do
+    Vault.new(table_name ++ "_fn")
+  end
+
+  pfn subs_table() : Vault(v) do
+    Vault.new(table_name ++ "_subs")
+  end
+
   -- ── Attach / detach ───────────────────────────────────────────────────────
 
   doc """
@@ -58,10 +79,8 @@ mod Bastion.Telemetry do
       end)
   """
   fn attach(handler_id : String, event_names : List(List(String)), handler_fn) do
-    let fn_table   = Vault.new(table_name ++ "_fn")
-    let subs_table = Vault.new(table_name ++ "_subs")
-    Vault.set(fn_table, handler_id, handler_fn)
-    Vault.set(subs_table, handler_id, event_names)
+    Vault.set(fn_table(), handler_id, handler_fn)
+    Vault.set(subs_table(), handler_id, event_names)
   end
 
   doc """
@@ -70,16 +89,13 @@ mod Bastion.Telemetry do
       Bastion.Telemetry.detach("my_metrics")
   """
   fn detach(handler_id : String) do
-    let fn_table   = Vault.new(table_name ++ "_fn")
-    let subs_table = Vault.new(table_name ++ "_subs")
-    Vault.drop(fn_table, handler_id)
-    Vault.drop(subs_table, handler_id)
+    Vault.drop(fn_table(), handler_id)
+    Vault.drop(subs_table(), handler_id)
   end
 
   doc "Return the list of all attached handler IDs."
   fn attached_handlers() : List(String) do
-    let fn_table = Vault.new(table_name ++ "_fn")
-    Vault.keys(fn_table)
+    Vault.keys(fn_table())
   end
 
   -- ── Emit ──────────────────────────────────────────────────────────────────
@@ -100,14 +116,12 @@ mod Bastion.Telemetry do
         { conn: conn })
   """
   fn execute(event_name : List(String), measurements, metadata) do
-    let fn_table   = Vault.new(table_name ++ "_fn")
-    let subs_table = Vault.new(table_name ++ "_subs")
-    let ids = Vault.keys(fn_table)
+    let ids = Vault.keys(fn_table())
     List.each(ids, fn handler_id ->
-      match Vault.get(fn_table, handler_id) do
+      match Vault.get(fn_table(), handler_id) do
       None -> ()
       Some(handler_fn) ->
-        let subscriptions = Vault.get_or(subs_table, handler_id, [])
+        let subscriptions = Vault.get_or(subs_table(), handler_id, [])
         let subscribed = List.any(subscriptions, fn sub_event ->
           events_match(sub_event, event_name)
         )

@@ -308,11 +308,19 @@ mod IslandAssets do
     let parts = String.split(stem, "-")
     let hashed = match List.length(parts) > 1 do
       false -> false
-      true  -> String.byte_size(List.last(parts)) == 8
+      true  -> String.byte_size(last_segment(parts)) == 8
       end
     match hashed do
     true  -> "public, max-age=31536000, immutable"
     false -> "public, max-age=60"
+    end
+  end
+
+  pfn last_segment(parts) do
+    match parts do
+    Nil -> ""
+    Cons(part, Nil) -> part
+    Cons(_, rest) -> last_segment(rest)
     end
   end
 

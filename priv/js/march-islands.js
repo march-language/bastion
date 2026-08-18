@@ -219,7 +219,13 @@
       if (typeof Idiomorph !== 'undefined' && Idiomorph.morph) {
         Idiomorph.morph(this.el, newHTML, {
           morphStyle: 'innerHTML',
-          ignoreActiveValue: true
+          ignoreActiveValue: true,
+          callbacks: {
+            // A user-toggled <details> keeps its open state across server pushes.
+            // The server may still *add* open; only removals are ignored.
+            beforeAttributeUpdated: (attr, node, mutationType) =>
+              !(attr === 'open' && mutationType === 'remove' && node.tagName === 'DETAILS')
+          }
         });
       } else {
         this.el.innerHTML = newHTML;
@@ -1149,5 +1155,100 @@
 
   // Internal debug handle — use window.Bastion for production use.
   window.__bastionIslands = manager;
+
+  // ── Typeahead keyboard navigation ──────────────────────────────────────
+  // For a server-owned island containing a text <input> plus a list of result
+  // <a href> links (e.g. the package-search dropdown), let the keyboard drive it:
+  //   ArrowDown / ArrowUp  — move a highlight through the result links (wraps)
+  //   Enter                — follow the highlighted link (or the first result)
+  //   Escape               — clear the query + highlight and close the dropdown
+  // Purely client-side (no server round-trip) so it stays responsive; the
+  // highlight is re-derived from the live DOM on every keystroke, so it survives
+  // the server re-rendering the dropdown as the query changes.
+  (function typeaheadKeys() {
+    var HL_BG = 'rgba(34,211,238,0.12)';
+    function islandOf(el) { return el && el.closest ? el.closest('[data-march-island]') : null; }
+    function resultLinks(island) {
+      return island ? Array.prototype.slice.call(island.querySelectorAll('a[href]')) : [];
+    }
+    function activeIndex(links) {
+      for (var i = 0; i < links.length; i++) {
+        if (links[i].getAttribute('data-kbd-active') === '1') return i;
+      }
+      return -1;
+    }
+    function setActive(links, idx) {
+      for (var i = 0; i < links.length; i++) {
+        if (i === idx) {
+          links[i].setAttribute('data-kbd-active', '1');
+          links[i].style.background = HL_BG;
+          if (links[i].scrollIntoView) links[i].scrollIntoView({ block: 'nearest' });
+        } else {
+          links[i].removeAttribute('data-kbd-active');
+          links[i].style.background = '';
+        }
+      }
+    }
+    document.addEventListener('keydown', function (e) {
+      var t = e.target;
+      if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA')) return;
+      var island = islandOf(t);
+      if (!island) return;
+      var links = resultLinks(island);
+      var idx = activeIndex(links);
+      if (e.key === 'ArrowDown') {
+        if (!links.length) return;
+        e.preventDefault();
+        setActive(links, idx < 0 ? 0 : (idx + 1) % links.length);
+      } else if (e.key === 'ArrowUp') {
+        if (!links.length) return;
+        e.preventDefault();
+        setActive(links, idx <= 0 ? links.length - 1 : idx - 1);
+      } else if (e.key === 'Enter') {
+        var target = idx >= 0 ? links[idx] : links[0];
+        if (target && target.href) { e.preventDefault(); window.location.href = target.href; }
+      } else if (e.key === 'Escape') {
+        setActive(links, -1);
+        if (t.value) { t.value = ''; t.dispatchEvent(new Event('input', { bubbles: true })); }
+        t.blur();
+      }
+    }, true);
+  })();
+
+  // ── Typeahead: click-outside closes the dropdown ───────────────────────
+  // The search island renders its result dropdown as the input's next
+  // sibling (an absolutely-positioned overlay). A pointerdown anywhere
+  // outside the island hides that overlay — the typed text stays put.
+  // Focusing back into the input restores it, and the next server re-render
+  // (on the next keystroke) rebuilds it fresh. Purely client-side.
+  (function typeaheadClickOutside() {
+    function overlayOf(island) {
+      var input = island.querySelector('input, textarea');
+      return input ? input.nextElementSibling : null;
+    }
+    function hide(island) {
+      var o = overlayOf(island);
+      if (o) o.style.display = 'none';
+      var hl = island.querySelectorAll('a[data-kbd-active]');
+      for (var i = 0; i < hl.length; i++) { hl[i].removeAttribute('data-kbd-active'); hl[i].style.background = ''; }
+    }
+    function show(island) {
+      var o = overlayOf(island);
+      if (o) o.style.display = '';
+    }
+    document.addEventListener('pointerdown', function (e) {
+      var inside = e.target && e.target.closest ? e.target.closest('[data-march-island]') : null;
+      var islands = document.querySelectorAll('[data-march-island]');
+      for (var i = 0; i < islands.length; i++) {
+        if (islands[i] !== inside) hide(islands[i]);
+      }
+    }, true);
+    document.addEventListener('focusin', function (e) {
+      var t = e.target;
+      if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA')) return;
+      var island = t.closest ? t.closest('[data-march-island]') : null;
+      if (island) show(island);
+    }, true);
+  })();
 
 })();
