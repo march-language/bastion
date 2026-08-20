@@ -23,6 +23,9 @@
 mod Forge.GenAuth do
 
   needs IO.Console
+  needs IO.Clock
+  needs IO.FileWrite
+  needs IO.Process
 
 -- Capitalise the first character of a string.
 pfn capitalize(s) do
@@ -1047,7 +1050,7 @@ fn run() do
   Ok(())
 end
 
-fn main() do
+fn main(_cap_console : Cap(IO.Console), _cap_clock : Cap(IO.Clock), _cap_filewrite : Cap(IO.FileWrite), _cap_process : Cap(IO.Process)) do
   let _ = run()
   ()
 end

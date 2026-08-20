@@ -24,6 +24,9 @@
 mod Forge.GenContext do
 
   needs IO.Console
+  needs IO.Clock
+  needs IO.FileWrite
+  needs IO.Process
 
 -- ── Name helpers ─────────────────────────────────────────────────────────────
 
@@ -326,7 +329,7 @@ fn run(args) do
   end
 end
 
-fn main() do
+fn main(_cap_console : Cap(IO.Console), _cap_clock : Cap(IO.Clock), _cap_filewrite : Cap(IO.FileWrite), _cap_process : Cap(IO.Process)) do
   let raw  = Env.get("FORGE_TASK_ARGS", "")
   let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
   run(args)

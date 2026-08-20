@@ -29,6 +29,9 @@
 mod Forge.Release do
 
   needs IO.Console
+  needs IO.FileRead
+  needs IO.FileWrite
+  needs IO.Process
 
   -- ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -263,7 +266,7 @@ mod Forge.Release do
     end
   end
 
-  fn main() do
+  fn main(_cap_console : Cap(IO.Console), _cap_fileread : Cap(IO.FileRead), _cap_filewrite : Cap(IO.FileWrite), _cap_process : Cap(IO.Process)) do
     let raw  = Env.get("FORGE_TASK_ARGS", "")
     let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
     run(args)
