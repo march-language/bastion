@@ -33,6 +33,8 @@
 mod Forge.Console do
 
   needs IO.Console
+  needs IO.Process
+  needs IO.FileRead
 
 -- ---------------------------------------------------------------------------
 -- Config
@@ -57,7 +59,7 @@ end
 -- Entry point
 -- ---------------------------------------------------------------------------
 
-fn main() do
+fn main(_cap_console : Cap(IO.Console), _cap_process : Cap(IO.Process), _cap_fileread : Cap(IO.FileRead)) do
   let raw  = Env.get("FORGE_TASK_ARGS", "")
   let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
   run(args)

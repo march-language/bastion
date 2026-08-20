@@ -11,8 +11,9 @@
 mod Forge.DepotRollback do
 
   needs IO.Console
+  needs IO.Process
 
-  fn main() do
+  fn main(_cap_console : Cap(IO.Console), _cap_process : Cap(IO.Process)) do
     let raw  = Env.get("FORGE_TASK_ARGS", "")
     let step = match raw do
       "" -> 1

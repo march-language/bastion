@@ -236,7 +236,7 @@ fn run(args) do
   end
 end
 
-fn main() do
+fn main(_cap_fileread : Cap(IO.FileRead), _cap_filewrite : Cap(IO.FileWrite), _cap_process : Cap(IO.Process), _cap_console : Cap(IO.Console)) do
   let raw  = Env.get("FORGE_TASK_ARGS", "")
   let args = if String.is_empty(raw) do Nil else String.split(raw, "\n") end
   run(args)

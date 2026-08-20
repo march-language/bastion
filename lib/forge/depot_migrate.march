@@ -12,8 +12,9 @@
 mod Forge.DepotMigrate do
 
   needs IO.Console
+  needs IO.Process
 
-  fn main() do
+  fn main(_cap_console : Cap(IO.Console), _cap_process : Cap(IO.Process)) do
     match CmdDepot.migrate() do
     Ok(_)    -> ()
     Err(msg) -> do
