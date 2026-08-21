@@ -1,0 +1,1020 @@
+<!DOCTYPE html><html lang="en" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Request — March Docs</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;1,400;1,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><style>
+/* Dark theme (default) — deep navy with cyan accent, matching the March homepage */
+:root{--bg:#07101a;--sb:#0a1622;--bg-nav:rgba(7,16,26,.92);--card:#0c1928;--bdr:#0f2438;
+--acc:oklch(63% .12 207);--acc2:oklch(74% .11 200);--text:#cce5f5;--dim:#4a7898;
+--faint:#1e4060;--bright:#eaf4fb;--code:#0c1928;
+--fn:oklch(74% .13 165);--ty:oklch(82% .12 70);--if:oklch(78% .11 235);--prv:#3a5f7d}
+
+/* Light theme overrides */
+[data-theme='light']{--bg:#f0f6fc;--sb:#e3eef8;--bg-nav:rgba(240,246,252,.92);--card:#ddeaf5;--bdr:#b5cce0;
+--acc:oklch(37% .11 210);--acc2:oklch(45% .11 215);--text:#071828;--dim:#2e5c7c;
+--faint:#6a96b5;--bright:#071828;--code:#ddeaf5;
+--fn:oklch(45% .13 165);--ty:oklch(52% .12 70);--if:oklch(45% .11 235);--prv:#6a96b5}
+
+/* Reset + base */
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;font-size:15px;line-height:1.6;display:flex;flex-direction:column;min-height:100vh}
+a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline;color:var(--acc2)}
+
+/* Top bar */
+#topbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:60px;background:var(--bg-nav);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--bdr);flex-shrink:0;position:sticky;top:0;z-index:100}
+#topbar .brand{font-family:'Lora',Georgia,serif;font-size:18px;font-weight:600;color:var(--text);letter-spacing:-.02em;display:flex;align-items:center;gap:9px}
+#topbar .brand svg{width:20px;height:20px}
+#topbar .actions{display:flex;align-items:center;gap:12px}
+#theme-toggle{background:none;border:1px solid var(--bdr);border-radius:6px;color:var(--dim);cursor:pointer;padding:5px 8px;font-size:13px;font-family:'JetBrains Mono',monospace;display:flex;align-items:center;gap:4px;transition:all .15s}
+#theme-toggle:hover{color:var(--text);border-color:var(--acc)}
+#search-trigger{background:var(--card);border:1px solid var(--bdr);border-radius:6px;color:var(--dim);cursor:pointer;padding:5px 14px;font-size:13px;display:flex;align-items:center;gap:8px;transition:all .15s;min-width:200px}
+#search-trigger:hover{border-color:var(--acc);color:var(--text)}
+#search-trigger kbd{font-size:10px;background:var(--bg);border:1px solid var(--bdr);border-radius:3px;padding:1px 5px;margin-left:auto;font-family:inherit}
+
+/* Content wrapper (sidebar + main) */
+.content-wrap{display:flex;flex:1;overflow:hidden}
+
+/* Typography */
+code,pre{font-family:'JetBrains Mono','Fira Code','SF Mono',monospace;font-size:13px}
+pre{background:var(--code);border:1px solid var(--bdr);border-radius:6px;padding:14px 18px;overflow-x:auto;margin:12px 0;line-height:1.5}
+code{background:var(--code);padding:2px 6px;border-radius:4px;font-size:12px;color:var(--acc)}pre code{background:none;padding:0;color:var(--text);font-size:13px}
+h1{font-family:'Lora',Georgia,serif;font-size:2.1rem;color:var(--bright);margin-bottom:12px;font-weight:600;letter-spacing:-.02em}
+h2{font-family:'JetBrains Mono','Fira Code',monospace;font-size:.72rem;color:var(--acc);margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--bdr);font-weight:500;text-transform:uppercase;letter-spacing:.12em}
+p{margin:8px 0}
+
+/* Sidebar */
+#sb{width:248px;min-width:208px;background:var(--sb);border-right:1px solid var(--bdr);padding:8px 10px 28px;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto;flex-shrink:0}
+#sb::-webkit-scrollbar{width:5px}#sb::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:3px}#sb::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+.sb-section{padding:0}
+.sb-heading{font-family:'JetBrains Mono','Fira Code',monospace;font-size:10px;font-weight:500;color:var(--faint);text-transform:uppercase;letter-spacing:.16em;padding:20px 10px 8px;user-select:none}
+
+/* Generic nav link (top-level + sub-items) */
+.sl{display:block;padding:5px 10px;border-radius:6px;font-size:13px;line-height:1.45;color:var(--dim);transition:color .12s,background .12s}
+.sl:hover{background:color-mix(in oklab,var(--acc) 9%,transparent);color:var(--text);text-decoration:none}
+.sl.active{color:var(--acc);font-weight:500}
+.sb-section>.sl.active,.sb-sub .sl.active{background:color-mix(in oklab,var(--acc) 12%,transparent);box-shadow:inset 2px 0 0 var(--acc)}
+
+/* Hierarchical sidebar groups */
+.sb-group{margin:1px 0}
+.sb-group-hdr{display:flex;align-items:center;border-radius:6px;cursor:pointer;user-select:none;transition:background .12s}
+.sb-group-hdr:hover{background:color-mix(in oklab,var(--acc) 9%,transparent)}
+.sb-group-hdr:hover .sl,.sb-group-hdr:hover .sb-chevron{color:var(--text)}
+.sb-group-hdr:has(.sl.active){background:color-mix(in oklab,var(--acc) 12%,transparent);box-shadow:inset 2px 0 0 var(--acc)}
+.sb-group-hdr .sl{flex:1;padding-left:1px}
+.sb-chevron{font-size:9px;transition:transform .15s,color .12s;width:20px;align-self:stretch;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--faint)}
+.sb-group.open>.sb-group-hdr .sb-chevron{transform:rotate(90deg);color:var(--acc)}
+.sb-sub{display:none;margin:1px 0 6px 19px;padding-left:8px;border-left:1px solid var(--bdr)}
+.sb-group.open .sb-sub{display:block}
+.sb-sub .sl{font-size:12px;padding:3px 8px;color:var(--dim)}
+.sb-sub .sl:hover{color:var(--text)}
+.sb-kind{display:inline-block;width:12px;font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;letter-spacing:.03em;margin-right:8px;text-transform:uppercase;text-align:center}
+
+/* Main content */
+#main{flex:1;padding:40px max(52px,calc(50% - 574px));min-width:0;overflow-y:auto;height:calc(100vh - 60px)}
+
+/* Breadcrumb */
+.breadcrumb{font-size:12px;color:var(--dim);margin-bottom:16px;display:flex;align-items:center;gap:6px}
+.breadcrumb a{color:var(--dim);font-size:12px}.breadcrumb a:hover{color:var(--acc)}
+.breadcrumb .sep{color:var(--bdr)}
+
+/* Module doc card */
+.mdoc{background:var(--card);border:1px solid var(--bdr);border-radius:8px;padding:20px 24px;margin-bottom:24px;color:var(--dim);font-size:14px;line-height:1.7}
+
+/* Items */
+.item{border:1px solid var(--bdr);border-radius:8px;margin-bottom:12px;overflow:hidden;transition:border-color .15s}
+.item:hover{border-color:color-mix(in srgb,var(--acc) 40%,var(--bdr))}
+.ih{display:flex;align-items:baseline;gap:10px;padding:12px 16px;background:var(--card);cursor:pointer;user-select:none;transition:background .1s}
+.ih:hover{background:color-mix(in srgb,var(--card) 80%,var(--acc) 20%)}
+
+/* Badges */
+.badge{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;letter-spacing:.08em;padding:2px 9px;border-radius:100px;text-transform:uppercase;flex-shrink:0;border:1px solid transparent}
+.bfn{background:color-mix(in oklab,var(--fn) 13%,transparent);color:var(--fn);border-color:color-mix(in oklab,var(--fn) 24%,transparent)}
+.bpfn{background:color-mix(in oklab,var(--prv) 18%,transparent);color:var(--prv);border-color:color-mix(in oklab,var(--prv) 30%,transparent)}
+.bty{background:color-mix(in oklab,var(--ty) 12%,transparent);color:var(--ty);border-color:color-mix(in oklab,var(--ty) 24%,transparent)}
+.bpt{background:color-mix(in oklab,var(--prv) 15%,transparent);color:var(--prv);border-color:color-mix(in oklab,var(--prv) 26%,transparent)}
+.bif{background:color-mix(in oklab,var(--if) 12%,transparent);color:var(--if);border-color:color-mix(in oklab,var(--if) 24%,transparent)}
+
+/* Item content */
+.name{font-family:'JetBrains Mono','Fira Code',monospace;font-size:13px;color:var(--bright);font-weight:600}
+.sig{font-family:'JetBrains Mono','Fira Code',monospace;font-size:12px;color:var(--dim);flex:1;margin-left:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{padding:18px 20px;border-top:1px solid var(--bdr);display:none;font-size:14px;color:var(--text);line-height:1.7}
+.ib.open{display:block}
+
+/* Source + anchor links */
+.src-link{font-size:10px;color:var(--dim);background:var(--bg);border:1px solid var(--bdr);border-radius:4px;padding:1px 6px;margin-left:auto;opacity:0;transition:all .15s;text-decoration:none;flex-shrink:0}
+.ih:hover .src-link{opacity:1}.src-link:hover{color:var(--acc);border-color:var(--acc);text-decoration:none}
+.anchor-link{color:var(--bdr);font-size:14px;margin-left:6px;opacity:0;transition:opacity .15s;text-decoration:none}
+.ih:hover .anchor-link{opacity:1}.anchor-link:hover{color:var(--acc);text-decoration:none}
+
+/* Module cards (index page) */
+.mc{border:1px solid var(--bdr);border-radius:8px;padding:16px 20px;margin-bottom:12px;background:var(--card);transition:all .15s}
+.mc:hover{border-color:var(--acc);transform:translateY(-1px)}
+.mc h3{font-family:'Lora',Georgia,serif;color:var(--acc);font-size:1.05rem;font-weight:600;letter-spacing:-.01em}
+.mc p{font-size:13px;color:var(--dim);margin-top:6px}
+.st{font-size:12px;color:var(--dim);margin-top:8px;display:flex;gap:16px}
+.st span{display:flex;align-items:center;gap:4px}
+
+/* Copy button */
+.pre-wrap{position:relative}
+.copy-btn{position:absolute;top:8px;right:10px;background:var(--card);color:var(--dim);border:1px solid var(--bdr);border-radius:5px;padding:3px 10px;font-size:11px;font-family:-apple-system,sans-serif;cursor:pointer;opacity:0;transition:all .15s}
+.pre-wrap:hover .copy-btn{opacity:1}
+.copy-btn:hover{color:var(--text);border-color:var(--acc)}
+.copy-btn.copied{color:var(--fn);border-color:var(--fn);opacity:1}
+
+/* Search overlay (Cmd+K) */
+#search-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:flex-start;justify-content:center;padding-top:min(20vh,160px)}
+#search-overlay.open{display:flex}
+#search-modal{background:var(--sb);border:1px solid var(--bdr);border-radius:12px;width:560px;max-width:90vw;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.4)}
+#search-input{width:100%;background:transparent;border:none;border-bottom:1px solid var(--bdr);color:var(--text);padding:16px 20px;font-size:15px;outline:none;font-family:inherit}
+#search-input::placeholder{color:var(--dim)}
+#sr{max-height:50vh;overflow-y:auto;padding:8px}
+#sr:empty{display:none}
+.sr-item{display:flex;align-items:baseline;gap:8px;padding:8px 12px;border-radius:6px;cursor:pointer;text-decoration:none;color:var(--text);font-size:13px;transition:background .1s}
+.sr-item:hover{background:var(--card);text-decoration:none}
+.sr-kind{font-size:9px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:4px;text-transform:uppercase;flex-shrink:0;min-width:32px;text-align:center}
+.sr-fn{background:color-mix(in oklab,var(--fn) 13%,transparent);color:var(--fn)}.sr-type{background:color-mix(in oklab,var(--ty) 12%,transparent);color:var(--ty)}
+.sr-interface{background:color-mix(in oklab,var(--if) 12%,transparent);color:var(--if)}.sr-module{background:color-mix(in oklab,var(--acc) 13%,transparent);color:var(--acc)}
+.sr-pfn{background:color-mix(in oklab,var(--prv) 18%,transparent);color:var(--prv)}.sr-ptype{background:color-mix(in oklab,var(--prv) 15%,transparent);color:var(--prv)}
+.sr-name{color:var(--bright);font-family:monospace;font-weight:600;white-space:nowrap}
+.sr-mod{color:var(--dim);font-size:11px;margin-left:auto;flex-shrink:0}
+.sr-doc{color:var(--dim);font-size:11px;padding:0 12px 6px 48px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sr-sep{border-top:1px solid var(--bdr);margin:2px 8px}
+
+/* Admonitions */
+.admonition{border-left:3px solid var(--acc);background:var(--card);border-radius:0 6px 6px 0;padding:12px 16px;margin:12px 0;font-size:14px;color:var(--text)}
+.admonition.warning{border-left-color:var(--ty)}
+.admonition.note{border-left-color:var(--acc2)}
+
+/* Lists */
+ul,ol{margin:8px 0;padding-left:24px}li{margin:4px 0;line-height:1.6}
+
+/* Guide body */
+.guide-body{line-height:1.8;font-size:15px}
+.guide-body h3{font-family:'Lora',Georgia,serif;font-size:1.4rem;margin:30px 0 12px;color:var(--bright);font-weight:600;letter-spacing:-.01em}
+.guide-body h4{font-family:'Lora',Georgia,serif;font-size:1.1rem;margin:24px 0 10px;color:var(--bright);font-weight:600}
+
+/* Code blocks follow theme tokens (light code surface in light mode, like the main page) */
+
+/* Responsive */
+@media(max-width:768px){#sb{display:none}#main{padding:24px 16px}#search-trigger{min-width:auto}}
+</style></head><body><header id="topbar"><div class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> March Docs</div><div class="actions"><button id="search-trigger" onclick="openSearch()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Search&hellip;<kbd>&#8984;K</kbd></button><button id="theme-toggle" onclick="toggleTheme()"><svg id="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg><svg id="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button></div></header><div id="search-overlay" onclick="closeSearch()"><div id="search-modal" onclick="event.stopPropagation()"><input id="search-input" type="text" placeholder="Search modules, functions, types&hellip;" autocomplete="off"><div id="sr"></div></div></div><div class="content-wrap"><nav id="sb"><div class="sb-section"><a href="index.html" class="sl">Overview</a><div class="sb-heading">Modules</div><div class="sb-group"><div class="sb-group-hdr" data-href="Auth.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Auth.html">Auth</a></div><div class="sb-sub"><a class="sl" href="Auth.html#fn-authenticated"><span class="sb-kind" style="color:var(--fn)">F</span>authenticated</a>
+<a class="sl" href="Auth.html#fn-current_user"><span class="sb-kind" style="color:var(--fn)">F</span>current_user</a>
+<a class="sl" href="Auth.html#fn-load_current_user"><span class="sb-kind" style="color:var(--fn)">F</span>load_current_user</a>
+<a class="sl" href="Auth.html#fn-load_current_user_with_remember"><span class="sb-kind" style="color:var(--fn)">F</span>load_current_user_with_remember</a>
+<a class="sl" href="Auth.html#fn-log_in"><span class="sb-kind" style="color:var(--fn)">F</span>log_in</a>
+<a class="sl" href="Auth.html#fn-log_out"><span class="sb-kind" style="color:var(--fn)">F</span>log_out</a>
+<a class="sl" href="Auth.html#fn-redirect_after_login"><span class="sb-kind" style="color:var(--fn)">F</span>redirect_after_login</a>
+<a class="sl" href="Auth.html#fn-require_auth"><span class="sb-kind" style="color:var(--fn)">F</span>require_auth</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.html">Bastion</a></div><div class="sb-sub"><a class="sl" href="Bastion.html#type-Opts"><span class="sb-kind" style="color:var(--ty)">T</span>Opts</a>
+<a class="sl" href="Bastion.html#fn-default_opts"><span class="sb-kind" style="color:var(--fn)">F</span>default_opts</a>
+<a class="sl" href="Bastion.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Bastion.html#fn-opts_port"><span class="sb-kind" style="color:var(--fn)">F</span>opts_port</a>
+<a class="sl" href="Bastion.html#fn-port"><span class="sb-kind" style="color:var(--fn)">F</span>port</a>
+<a class="sl" href="Bastion.html#fn-with_idle_timeout"><span class="sb-kind" style="color:var(--fn)">F</span>with_idle_timeout</a>
+<a class="sl" href="Bastion.html#fn-with_max_connections"><span class="sb-kind" style="color:var(--fn)">F</span>with_max_connections</a>
+<a class="sl" href="Bastion.html#fn-with_port"><span class="sb-kind" style="color:var(--fn)">F</span>with_port</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Channel.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Channel.html">Bastion.Channel</a></div><div class="sb-sub"><a class="sl" href="Bastion.Channel.html#type-ChannelConn"><span class="sb-kind" style="color:var(--ty)">T</span>ChannelConn</a>
+<a class="sl" href="Bastion.Channel.html#fn-assign"><span class="sb-kind" style="color:var(--fn)">F</span>assign</a>
+<a class="sl" href="Bastion.Channel.html#fn-broadcast_from"><span class="sb-kind" style="color:var(--fn)">F</span>broadcast_from</a>
+<a class="sl" href="Bastion.Channel.html#fn-conn_id"><span class="sb-kind" style="color:var(--fn)">F</span>conn_id</a>
+<a class="sl" href="Bastion.Channel.html#fn-get_assign"><span class="sb-kind" style="color:var(--fn)">F</span>get_assign</a>
+<a class="sl" href="Bastion.Channel.html#fn-new_conn"><span class="sb-kind" style="color:var(--fn)">F</span>new_conn</a>
+<a class="sl" href="Bastion.Channel.html#fn-push"><span class="sb-kind" style="color:var(--fn)">F</span>push</a>
+<a class="sl" href="Bastion.Channel.html#fn-sub_id"><span class="sb-kind" style="color:var(--fn)">F</span>sub_id</a>
+<a class="sl" href="Bastion.Channel.html#fn-topic"><span class="sb-kind" style="color:var(--fn)">F</span>topic</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.ChannelServer.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.ChannelServer.html">Bastion.ChannelServer</a></div><div class="sb-sub"><a class="sl" href="Bastion.ChannelServer.html#type-ChannelRoute"><span class="sb-kind" style="color:var(--ty)">T</span>ChannelRoute</a>
+<a class="sl" href="Bastion.ChannelServer.html#type-ChannelRoutes"><span class="sb-kind" style="color:var(--ty)">T</span>ChannelRoutes</a>
+<a class="sl" href="Bastion.ChannelServer.html#fn-add_route"><span class="sb-kind" style="color:var(--fn)">F</span>add_route</a>
+<a class="sl" href="Bastion.ChannelServer.html#fn-new_routes"><span class="sb-kind" style="color:var(--fn)">F</span>new_routes</a>
+<a class="sl" href="Bastion.ChannelServer.html#fn-plug"><span class="sb-kind" style="color:var(--fn)">F</span>plug</a>
+<a class="sl" href="Bastion.ChannelServer.html#fn-plug_at"><span class="sb-kind" style="color:var(--fn)">F</span>plug_at</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Cmd.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Cmd.html">Bastion.Cmd</a></div><div class="sb-sub"><a class="sl" href="Bastion.Cmd.html#type-Cmd"><span class="sb-kind" style="color:var(--ty)">T</span>Cmd</a>
+<a class="sl" href="Bastion.Cmd.html#fn-after"><span class="sb-kind" style="color:var(--fn)">F</span>after</a>
+<a class="sl" href="Bastion.Cmd.html#fn-batch"><span class="sb-kind" style="color:var(--fn)">F</span>batch</a>
+<a class="sl" href="Bastion.Cmd.html#fn-blur"><span class="sb-kind" style="color:var(--fn)">F</span>blur</a>
+<a class="sl" href="Bastion.Cmd.html#fn-channel_push"><span class="sb-kind" style="color:var(--fn)">F</span>channel_push</a>
+<a class="sl" href="Bastion.Cmd.html#fn-every"><span class="sb-kind" style="color:var(--fn)">F</span>every</a>
+<a class="sl" href="Bastion.Cmd.html#fn-focus"><span class="sb-kind" style="color:var(--fn)">F</span>focus</a>
+<a class="sl" href="Bastion.Cmd.html#fn-http_get"><span class="sb-kind" style="color:var(--fn)">F</span>http_get</a>
+<a class="sl" href="Bastion.Cmd.html#fn-http_post"><span class="sb-kind" style="color:var(--fn)">F</span>http_post</a>
+<a class="sl" href="Bastion.Cmd.html#fn-is_none"><span class="sb-kind" style="color:var(--fn)">F</span>is_none</a>
+<a class="sl" href="Bastion.Cmd.html#fn-load_local"><span class="sb-kind" style="color:var(--fn)">F</span>load_local</a>
+<a class="sl" href="Bastion.Cmd.html#fn-map"><span class="sb-kind" style="color:var(--fn)">F</span>map</a>
+<a class="sl" href="Bastion.Cmd.html#fn-none"><span class="sb-kind" style="color:var(--fn)">F</span>none</a>
+<a class="sl" href="Bastion.Cmd.html#fn-push_url"><span class="sb-kind" style="color:var(--fn)">F</span>push_url</a>
+<a class="sl" href="Bastion.Cmd.html#fn-remove_local"><span class="sb-kind" style="color:var(--fn)">F</span>remove_local</a>
+<a class="sl" href="Bastion.Cmd.html#fn-replace_url"><span class="sb-kind" style="color:var(--fn)">F</span>replace_url</a>
+<a class="sl" href="Bastion.Cmd.html#fn-store_local"><span class="sb-kind" style="color:var(--fn)">F</span>store_local</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Dev.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Dev.html">Bastion.Dev</a></div><div class="sb-sub"><a class="sl" href="Bastion.Dev.html#fn-conn_inspector"><span class="sb-kind" style="color:var(--fn)">F</span>conn_inspector</a>
+<a class="sl" href="Bastion.Dev.html#fn-dashboard"><span class="sb-kind" style="color:var(--fn)">F</span>dashboard</a>
+<a class="sl" href="Bastion.Dev.html#fn-dev_env"><span class="sb-kind" style="color:var(--fn)">F</span>dev_env</a>
+<a class="sl" href="Bastion.Dev.html#fn-live_reload"><span class="sb-kind" style="color:var(--fn)">F</span>live_reload</a>
+<a class="sl" href="Bastion.Dev.html#fn-live_reload_tag"><span class="sb-kind" style="color:var(--fn)">F</span>live_reload_tag</a>
+<a class="sl" href="Bastion.Dev.html#fn-request_timer"><span class="sb-kind" style="color:var(--fn)">F</span>request_timer</a>
+<a class="sl" href="Bastion.Dev.html#fn-server_timing"><span class="sb-kind" style="color:var(--fn)">F</span>server_timing</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.ErrorOverlay.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.ErrorOverlay.html">Bastion.ErrorOverlay</a></div><div class="sb-sub"><a class="sl" href="Bastion.ErrorOverlay.html#fn-debug_socket"><span class="sb-kind" style="color:var(--fn)">F</span>debug_socket</a>
+<a class="sl" href="Bastion.ErrorOverlay.html#fn-render_error_page"><span class="sb-kind" style="color:var(--fn)">F</span>render_error_page</a>
+<a class="sl" href="Bastion.ErrorOverlay.html#fn-rescue_errors"><span class="sb-kind" style="color:var(--fn)">F</span>rescue_errors</a>
+<a class="sl" href="Bastion.ErrorOverlay.html#fn-router_plug"><span class="sb-kind" style="color:var(--fn)">F</span>router_plug</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Health.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Health.html">Bastion.Health</a></div><div class="sb-sub"><a class="sl" href="Bastion.Health.html#type-Check"><span class="sb-kind" style="color:var(--ty)">T</span>Check</a>
+<a class="sl" href="Bastion.Health.html#fn-check"><span class="sb-kind" style="color:var(--fn)">F</span>check</a>
+<a class="sl" href="Bastion.Health.html#fn-draining"><span class="sb-kind" style="color:var(--fn)">F</span>draining</a>
+<a class="sl" href="Bastion.Health.html#fn-plug"><span class="sb-kind" style="color:var(--fn)">F</span>plug</a>
+<a class="sl" href="Bastion.Health.html#fn-plug_with_checks"><span class="sb-kind" style="color:var(--fn)">F</span>plug_with_checks</a>
+<a class="sl" href="Bastion.Health.html#fn-start_drain"><span class="sb-kind" style="color:var(--fn)">F</span>start_drain</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Idempotency.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Idempotency.html">Bastion.Idempotency</a></div><div class="sb-sub"><a class="sl" href="Bastion.Idempotency.html#type-IdempotencyOpts"><span class="sb-kind" style="color:var(--ty)">T</span>IdempotencyOpts</a>
+<a class="sl" href="Bastion.Idempotency.html#fn-default_opts"><span class="sb-kind" style="color:var(--fn)">F</span>default_opts</a>
+<a class="sl" href="Bastion.Idempotency.html#fn-invalidate"><span class="sb-kind" style="color:var(--fn)">F</span>invalidate</a>
+<a class="sl" href="Bastion.Idempotency.html#fn-invalidate_with_scope"><span class="sb-kind" style="color:var(--fn)">F</span>invalidate_with_scope</a>
+<a class="sl" href="Bastion.Idempotency.html#fn-is_cached"><span class="sb-kind" style="color:var(--fn)">F</span>is_cached</a>
+<a class="sl" href="Bastion.Idempotency.html#fn-is_cached_with_scope"><span class="sb-kind" style="color:var(--fn)">F</span>is_cached_with_scope</a>
+<a class="sl" href="Bastion.Idempotency.html#fn-opts"><span class="sb-kind" style="color:var(--fn)">F</span>opts</a>
+<a class="sl" href="Bastion.Idempotency.html#fn-protect"><span class="sb-kind" style="color:var(--fn)">F</span>protect</a>
+<a class="sl" href="Bastion.Idempotency.html#fn-protect_with"><span class="sb-kind" style="color:var(--fn)">F</span>protect_with</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.IslandServer.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.IslandServer.html">Bastion.IslandServer</a></div><div class="sb-sub"><a class="sl" href="Bastion.IslandServer.html#fn-has_subscribers"><span class="sb-kind" style="color:var(--fn)">F</span>has_subscribers</a>
+<a class="sl" href="Bastion.IslandServer.html#fn-push"><span class="sb-kind" style="color:var(--fn)">F</span>push</a>
+<a class="sl" href="Bastion.IslandServer.html#fn-push_from"><span class="sb-kind" style="color:var(--fn)">F</span>push_from</a>
+<a class="sl" href="Bastion.IslandServer.html#fn-subscriber_count"><span class="sb-kind" style="color:var(--fn)">F</span>subscriber_count</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.JS.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.JS.html">Bastion.JS</a></div><div class="sb-sub"><a class="sl" href="Bastion.JS.html#type-JsRef"><span class="sb-kind" style="color:var(--ty)">T</span>JsRef</a>
+<a class="sl" href="Bastion.JS.html#type-JsElement"><span class="sb-kind" style="color:var(--ty)">T</span>JsElement</a>
+<a class="sl" href="Bastion.JS.html#type-JsEvent"><span class="sb-kind" style="color:var(--ty)">T</span>JsEvent</a>
+<a class="sl" href="Bastion.JS.html#fn-add_event_listener"><span class="sb-kind" style="color:var(--fn)">F</span>add_event_listener</a>
+<a class="sl" href="Bastion.JS.html#fn-bool_val"><span class="sb-kind" style="color:var(--fn)">F</span>bool_val</a>
+<a class="sl" href="Bastion.JS.html#fn-call"><span class="sb-kind" style="color:var(--fn)">F</span>call</a>
+<a class="sl" href="Bastion.JS.html#fn-eval"><span class="sb-kind" style="color:var(--fn)">F</span>eval</a>
+<a class="sl" href="Bastion.JS.html#fn-event_detail"><span class="sb-kind" style="color:var(--fn)">F</span>event_detail</a>
+<a class="sl" href="Bastion.JS.html#fn-get_attribute"><span class="sb-kind" style="color:var(--fn)">F</span>get_attribute</a>
+<a class="sl" href="Bastion.JS.html#fn-global"><span class="sb-kind" style="color:var(--fn)">F</span>global</a>
+<a class="sl" href="Bastion.JS.html#fn-int_val"><span class="sb-kind" style="color:var(--fn)">F</span>int_val</a>
+<a class="sl" href="Bastion.JS.html#fn-is_null"><span class="sb-kind" style="color:var(--fn)">F</span>is_null</a>
+<a class="sl" href="Bastion.JS.html#fn-json_val"><span class="sb-kind" style="color:var(--fn)">F</span>json_val</a>
+<a class="sl" href="Bastion.JS.html#fn-null_val"><span class="sb-kind" style="color:var(--fn)">F</span>null_val</a>
+<a class="sl" href="Bastion.JS.html#fn-query_selector"><span class="sb-kind" style="color:var(--fn)">F</span>query_selector</a>
+<a class="sl" href="Bastion.JS.html#fn-remove_attribute"><span class="sb-kind" style="color:var(--fn)">F</span>remove_attribute</a>
+<a class="sl" href="Bastion.JS.html#fn-set_attribute"><span class="sb-kind" style="color:var(--fn)">F</span>set_attribute</a>
+<a class="sl" href="Bastion.JS.html#fn-string_val"><span class="sb-kind" style="color:var(--fn)">F</span>string_val</a>
+<a class="sl" href="Bastion.JS.html#fn-to_int"><span class="sb-kind" style="color:var(--fn)">F</span>to_int</a>
+<a class="sl" href="Bastion.JS.html#fn-to_string"><span class="sb-kind" style="color:var(--fn)">F</span>to_string</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Logger.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Logger.html">Bastion.Logger</a></div><div class="sb-sub"><a class="sl" href="Bastion.Logger.html#fn-configure"><span class="sb-kind" style="color:var(--fn)">F</span>configure</a>
+<a class="sl" href="Bastion.Logger.html#fn-debug"><span class="sb-kind" style="color:var(--fn)">F</span>debug</a>
+<a class="sl" href="Bastion.Logger.html#fn-error"><span class="sb-kind" style="color:var(--fn)">F</span>error</a>
+<a class="sl" href="Bastion.Logger.html#fn-error_conn"><span class="sb-kind" style="color:var(--fn)">F</span>error_conn</a>
+<a class="sl" href="Bastion.Logger.html#fn-info"><span class="sb-kind" style="color:var(--fn)">F</span>info</a>
+<a class="sl" href="Bastion.Logger.html#fn-info_conn"><span class="sb-kind" style="color:var(--fn)">F</span>info_conn</a>
+<a class="sl" href="Bastion.Logger.html#fn-parse_level"><span class="sb-kind" style="color:var(--fn)">F</span>parse_level</a>
+<a class="sl" href="Bastion.Logger.html#fn-warn"><span class="sb-kind" style="color:var(--fn)">F</span>warn</a>
+<a class="sl" href="Bastion.Logger.html#fn-warn_conn"><span class="sb-kind" style="color:var(--fn)">F</span>warn_conn</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Metrics.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Metrics.html">Bastion.Metrics</a></div><div class="sb-sub"><a class="sl" href="Bastion.Metrics.html#type-RequestEntry"><span class="sb-kind" style="color:var(--ty)">T</span>RequestEntry</a>
+<a class="sl" href="Bastion.Metrics.html#type-MetricsSummary"><span class="sb-kind" style="color:var(--ty)">T</span>MetricsSummary</a>
+<a class="sl" href="Bastion.Metrics.html#fn-error_count"><span class="sb-kind" style="color:var(--fn)">F</span>error_count</a>
+<a class="sl" href="Bastion.Metrics.html#fn-instrument"><span class="sb-kind" style="color:var(--fn)">F</span>instrument</a>
+<a class="sl" href="Bastion.Metrics.html#fn-recent_requests"><span class="sb-kind" style="color:var(--fn)">F</span>recent_requests</a>
+<a class="sl" href="Bastion.Metrics.html#fn-record"><span class="sb-kind" style="color:var(--fn)">F</span>record</a>
+<a class="sl" href="Bastion.Metrics.html#fn-reset"><span class="sb-kind" style="color:var(--fn)">F</span>reset</a>
+<a class="sl" href="Bastion.Metrics.html#fn-summary"><span class="sb-kind" style="color:var(--fn)">F</span>summary</a>
+<a class="sl" href="Bastion.Metrics.html#fn-total"><span class="sb-kind" style="color:var(--fn)">F</span>total</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.OpenTelemetry.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.OpenTelemetry.html">Bastion.OpenTelemetry</a></div><div class="sb-sub"><a class="sl" href="Bastion.OpenTelemetry.html#type-Config"><span class="sb-kind" style="color:var(--ty)">T</span>Config</a>
+<a class="sl" href="Bastion.OpenTelemetry.html#fn-default_config"><span class="sb-kind" style="color:var(--fn)">F</span>default_config</a>
+<a class="sl" href="Bastion.OpenTelemetry.html#fn-export_span"><span class="sb-kind" style="color:var(--fn)">F</span>export_span</a>
+<a class="sl" href="Bastion.OpenTelemetry.html#fn-start"><span class="sb-kind" style="color:var(--fn)">F</span>start</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.PubSub.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.PubSub.html">Bastion.PubSub</a></div><div class="sb-sub"><a class="sl" href="Bastion.PubSub.html#fn-broadcast"><span class="sb-kind" style="color:var(--fn)">F</span>broadcast</a>
+<a class="sl" href="Bastion.PubSub.html#fn-broadcast_from"><span class="sb-kind" style="color:var(--fn)">F</span>broadcast_from</a>
+<a class="sl" href="Bastion.PubSub.html#fn-has_subscribers"><span class="sb-kind" style="color:var(--fn)">F</span>has_subscribers</a>
+<a class="sl" href="Bastion.PubSub.html#fn-subscribe"><span class="sb-kind" style="color:var(--fn)">F</span>subscribe</a>
+<a class="sl" href="Bastion.PubSub.html#fn-subscriber_count"><span class="sb-kind" style="color:var(--fn)">F</span>subscriber_count</a>
+<a class="sl" href="Bastion.PubSub.html#fn-unsubscribe"><span class="sb-kind" style="color:var(--fn)">F</span>unsubscribe</a>
+<a class="sl" href="Bastion.PubSub.html#fn-unsubscribe_all"><span class="sb-kind" style="color:var(--fn)">F</span>unsubscribe_all</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Session.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Session.html">Bastion.Session</a></div><div class="sb-sub"><a class="sl" href="Bastion.Session.html#fn-clear"><span class="sb-kind" style="color:var(--fn)">F</span>clear</a>
+<a class="sl" href="Bastion.Session.html#fn-commit"><span class="sb-kind" style="color:var(--fn)">F</span>commit</a>
+<a class="sl" href="Bastion.Session.html#fn-commit_from_conn"><span class="sb-kind" style="color:var(--fn)">F</span>commit_from_conn</a>
+<a class="sl" href="Bastion.Session.html#fn-delete"><span class="sb-kind" style="color:var(--fn)">F</span>delete</a>
+<a class="sl" href="Bastion.Session.html#fn-get"><span class="sb-kind" style="color:var(--fn)">F</span>get</a>
+<a class="sl" href="Bastion.Session.html#fn-load"><span class="sb-kind" style="color:var(--fn)">F</span>load</a>
+<a class="sl" href="Bastion.Session.html#fn-persist"><span class="sb-kind" style="color:var(--fn)">F</span>persist</a>
+<a class="sl" href="Bastion.Session.html#fn-put"><span class="sb-kind" style="color:var(--fn)">F</span>put</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Telemetry.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Telemetry.html">Bastion.Telemetry</a></div><div class="sb-sub"><a class="sl" href="Bastion.Telemetry.html#fn-attach"><span class="sb-kind" style="color:var(--fn)">F</span>attach</a>
+<a class="sl" href="Bastion.Telemetry.html#fn-attached_handlers"><span class="sb-kind" style="color:var(--fn)">F</span>attached_handlers</a>
+<a class="sl" href="Bastion.Telemetry.html#fn-detach"><span class="sb-kind" style="color:var(--fn)">F</span>detach</a>
+<a class="sl" href="Bastion.Telemetry.html#fn-execute"><span class="sb-kind" style="color:var(--fn)">F</span>execute</a>
+<a class="sl" href="Bastion.Telemetry.html#fn-request_start"><span class="sb-kind" style="color:var(--fn)">F</span>request_start</a>
+<a class="sl" href="Bastion.Telemetry.html#fn-request_stop"><span class="sb-kind" style="color:var(--fn)">F</span>request_stop</a>
+<a class="sl" href="Bastion.Telemetry.html#fn-span"><span class="sb-kind" style="color:var(--fn)">F</span>span</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Telemetry.Aggregator.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Telemetry.Aggregator.html">Bastion.Telemetry.Aggregator</a></div><div class="sb-sub"><a class="sl" href="Bastion.Telemetry.Aggregator.html#type-EventEntry"><span class="sb-kind" style="color:var(--ty)">T</span>EventEntry</a>
+<a class="sl" href="Bastion.Telemetry.Aggregator.html#type-RequestSummary"><span class="sb-kind" style="color:var(--ty)">T</span>RequestSummary</a>
+<a class="sl" href="Bastion.Telemetry.Aggregator.html#type-WaterfallData"><span class="sb-kind" style="color:var(--ty)">T</span>WaterfallData</a>
+<a class="sl" href="Bastion.Telemetry.Aggregator.html#type-CounterSummary"><span class="sb-kind" style="color:var(--ty)">T</span>CounterSummary</a>
+<a class="sl" href="Bastion.Telemetry.Aggregator.html#fn-counters"><span class="sb-kind" style="color:var(--fn)">F</span>counters</a>
+<a class="sl" href="Bastion.Telemetry.Aggregator.html#fn-recent_requests"><span class="sb-kind" style="color:var(--fn)">F</span>recent_requests</a>
+<a class="sl" href="Bastion.Telemetry.Aggregator.html#fn-request_waterfall"><span class="sb-kind" style="color:var(--fn)">F</span>request_waterfall</a>
+<a class="sl" href="Bastion.Telemetry.Aggregator.html#fn-reset"><span class="sb-kind" style="color:var(--fn)">F</span>reset</a>
+<a class="sl" href="Bastion.Telemetry.Aggregator.html#fn-start"><span class="sb-kind" style="color:var(--fn)">F</span>start</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Test.Auth.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Test.Auth.html">Bastion.Test.Auth</a></div><div class="sb-sub"><a class="sl" href="Bastion.Test.Auth.html#fn-assert_redirects_to_login"><span class="sb-kind" style="color:var(--fn)">F</span>assert_redirects_to_login</a>
+<a class="sl" href="Bastion.Test.Auth.html#fn-log_in_user"><span class="sb-kind" style="color:var(--fn)">F</span>log_in_user</a>
+<a class="sl" href="Bastion.Test.Auth.html#fn-log_in_user_with_secret"><span class="sb-kind" style="color:var(--fn)">F</span>log_in_user_with_secret</a>
+<a class="sl" href="Bastion.Test.Auth.html#fn-logged_in"><span class="sb-kind" style="color:var(--fn)">F</span>logged_in</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Test.Channel.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Test.Channel.html">Bastion.Test.Channel</a></div><div class="sb-sub"><a class="sl" href="Bastion.Test.Channel.html#fn-assert_assign"><span class="sb-kind" style="color:var(--fn)">F</span>assert_assign</a>
+<a class="sl" href="Bastion.Test.Channel.html#fn-assert_broadcast"><span class="sb-kind" style="color:var(--fn)">F</span>assert_broadcast</a>
+<a class="sl" href="Bastion.Test.Channel.html#fn-captured_broadcasts"><span class="sb-kind" style="color:var(--fn)">F</span>captured_broadcasts</a>
+<a class="sl" href="Bastion.Test.Channel.html#fn-clear_broadcasts"><span class="sb-kind" style="color:var(--fn)">F</span>clear_broadcasts</a>
+<a class="sl" href="Bastion.Test.Channel.html#fn-intercept"><span class="sb-kind" style="color:var(--fn)">F</span>intercept</a>
+<a class="sl" href="Bastion.Test.Channel.html#fn-join"><span class="sb-kind" style="color:var(--fn)">F</span>join</a>
+<a class="sl" href="Bastion.Test.Channel.html#fn-join_as"><span class="sb-kind" style="color:var(--fn)">F</span>join_as</a>
+<a class="sl" href="Bastion.Test.Channel.html#fn-push"><span class="sb-kind" style="color:var(--fn)">F</span>push</a>
+<a class="sl" href="Bastion.Test.Channel.html#fn-refute_broadcast"><span class="sb-kind" style="color:var(--fn)">F</span>refute_broadcast</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Test.Conn.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Test.Conn.html">Bastion.Test.Conn</a></div><div class="sb-sub"><a class="sl" href="Bastion.Test.Conn.html#fn-assert_header"><span class="sb-kind" style="color:var(--fn)">F</span>assert_header</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-assert_html_contains"><span class="sb-kind" style="color:var(--fn)">F</span>assert_html_contains</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-assert_json"><span class="sb-kind" style="color:var(--fn)">F</span>assert_json</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-assert_redirected_to"><span class="sb-kind" style="color:var(--fn)">F</span>assert_redirected_to</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-assert_status"><span class="sb-kind" style="color:var(--fn)">F</span>assert_status</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-build_conn"><span class="sb-kind" style="color:var(--fn)">F</span>build_conn</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-build_conn_with_body"><span class="sb-kind" style="color:var(--fn)">F</span>build_conn_with_body</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-get_resp_header"><span class="sb-kind" style="color:var(--fn)">F</span>get_resp_header</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-put_query_params"><span class="sb-kind" style="color:var(--fn)">F</span>put_query_params</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-put_req_body"><span class="sb-kind" style="color:var(--fn)">F</span>put_req_body</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-put_req_cookie"><span class="sb-kind" style="color:var(--fn)">F</span>put_req_cookie</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-put_req_header"><span class="sb-kind" style="color:var(--fn)">F</span>put_req_header</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-resp_body"><span class="sb-kind" style="color:var(--fn)">F</span>resp_body</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-resp_status"><span class="sb-kind" style="color:var(--fn)">F</span>resp_status</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-responded"><span class="sb-kind" style="color:var(--fn)">F</span>responded</a>
+<a class="sl" href="Bastion.Test.Conn.html#fn-with_api_token"><span class="sb-kind" style="color:var(--fn)">F</span>with_api_token</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Test.Depot.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Test.Depot.html">Bastion.Test.Depot</a></div><div class="sb-sub"><a class="sl" href="Bastion.Test.Depot.html#fn-active"><span class="sb-kind" style="color:var(--fn)">F</span>active</a>
+<a class="sl" href="Bastion.Test.Depot.html#fn-checkin"><span class="sb-kind" style="color:var(--fn)">F</span>checkin</a>
+<a class="sl" href="Bastion.Test.Depot.html#fn-checkout"><span class="sb-kind" style="color:var(--fn)">F</span>checkout</a>
+<a class="sl" href="Bastion.Test.Depot.html#fn-sandboxed"><span class="sb-kind" style="color:var(--fn)">F</span>sandboxed</a>
+<a class="sl" href="Bastion.Test.Depot.html#fn-start_sandbox"><span class="sb-kind" style="color:var(--fn)">F</span>start_sandbox</a>
+<a class="sl" href="Bastion.Test.Depot.html#fn-stop_sandbox"><span class="sb-kind" style="color:var(--fn)">F</span>stop_sandbox</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Bastion.Upload.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Bastion.Upload.html">Bastion.Upload</a></div><div class="sb-sub"><a class="sl" href="Bastion.Upload.html#type-UploadedFile"><span class="sb-kind" style="color:var(--ty)">T</span>UploadedFile</a>
+<a class="sl" href="Bastion.Upload.html#type-UploadOpts"><span class="sb-kind" style="color:var(--ty)">T</span>UploadOpts</a>
+<a class="sl" href="Bastion.Upload.html#type-UploadResult"><span class="sb-kind" style="color:var(--ty)">T</span>UploadResult</a>
+<a class="sl" href="Bastion.Upload.html#type-UploadError"><span class="sb-kind" style="color:var(--ty)">T</span>UploadError</a>
+<a class="sl" href="Bastion.Upload.html#fn-default_opts"><span class="sb-kind" style="color:var(--fn)">F</span>default_opts</a>
+<a class="sl" href="Bastion.Upload.html#fn-error_message"><span class="sb-kind" style="color:var(--fn)">F</span>error_message</a>
+<a class="sl" href="Bastion.Upload.html#fn-parse"><span class="sb-kind" style="color:var(--fn)">F</span>parse</a>
+<a class="sl" href="Bastion.Upload.html#fn-parse_conn"><span class="sb-kind" style="color:var(--fn)">F</span>parse_conn</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="BastionCSP.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="BastionCSP.html">BastionCSP</a></div><div class="sb-sub"><a class="sl" href="BastionCSP.html#fn-assign_nonce"><span class="sb-kind" style="color:var(--fn)">F</span>assign_nonce</a>
+<a class="sl" href="BastionCSP.html#fn-disable"><span class="sb-kind" style="color:var(--fn)">F</span>disable</a>
+<a class="sl" href="BastionCSP.html#fn-get_nonce"><span class="sb-kind" style="color:var(--fn)">F</span>get_nonce</a>
+<a class="sl" href="BastionCSP.html#fn-nonce"><span class="sb-kind" style="color:var(--fn)">F</span>nonce</a>
+<a class="sl" href="BastionCSP.html#fn-protect"><span class="sb-kind" style="color:var(--fn)">F</span>protect</a>
+<a class="sl" href="BastionCSP.html#fn-protect_with_overrides"><span class="sb-kind" style="color:var(--fn)">F</span>protect_with_overrides</a>
+<a class="sl" href="BastionCSP.html#fn-report_only"><span class="sb-kind" style="color:var(--fn)">F</span>report_only</a>
+<a class="sl" href="BastionCSP.html#fn-set_header"><span class="sb-kind" style="color:var(--fn)">F</span>set_header</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="BastionServer.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="BastionServer.html">BastionServer</a></div><div class="sb-sub"><a class="sl" href="BastionServer.html#fn-spawn_n"><span class="sb-kind" style="color:var(--fn)">F</span>spawn_n</a>
+<a class="sl" href="BastionServer.html#fn-start"><span class="sb-kind" style="color:var(--fn)">F</span>start</a>
+<a class="sl" href="BastionServer.html#fn-start_plug"><span class="sb-kind" style="color:var(--fn)">F</span>start_plug</a>
+<a class="sl" href="BastionServer.html#fn-wait_for"><span class="sb-kind" style="color:var(--fn)">F</span>wait_for</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="CSRF.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="CSRF.html">CSRF</a></div><div class="sb-sub"><a class="sl" href="CSRF.html#fn-ensure_token"><span class="sb-kind" style="color:var(--fn)">F</span>ensure_token</a>
+<a class="sl" href="CSRF.html#fn-generate_token"><span class="sb-kind" style="color:var(--fn)">F</span>generate_token</a>
+<a class="sl" href="CSRF.html#fn-protect"><span class="sb-kind" style="color:var(--fn)">F</span>protect</a>
+<a class="sl" href="CSRF.html#fn-skip"><span class="sb-kind" style="color:var(--fn)">F</span>skip</a>
+<a class="sl" href="CSRF.html#fn-tag"><span class="sb-kind" style="color:var(--fn)">F</span>tag</a>
+<a class="sl" href="CSRF.html#fn-tag_string"><span class="sb-kind" style="color:var(--fn)">F</span>tag_string</a>
+<a class="sl" href="CSRF.html#fn-token"><span class="sb-kind" style="color:var(--fn)">F</span>token</a>
+<a class="sl" href="CSRF.html#fn-validate"><span class="sb-kind" style="color:var(--fn)">F</span>validate</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Cache.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Cache.html">Cache</a></div><div class="sb-sub"><a class="sl" href="Cache.html#fn-cache_control"><span class="sb-kind" style="color:var(--fn)">F</span>cache_control</a>
+<a class="sl" href="Cache.html#fn-cached"><span class="sb-kind" style="color:var(--fn)">F</span>cached</a>
+<a class="sl" href="Cache.html#fn-etag"><span class="sb-kind" style="color:var(--fn)">F</span>etag</a>
+<a class="sl" href="Cache.html#fn-etag_from"><span class="sb-kind" style="color:var(--fn)">F</span>etag_from</a>
+<a class="sl" href="Cache.html#fn-fragment"><span class="sb-kind" style="color:var(--fn)">F</span>fragment</a>
+<a class="sl" href="Cache.html#fn-invalidate"><span class="sb-kind" style="color:var(--fn)">F</span>invalidate</a>
+<a class="sl" href="Cache.html#fn-invalidate_fragment"><span class="sb-kind" style="color:var(--fn)">F</span>invalidate_fragment</a>
+<a class="sl" href="Cache.html#fn-invalidate_prefix"><span class="sb-kind" style="color:var(--fn)">F</span>invalidate_prefix</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="CmdDepot.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="CmdDepot.html">CmdDepot</a></div><div class="sb-sub"><a class="sl" href="CmdDepot.html#fn-migrate"><span class="sb-kind" style="color:var(--fn)">F</span>migrate</a>
+<a class="sl" href="CmdDepot.html#fn-migrations"><span class="sb-kind" style="color:var(--fn)">F</span>migrations</a>
+<a class="sl" href="CmdDepot.html#fn-reset"><span class="sb-kind" style="color:var(--fn)">F</span>reset</a>
+<a class="sl" href="CmdDepot.html#fn-rollback"><span class="sb-kind" style="color:var(--fn)">F</span>rollback</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Conn.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Conn.html">Conn</a></div><div class="sb-sub"><a class="sl" href="Conn.html#fn-accept"><span class="sb-kind" style="color:var(--fn)">F</span>accept</a>
+<a class="sl" href="Conn.html#fn-after_send_hooks"><span class="sb-kind" style="color:var(--fn)">F</span>after_send_hooks</a>
+<a class="sl" href="Conn.html#fn-assign"><span class="sb-kind" style="color:var(--fn)">F</span>assign</a>
+<a class="sl" href="Conn.html#fn-content_type"><span class="sb-kind" style="color:var(--fn)">F</span>content_type</a>
+<a class="sl" href="Conn.html#fn-delete_resp_cookie"><span class="sb-kind" style="color:var(--fn)">F</span>delete_resp_cookie</a>
+<a class="sl" href="Conn.html#fn-get_assign"><span class="sb-kind" style="color:var(--fn)">F</span>get_assign</a>
+<a class="sl" href="Conn.html#fn-get_form_param"><span class="sb-kind" style="color:var(--fn)">F</span>get_form_param</a>
+<a class="sl" href="Conn.html#fn-get_req_cookie"><span class="sb-kind" style="color:var(--fn)">F</span>get_req_cookie</a>
+<a class="sl" href="Conn.html#fn-get_req_header"><span class="sb-kind" style="color:var(--fn)">F</span>get_req_header</a>
+<a class="sl" href="Conn.html#fn-halt"><span class="sb-kind" style="color:var(--fn)">F</span>halt</a>
+<a class="sl" href="Conn.html#fn-halted"><span class="sb-kind" style="color:var(--fn)">F</span>halted</a>
+<a class="sl" href="Conn.html#fn-method"><span class="sb-kind" style="color:var(--fn)">F</span>method</a>
+<a class="sl" href="Conn.html#fn-path"><span class="sb-kind" style="color:var(--fn)">F</span>path</a>
+<a class="sl" href="Conn.html#fn-path_info"><span class="sb-kind" style="color:var(--fn)">F</span>path_info</a>
+<a class="sl" href="Conn.html#fn-put_resp_cookie"><span class="sb-kind" style="color:var(--fn)">F</span>put_resp_cookie</a>
+<a class="sl" href="Conn.html#fn-put_resp_header"><span class="sb-kind" style="color:var(--fn)">F</span>put_resp_header</a>
+<a class="sl" href="Conn.html#fn-query_string"><span class="sb-kind" style="color:var(--fn)">F</span>query_string</a>
+<a class="sl" href="Conn.html#fn-register_after_send"><span class="sb-kind" style="color:var(--fn)">F</span>register_after_send</a>
+<a class="sl" href="Conn.html#fn-req_body"><span class="sb-kind" style="color:var(--fn)">F</span>req_body</a>
+<a class="sl" href="Conn.html#fn-req_headers"><span class="sb-kind" style="color:var(--fn)">F</span>req_headers</a>
+<a class="sl" href="Conn.html#fn-resp_body"><span class="sb-kind" style="color:var(--fn)">F</span>resp_body</a>
+<a class="sl" href="Conn.html#fn-resp_headers"><span class="sb-kind" style="color:var(--fn)">F</span>resp_headers</a>
+<a class="sl" href="Conn.html#fn-send_resp"><span class="sb-kind" style="color:var(--fn)">F</span>send_resp</a>
+<a class="sl" href="Conn.html#fn-status"><span class="sb-kind" style="color:var(--fn)">F</span>status</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="ConnStates.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="ConnStates.html">ConnStates</a></div><div class="sb-sub"><a class="sl" href="ConnStates.html#type-Raw"><span class="sb-kind" style="color:var(--ty)">T</span>Raw</a>
+<a class="sl" href="ConnStates.html#type-Parsed"><span class="sb-kind" style="color:var(--ty)">T</span>Parsed</a>
+<a class="sl" href="ConnStates.html#type-WithSession"><span class="sb-kind" style="color:var(--ty)">T</span>WithSession</a>
+<a class="sl" href="ConnStates.html#type-Authenticated"><span class="sb-kind" style="color:var(--ty)">T</span>Authenticated</a>
+<a class="sl" href="ConnStates.html#type-WithDB"><span class="sb-kind" style="color:var(--ty)">T</span>WithDB</a>
+<a class="sl" href="ConnStates.html#type-TypedConn"><span class="sb-kind" style="color:var(--ty)">T</span>TypedConn</a>
+<a class="sl" href="ConnStates.html#type-Session"><span class="sb-kind" style="color:var(--ty)">T</span>Session</a>
+<a class="sl" href="ConnStates.html#type-User"><span class="sb-kind" style="color:var(--ty)">T</span>User</a>
+<a class="sl" href="ConnStates.html#fn-empty_session"><span class="sb-kind" style="color:var(--fn)">F</span>empty_session</a>
+<a class="sl" href="ConnStates.html#fn-make_user"><span class="sb-kind" style="color:var(--fn)">F</span>make_user</a>
+<a class="sl" href="ConnStates.html#fn-session_delete"><span class="sb-kind" style="color:var(--fn)">F</span>session_delete</a>
+<a class="sl" href="ConnStates.html#fn-session_get"><span class="sb-kind" style="color:var(--fn)">F</span>session_get</a>
+<a class="sl" href="ConnStates.html#fn-session_id"><span class="sb-kind" style="color:var(--fn)">F</span>session_id</a>
+<a class="sl" href="ConnStates.html#fn-session_pairs"><span class="sb-kind" style="color:var(--fn)">F</span>session_pairs</a>
+<a class="sl" href="ConnStates.html#fn-session_put"><span class="sb-kind" style="color:var(--fn)">F</span>session_put</a>
+<a class="sl" href="ConnStates.html#fn-user_email"><span class="sb-kind" style="color:var(--fn)">F</span>user_email</a>
+<a class="sl" href="ConnStates.html#fn-user_id"><span class="sb-kind" style="color:var(--fn)">F</span>user_id</a>
+<a class="sl" href="ConnStates.html#fn-user_name"><span class="sb-kind" style="color:var(--fn)">F</span>user_name</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Controller.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Controller.html">Controller</a></div><div class="sb-sub"><a class="sl" href="Controller.html#type-ActionResult"><span class="sb-kind" style="color:var(--ty)">T</span>ActionResult</a>
+<a class="sl" href="Controller.html#fn-action"><span class="sb-kind" style="color:var(--fn)">F</span>action</a>
+<a class="sl" href="Controller.html#fn-json"><span class="sb-kind" style="color:var(--fn)">F</span>json</a>
+<a class="sl" href="Controller.html#fn-redirect"><span class="sb-kind" style="color:var(--fn)">F</span>redirect</a>
+<a class="sl" href="Controller.html#fn-render"><span class="sb-kind" style="color:var(--fn)">F</span>render</a>
+<a class="sl" href="Controller.html#fn-render_iolist"><span class="sb-kind" style="color:var(--fn)">F</span>render_iolist</a>
+<a class="sl" href="Controller.html#fn-render_iolist_ok"><span class="sb-kind" style="color:var(--fn)">F</span>render_iolist_ok</a>
+<a class="sl" href="Controller.html#fn-render_ok"><span class="sb-kind" style="color:var(--fn)">F</span>render_ok</a>
+<a class="sl" href="Controller.html#fn-text"><span class="sb-kind" style="color:var(--fn)">F</span>text</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Cors.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Cors.html">Cors</a></div><div class="sb-sub"><a class="sl" href="Cors.html#type-CorsConfig"><span class="sb-kind" style="color:var(--ty)">T</span>CorsConfig</a>
+<a class="sl" href="Cors.html#fn-allow"><span class="sb-kind" style="color:var(--fn)">F</span>allow</a>
+<a class="sl" href="Cors.html#fn-config"><span class="sb-kind" style="color:var(--fn)">F</span>config</a>
+<a class="sl" href="Cors.html#fn-config_credentialed"><span class="sb-kind" style="color:var(--fn)">F</span>config_credentialed</a>
+<a class="sl" href="Cors.html#fn-config_open"><span class="sb-kind" style="color:var(--fn)">F</span>config_open</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Crypto.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Crypto.html">Crypto</a></div><div class="sb-sub"><a class="sl" href="Crypto.html#fn-base64_decode"><span class="sb-kind" style="color:var(--fn)">F</span>base64_decode</a>
+<a class="sl" href="Crypto.html#fn-base64_encode"><span class="sb-kind" style="color:var(--fn)">F</span>base64_encode</a>
+<a class="sl" href="Crypto.html#fn-base64_url_decode"><span class="sb-kind" style="color:var(--fn)">F</span>base64_url_decode</a>
+<a class="sl" href="Crypto.html#fn-base64_url_encode"><span class="sb-kind" style="color:var(--fn)">F</span>base64_url_encode</a>
+<a class="sl" href="Crypto.html#fn-bytes_to_string"><span class="sb-kind" style="color:var(--fn)">F</span>bytes_to_string</a>
+<a class="sl" href="Crypto.html#fn-derive_key"><span class="sb-kind" style="color:var(--fn)">F</span>derive_key</a>
+<a class="sl" href="Crypto.html#fn-generate_token"><span class="sb-kind" style="color:var(--fn)">F</span>generate_token</a>
+<a class="sl" href="Crypto.html#fn-hash_password"><span class="sb-kind" style="color:var(--fn)">F</span>hash_password</a>
+<a class="sl" href="Crypto.html#fn-hkdf_sha256"><span class="sb-kind" style="color:var(--fn)">F</span>hkdf_sha256</a>
+<a class="sl" href="Crypto.html#fn-hmac_sha256"><span class="sb-kind" style="color:var(--fn)">F</span>hmac_sha256</a>
+<a class="sl" href="Crypto.html#fn-random_bytes"><span class="sb-kind" style="color:var(--fn)">F</span>random_bytes</a>
+<a class="sl" href="Crypto.html#fn-random_hex"><span class="sb-kind" style="color:var(--fn)">F</span>random_hex</a>
+<a class="sl" href="Crypto.html#fn-secure_compare"><span class="sb-kind" style="color:var(--fn)">F</span>secure_compare</a>
+<a class="sl" href="Crypto.html#fn-sha256"><span class="sb-kind" style="color:var(--fn)">F</span>sha256</a>
+<a class="sl" href="Crypto.html#fn-verify_password"><span class="sb-kind" style="color:var(--fn)">F</span>verify_password</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Css.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Css.html">Css</a></div><div class="sb-sub"><a class="sl" href="Css.html#fn-style"><span class="sb-kind" style="color:var(--fn)">F</span>style</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Depot.Middleware.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Depot.Middleware.html">Depot.Middleware</a></div><div class="sb-sub"><a class="sl" href="Depot.Middleware.html#fn-checkin_from_conn"><span class="sb-kind" style="color:var(--fn)">F</span>checkin_from_conn</a>
+<a class="sl" href="Depot.Middleware.html#fn-get_conn"><span class="sb-kind" style="color:var(--fn)">F</span>get_conn</a>
+<a class="sl" href="Depot.Middleware.html#fn-get_pool"><span class="sb-kind" style="color:var(--fn)">F</span>get_pool</a>
+<a class="sl" href="Depot.Middleware.html#fn-query_with_telemetry"><span class="sb-kind" style="color:var(--fn)">F</span>query_with_telemetry</a>
+<a class="sl" href="Depot.Middleware.html#fn-with_pool"><span class="sb-kind" style="color:var(--fn)">F</span>with_pool</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="ErrorView.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="ErrorView.html">ErrorView</a></div><div class="sb-sub"><a class="sl" href="ErrorView.html#fn-default_message"><span class="sb-kind" style="color:var(--fn)">F</span>default_message</a>
+<a class="sl" href="ErrorView.html#fn-render"><span class="sb-kind" style="color:var(--fn)">F</span>render</a>
+<a class="sl" href="ErrorView.html#fn-render_default"><span class="sb-kind" style="color:var(--fn)">F</span>render_default</a>
+<a class="sl" href="ErrorView.html#fn-status_text"><span class="sb-kind" style="color:var(--fn)">F</span>status_text</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="FallbackController.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="FallbackController.html">FallbackController</a></div><div class="sb-sub"><a class="sl" href="FallbackController.html#fn-call"><span class="sb-kind" style="color:var(--fn)">F</span>call</a>
+<a class="sl" href="FallbackController.html#fn-call_json"><span class="sb-kind" style="color:var(--fn)">F</span>call_json</a>
+<a class="sl" href="FallbackController.html#fn-new"><span class="sb-kind" style="color:var(--fn)">F</span>new</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Flash.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Flash.html">Flash</a></div><div class="sb-sub"><a class="sl" href="Flash.html#fn-clear"><span class="sb-kind" style="color:var(--fn)">F</span>clear</a>
+<a class="sl" href="Flash.html#fn-delete"><span class="sb-kind" style="color:var(--fn)">F</span>delete</a>
+<a class="sl" href="Flash.html#fn-get"><span class="sb-kind" style="color:var(--fn)">F</span>get</a>
+<a class="sl" href="Flash.html#fn-loaded_flashes"><span class="sb-kind" style="color:var(--fn)">F</span>loaded_flashes</a>
+<a class="sl" href="Flash.html#fn-put"><span class="sb-kind" style="color:var(--fn)">F</span>put</a>
+<a class="sl" href="Flash.html#fn-render_one"><span class="sb-kind" style="color:var(--fn)">F</span>render_one</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.Assets.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.Assets.html">Forge.Assets</a></div><div class="sb-sub"><a class="sl" href="Forge.Assets.html#fn-build"><span class="sb-kind" style="color:var(--fn)">F</span>build</a>
+<a class="sl" href="Forge.Assets.html#fn-deploy"><span class="sb-kind" style="color:var(--fn)">F</span>deploy</a>
+<a class="sl" href="Forge.Assets.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.Assets.html#fn-watch"><span class="sb-kind" style="color:var(--fn)">F</span>watch</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.BuildIslands.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.BuildIslands.html">Forge.BuildIslands</a></div><div class="sb-sub"><a class="sl" href="Forge.BuildIslands.html#fn-extract_mod_name"><span class="sb-kind" style="color:var(--fn)">F</span>extract_mod_name</a>
+<a class="sl" href="Forge.BuildIslands.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.BuildIslands.html#fn-pascal_to_snake"><span class="sb-kind" style="color:var(--fn)">F</span>pascal_to_snake</a>
+<a class="sl" href="Forge.BuildIslands.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.Console.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.Console.html">Forge.Console</a></div><div class="sb-sub"><a class="sl" href="Forge.Console.html#type-ConsoleConfig"><span class="sb-kind" style="color:var(--ty)">T</span>ConsoleConfig</a>
+<a class="sl" href="Forge.Console.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.Console.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.DepotMigrate.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.DepotMigrate.html">Forge.DepotMigrate</a></div><div class="sb-sub"><a class="sl" href="Forge.DepotMigrate.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.DepotMigrations.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.DepotMigrations.html">Forge.DepotMigrations</a></div><div class="sb-sub"><a class="sl" href="Forge.DepotMigrations.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.DepotReset.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.DepotReset.html">Forge.DepotReset</a></div><div class="sb-sub"><a class="sl" href="Forge.DepotReset.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.DepotRollback.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.DepotRollback.html">Forge.DepotRollback</a></div><div class="sb-sub"><a class="sl" href="Forge.DepotRollback.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.GenAuth.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.GenAuth.html">Forge.GenAuth</a></div><div class="sb-sub"><a class="sl" href="Forge.GenAuth.html#fn-build_email_token"><span class="sb-kind" style="color:var(--fn)">F</span>build_email_token</a>
+<a class="sl" href="Forge.GenAuth.html#fn-build_session_token"><span class="sb-kind" style="color:var(--fn)">F</span>build_session_token</a>
+<a class="sl" href="Forge.GenAuth.html#fn-change_user_password"><span class="sb-kind" style="color:var(--fn)">F</span>change_user_password</a>
+<a class="sl" href="Forge.GenAuth.html#fn-change_user_registration"><span class="sb-kind" style="color:var(--fn)">F</span>change_user_registration</a>
+<a class="sl" href="Forge.GenAuth.html#fn-confirm"><span class="sb-kind" style="color:var(--fn)">F</span>confirm</a>
+<a class="sl" href="Forge.GenAuth.html#fn-confirm_user"><span class="sb-kind" style="color:var(--fn)">F</span>confirm_user</a>
+<a class="sl" href="Forge.GenAuth.html#fn-create"><span class="sb-kind" style="color:var(--fn)">F</span>create</a>
+<a class="sl" href="Forge.GenAuth.html#fn-create"><span class="sb-kind" style="color:var(--fn)">F</span>create</a>
+<a class="sl" href="Forge.GenAuth.html#fn-create"><span class="sb-kind" style="color:var(--fn)">F</span>create</a>
+<a class="sl" href="Forge.GenAuth.html#fn-create_session_token"><span class="sb-kind" style="color:var(--fn)">F</span>create_session_token</a>
+<a class="sl" href="Forge.GenAuth.html#fn-create_session_token"><span class="sb-kind" style="color:var(--fn)">F</span>create_session_token</a>
+<a class="sl" href="Forge.GenAuth.html#fn-current_user"><span class="sb-kind" style="color:var(--fn)">F</span>current_user</a>
+<a class="sl" href="Forge.GenAuth.html#fn-delete"><span class="sb-kind" style="color:var(--fn)">F</span>delete</a>
+<a class="sl" href="Forge.GenAuth.html#fn-delete_session_token"><span class="sb-kind" style="color:var(--fn)">F</span>delete_session_token</a>
+<a class="sl" href="Forge.GenAuth.html#fn-deliver_confirmation_instructions"><span class="sb-kind" style="color:var(--fn)">F</span>deliver_confirmation_instructions</a>
+<a class="sl" href="Forge.GenAuth.html#fn-deliver_reset_password_instructions"><span class="sb-kind" style="color:var(--fn)">F</span>deliver_reset_password_instructions</a>
+<a class="sl" href="Forge.GenAuth.html#fn-deliver_update_email_instructions"><span class="sb-kind" style="color:var(--fn)">F</span>deliver_update_email_instructions</a>
+<a class="sl" href="Forge.GenAuth.html#fn-deliver_user_confirmation_instructions"><span class="sb-kind" style="color:var(--fn)">F</span>deliver_user_confirmation_instructions</a>
+<a class="sl" href="Forge.GenAuth.html#fn-deliver_user_reset_password_instructions"><span class="sb-kind" style="color:var(--fn)">F</span>deliver_user_reset_password_instructions</a>
+<a class="sl" href="Forge.GenAuth.html#fn-deliver_welcome"><span class="sb-kind" style="color:var(--fn)">F</span>deliver_welcome</a>
+<a class="sl" href="Forge.GenAuth.html#fn-down"><span class="sb-kind" style="color:var(--fn)">F</span>down</a>
+<a class="sl" href="Forge.GenAuth.html#fn-down"><span class="sb-kind" style="color:var(--fn)">F</span>down</a>
+<a class="sl" href="Forge.GenAuth.html#fn-edit"><span class="sb-kind" style="color:var(--fn)">F</span>edit</a>
+<a class="sl" href="Forge.GenAuth.html#fn-edit"><span class="sb-kind" style="color:var(--fn)">F</span>edit</a>
+<a class="sl" href="Forge.GenAuth.html#fn-get_user"><span class="sb-kind" style="color:var(--fn)">F</span>get_user</a>
+<a class="sl" href="Forge.GenAuth.html#fn-get_user_by_email"><span class="sb-kind" style="color:var(--fn)">F</span>get_user_by_email</a>
+<a class="sl" href="Forge.GenAuth.html#fn-get_user_by_email_and_password"><span class="sb-kind" style="color:var(--fn)">F</span>get_user_by_email_and_password</a>
+<a class="sl" href="Forge.GenAuth.html#fn-get_user_by_reset_password_token"><span class="sb-kind" style="color:var(--fn)">F</span>get_user_by_reset_password_token</a>
+<a class="sl" href="Forge.GenAuth.html#fn-get_user_by_session_token"><span class="sb-kind" style="color:var(--fn)">F</span>get_user_by_session_token</a>
+<a class="sl" href="Forge.GenAuth.html#fn-hash_password"><span class="sb-kind" style="color:var(--fn)">F</span>hash_password</a>
+<a class="sl" href="Forge.GenAuth.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.GenAuth.html#fn-new"><span class="sb-kind" style="color:var(--fn)">F</span>new</a>
+<a class="sl" href="Forge.GenAuth.html#fn-new"><span class="sb-kind" style="color:var(--fn)">F</span>new</a>
+<a class="sl" href="Forge.GenAuth.html#fn-new"><span class="sb-kind" style="color:var(--fn)">F</span>new</a>
+<a class="sl" href="Forge.GenAuth.html#fn-redirect_if_authenticated"><span class="sb-kind" style="color:var(--fn)">F</span>redirect_if_authenticated</a>
+<a class="sl" href="Forge.GenAuth.html#fn-register_user"><span class="sb-kind" style="color:var(--fn)">F</span>register_user</a>
+<a class="sl" href="Forge.GenAuth.html#fn-registration_gate"><span class="sb-kind" style="color:var(--fn)">F</span>registration_gate</a>
+<a class="sl" href="Forge.GenAuth.html#fn-require_authenticated_user"><span class="sb-kind" style="color:var(--fn)">F</span>require_authenticated_user</a>
+<a class="sl" href="Forge.GenAuth.html#fn-resend"><span class="sb-kind" style="color:var(--fn)">F</span>resend</a>
+<a class="sl" href="Forge.GenAuth.html#fn-reset_user_password"><span class="sb-kind" style="color:var(--fn)">F</span>reset_user_password</a>
+<a class="sl" href="Forge.GenAuth.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a>
+<a class="sl" href="Forge.GenAuth.html#fn-schema"><span class="sb-kind" style="color:var(--fn)">F</span>schema</a>
+<a class="sl" href="Forge.GenAuth.html#fn-schema"><span class="sb-kind" style="color:var(--fn)">F</span>schema</a>
+<a class="sl" href="Forge.GenAuth.html#fn-up"><span class="sb-kind" style="color:var(--fn)">F</span>up</a>
+<a class="sl" href="Forge.GenAuth.html#fn-up"><span class="sb-kind" style="color:var(--fn)">F</span>up</a>
+<a class="sl" href="Forge.GenAuth.html#fn-update"><span class="sb-kind" style="color:var(--fn)">F</span>update</a>
+<a class="sl" href="Forge.GenAuth.html#fn-update_email"><span class="sb-kind" style="color:var(--fn)">F</span>update_email</a>
+<a class="sl" href="Forge.GenAuth.html#fn-update_email_gate"><span class="sb-kind" style="color:var(--fn)">F</span>update_email_gate</a>
+<a class="sl" href="Forge.GenAuth.html#fn-update_password"><span class="sb-kind" style="color:var(--fn)">F</span>update_password</a>
+<a class="sl" href="Forge.GenAuth.html#fn-update_password_gate"><span class="sb-kind" style="color:var(--fn)">F</span>update_password_gate</a>
+<a class="sl" href="Forge.GenAuth.html#fn-update_user_email"><span class="sb-kind" style="color:var(--fn)">F</span>update_user_email</a>
+<a class="sl" href="Forge.GenAuth.html#fn-update_user_password"><span class="sb-kind" style="color:var(--fn)">F</span>update_user_password</a>
+<a class="sl" href="Forge.GenAuth.html#fn-user_fixture"><span class="sb-kind" style="color:var(--fn)">F</span>user_fixture</a>
+<a class="sl" href="Forge.GenAuth.html#fn-user_fixture_attrs"><span class="sb-kind" style="color:var(--fn)">F</span>user_fixture_attrs</a>
+<a class="sl" href="Forge.GenAuth.html#fn-valid_password"><span class="sb-kind" style="color:var(--fn)">F</span>valid_password</a>
+<a class="sl" href="Forge.GenAuth.html#fn-version"><span class="sb-kind" style="color:var(--fn)">F</span>version</a>
+<a class="sl" href="Forge.GenAuth.html#fn-version"><span class="sb-kind" style="color:var(--fn)">F</span>version</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.GenChannel.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.GenChannel.html">Forge.GenChannel</a></div><div class="sb-sub"><a class="sl" href="Forge.GenChannel.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.GenChannel.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.GenContext.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.GenContext.html">Forge.GenContext</a></div><div class="sb-sub"><a class="sl" href="Forge.GenContext.html#fn-change_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>change_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenContext.html#fn-create_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>create_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenContext.html#fn-create_gate"><span class="sb-kind" style="color:var(--fn)">F</span>create_gate</a>
+<a class="sl" href="Forge.GenContext.html#fn-delete_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>delete_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenContext.html#fn-down"><span class="sb-kind" style="color:var(--fn)">F</span>down</a>
+<a class="sl" href="Forge.GenContext.html#fn-get_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>get_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenContext.html#fn-list_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>list_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenContext.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.GenContext.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a>
+<a class="sl" href="Forge.GenContext.html#fn-schema"><span class="sb-kind" style="color:var(--fn)">F</span>schema</a>
+<a class="sl" href="Forge.GenContext.html#fn-up"><span class="sb-kind" style="color:var(--fn)">F</span>up</a>
+<a class="sl" href="Forge.GenContext.html#fn-update_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>update_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenContext.html#fn-update_gate"><span class="sb-kind" style="color:var(--fn)">F</span>update_gate</a>
+<a class="sl" href="Forge.GenContext.html#fn-version"><span class="sb-kind" style="color:var(--fn)">F</span>version</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.GenHandler.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.GenHandler.html">Forge.GenHandler</a></div><div class="sb-sub"><a class="sl" href="Forge.GenHandler.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.GenHandler.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.GenIsland.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.GenIsland.html">Forge.GenIsland</a></div><div class="sb-sub"><a class="sl" href="Forge.GenIsland.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.GenIsland.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.GenMigration.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.GenMigration.html">Forge.GenMigration</a></div><div class="sb-sub"><a class="sl" href="Forge.GenMigration.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.GenMigration.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.GenSchema.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.GenSchema.html">Forge.GenSchema</a></div><div class="sb-sub"><a class="sl" href="Forge.GenSchema.html#fn-create"><span class="sb-kind" style="color:var(--fn)">F</span>create</a>
+<a class="sl" href="Forge.GenSchema.html#fn-create_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>create_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenSchema.html#fn-delete"><span class="sb-kind" style="color:var(--fn)">F</span>delete</a>
+<a class="sl" href="Forge.GenSchema.html#fn-delete_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>delete_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenSchema.html#fn-down"><span class="sb-kind" style="color:var(--fn)">F</span>down</a>
+<a class="sl" href="Forge.GenSchema.html#fn-gate"><span class="sb-kind" style="color:var(--fn)">F</span>gate</a>
+<a class="sl" href="Forge.GenSchema.html#fn-get_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>get_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenSchema.html#fn-get_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>get_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenSchema.html#fn-index"><span class="sb-kind" style="color:var(--fn)">F</span>index</a>
+<a class="sl" href="Forge.GenSchema.html#fn-list_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>list_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenSchema.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.GenSchema.html#fn-not_found"><span class="sb-kind" style="color:var(--fn)">F</span>not_found</a>
+<a class="sl" href="Forge.GenSchema.html#fn-run_context"><span class="sb-kind" style="color:var(--fn)">F</span>run_context</a>
+<a class="sl" href="Forge.GenSchema.html#fn-run_json"><span class="sb-kind" style="color:var(--fn)">F</span>run_json</a>
+<a class="sl" href="Forge.GenSchema.html#fn-run_schema"><span class="sb-kind" style="color:var(--fn)">F</span>run_schema</a>
+<a class="sl" href="Forge.GenSchema.html#fn-schema"><span class="sb-kind" style="color:var(--fn)">F</span>schema</a>
+<a class="sl" href="Forge.GenSchema.html#fn-show"><span class="sb-kind" style="color:var(--fn)">F</span>show</a>
+<a class="sl" href="Forge.GenSchema.html#fn-up"><span class="sb-kind" style="color:var(--fn)">F</span>up</a>
+<a class="sl" href="Forge.GenSchema.html#fn-update"><span class="sb-kind" style="color:var(--fn)">F</span>update</a>
+<a class="sl" href="Forge.GenSchema.html#fn-update_&quot;&quot;&quot;"><span class="sb-kind" style="color:var(--fn)">F</span>update_&quot;&quot;&quot;</a>
+<a class="sl" href="Forge.GenSchema.html#fn-update_gate"><span class="sb-kind" style="color:var(--fn)">F</span>update_gate</a>
+<a class="sl" href="Forge.GenSchema.html#fn-version"><span class="sb-kind" style="color:var(--fn)">F</span>version</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.Lower.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.Lower.html">Forge.Lower</a></div><div class="sb-sub"><a class="sl" href="Forge.Lower.html#type-Token"><span class="sb-kind" style="color:var(--ty)">T</span>Token</a>
+<a class="sl" href="Forge.Lower.html#type-Attr"><span class="sb-kind" style="color:var(--ty)">T</span>Attr</a>
+<a class="sl" href="Forge.Lower.html#type-AttrValue"><span class="sb-kind" style="color:var(--ty)">T</span>AttrValue</a>
+<a class="sl" href="Forge.Lower.html#type-Frontmatter"><span class="sb-kind" style="color:var(--ty)">T</span>Frontmatter</a>
+<a class="sl" href="Forge.Lower.html#type-SpanEntry"><span class="sb-kind" style="color:var(--ty)">T</span>SpanEntry</a>
+<a class="sl" href="Forge.Lower.html#fn-lower"><span class="sb-kind" style="color:var(--fn)">F</span>lower</a>
+<a class="sl" href="Forge.Lower.html#fn-lower_file"><span class="sb-kind" style="color:var(--fn)">F</span>lower_file</a>
+<a class="sl" href="Forge.Lower.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.Lower.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.New.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.New.html">Forge.New</a></div><div class="sb-sub"><a class="sl" href="Forge.New.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.New.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.Project.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.Project.html">Forge.Project</a></div><div class="sb-sub"><a class="sl" href="Forge.Project.html#type-Dep"><span class="sb-kind" style="color:var(--ty)">T</span>Dep</a>
+<a class="sl" href="Forge.Project.html#type-Project"><span class="sb-kind" style="color:var(--ty)">T</span>Project</a>
+<a class="sl" href="Forge.Project.html#fn-load"><span class="sb-kind" style="color:var(--fn)">F</span>load</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.Release.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.Release.html">Forge.Release</a></div><div class="sb-sub"><a class="sl" href="Forge.Release.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.Release.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.Routes.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.Routes.html">Forge.Routes</a></div><div class="sb-sub"><a class="sl" href="Forge.Routes.html#type-ParsedRoute"><span class="sb-kind" style="color:var(--ty)">T</span>ParsedRoute</a>
+<a class="sl" href="Forge.Routes.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.Routes.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a>
+<a class="sl" href="Forge.Routes.html#fn-run_gen"><span class="sb-kind" style="color:var(--fn)">F</span>run_gen</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.Scaffold.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.Scaffold.html">Forge.Scaffold</a></div><div class="sb-sub"><a class="sl" href="Forge.Scaffold.html#fn-scaffold"><span class="sb-kind" style="color:var(--fn)">F</span>scaffold</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Forge.Server.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Forge.Server.html">Forge.Server</a></div><div class="sb-sub"><a class="sl" href="Forge.Server.html#fn-main"><span class="sb-kind" style="color:var(--fn)">F</span>main</a>
+<a class="sl" href="Forge.Server.html#fn-run"><span class="sb-kind" style="color:var(--fn)">F</span>run</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Form.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Form.html">Form</a></div><div class="sb-sub"><a class="sl" href="Form.html#fn-error_tag"><span class="sb-kind" style="color:var(--fn)">F</span>error_tag</a>
+<a class="sl" href="Form.html#fn-field_tag"><span class="sb-kind" style="color:var(--fn)">F</span>field_tag</a>
+<a class="sl" href="Form.html#fn-form_tag"><span class="sb-kind" style="color:var(--fn)">F</span>form_tag</a>
+<a class="sl" href="Form.html#fn-input_tag"><span class="sb-kind" style="color:var(--fn)">F</span>input_tag</a>
+<a class="sl" href="Form.html#fn-select_tag"><span class="sb-kind" style="color:var(--fn)">F</span>select_tag</a>
+<a class="sl" href="Form.html#fn-textarea_tag"><span class="sb-kind" style="color:var(--fn)">F</span>textarea_tag</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Gate.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Gate.html">Gate</a></div><div class="sb-sub"><a class="sl" href="Gate.html#type-LenConstraint"><span class="sb-kind" style="color:var(--ty)">T</span>LenConstraint</a>
+<a class="sl" href="Gate.html#type-NumConstraint"><span class="sb-kind" style="color:var(--ty)">T</span>NumConstraint</a>
+<a class="sl" href="Gate.html#type-ConstraintOpt"><span class="sb-kind" style="color:var(--ty)">T</span>ConstraintOpt</a>
+<a class="sl" href="Gate.html#fn-add_error"><span class="sb-kind" style="color:var(--fn)">F</span>add_error</a>
+<a class="sl" href="Gate.html#fn-cast"><span class="sb-kind" style="color:var(--fn)">F</span>cast</a>
+<a class="sl" href="Gate.html#fn-cast_record"><span class="sb-kind" style="color:var(--fn)">F</span>cast_record</a>
+<a class="sl" href="Gate.html#fn-delete_change"><span class="sb-kind" style="color:var(--fn)">F</span>delete_change</a>
+<a class="sl" href="Gate.html#fn-error_for"><span class="sb-kind" style="color:var(--fn)">F</span>error_for</a>
+<a class="sl" href="Gate.html#fn-errors"><span class="sb-kind" style="color:var(--fn)">F</span>errors</a>
+<a class="sl" href="Gate.html#fn-get_change"><span class="sb-kind" style="color:var(--fn)">F</span>get_change</a>
+<a class="sl" href="Gate.html#fn-get_field"><span class="sb-kind" style="color:var(--fn)">F</span>get_field</a>
+<a class="sl" href="Gate.html#fn-put_change"><span class="sb-kind" style="color:var(--fn)">F</span>put_change</a>
+<a class="sl" href="Gate.html#fn-unique_constraint"><span class="sb-kind" style="color:var(--fn)">F</span>unique_constraint</a>
+<a class="sl" href="Gate.html#fn-valid"><span class="sb-kind" style="color:var(--fn)">F</span>valid</a>
+<a class="sl" href="Gate.html#fn-validate_confirmation"><span class="sb-kind" style="color:var(--fn)">F</span>validate_confirmation</a>
+<a class="sl" href="Gate.html#fn-validate_format"><span class="sb-kind" style="color:var(--fn)">F</span>validate_format</a>
+<a class="sl" href="Gate.html#fn-validate_inclusion"><span class="sb-kind" style="color:var(--fn)">F</span>validate_inclusion</a>
+<a class="sl" href="Gate.html#fn-validate_length"><span class="sb-kind" style="color:var(--fn)">F</span>validate_length</a>
+<a class="sl" href="Gate.html#fn-validate_number"><span class="sb-kind" style="color:var(--fn)">F</span>validate_number</a>
+<a class="sl" href="Gate.html#fn-validate_required"><span class="sb-kind" style="color:var(--fn)">F</span>validate_required</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Hkdf.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Hkdf.html">Hkdf</a></div><div class="sb-sub"><a class="sl" href="Hkdf.html#fn-expand"><span class="sb-kind" style="color:var(--fn)">F</span>expand</a>
+<a class="sl" href="Hkdf.html#fn-extract"><span class="sb-kind" style="color:var(--fn)">F</span>extract</a>
+<a class="sl" href="Hkdf.html#fn-hkdf_sha256"><span class="sb-kind" style="color:var(--fn)">F</span>hkdf_sha256</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Html.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Html.html">Html</a></div><div class="sb-sub"><a class="sl" href="Html.html#fn-escape"><span class="sb-kind" style="color:var(--fn)">F</span>escape</a>
+<a class="sl" href="Html.html#fn-html_auto_escape_bool"><span class="sb-kind" style="color:var(--fn)">F</span>html_auto_escape_bool</a>
+<a class="sl" href="Html.html#fn-html_auto_escape_int"><span class="sb-kind" style="color:var(--fn)">F</span>html_auto_escape_int</a>
+<a class="sl" href="Html.html#fn-html_auto_escape_safe"><span class="sb-kind" style="color:var(--fn)">F</span>html_auto_escape_safe</a>
+<a class="sl" href="Html.html#fn-html_auto_escape_string"><span class="sb-kind" style="color:var(--fn)">F</span>html_auto_escape_string</a>
+<a class="sl" href="Html.html#fn-is_empty"><span class="sb-kind" style="color:var(--fn)">F</span>is_empty</a>
+<a class="sl" href="Html.html#fn-safe"><span class="sb-kind" style="color:var(--fn)">F</span>safe</a>
+<a class="sl" href="Html.html#fn-to_string"><span class="sb-kind" style="color:var(--fn)">F</span>to_string</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="IslandAssets.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="IslandAssets.html">IslandAssets</a></div><div class="sb-sub"><a class="sl" href="IslandAssets.html#type-AssetConfig"><span class="sb-kind" style="color:var(--ty)">T</span>AssetConfig</a>
+<a class="sl" href="IslandAssets.html#fn-config_base_path"><span class="sb-kind" style="color:var(--fn)">F</span>config_base_path</a>
+<a class="sl" href="IslandAssets.html#fn-default_config"><span class="sb-kind" style="color:var(--fn)">F</span>default_config</a>
+<a class="sl" href="IslandAssets.html#fn-make_config"><span class="sb-kind" style="color:var(--fn)">F</span>make_config</a>
+<a class="sl" href="IslandAssets.html#fn-plug"><span class="sb-kind" style="color:var(--fn)">F</span>plug</a>
+<a class="sl" href="IslandAssets.html#fn-serve_js"><span class="sb-kind" style="color:var(--fn)">F</span>serve_js</a>
+<a class="sl" href="IslandAssets.html#fn-serve_manifest"><span class="sb-kind" style="color:var(--fn)">F</span>serve_manifest</a>
+<a class="sl" href="IslandAssets.html#fn-serve_wasm_file"><span class="sb-kind" style="color:var(--fn)">F</span>serve_wasm_file</a>
+<a class="sl" href="IslandAssets.html#fn-serve_ws_js"><span class="sb-kind" style="color:var(--fn)">F</span>serve_ws_js</a>
+<a class="sl" href="IslandAssets.html#fn-wasm_cache_control"><span class="sb-kind" style="color:var(--fn)">F</span>wasm_cache_control</a>
+<a class="sl" href="IslandAssets.html#fn-wasm_url"><span class="sb-kind" style="color:var(--fn)">F</span>wasm_url</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="IslandCss.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="IslandCss.html">IslandCss</a></div><div class="sb-sub"><a class="sl" href="IslandCss.html#fn-attr_name"><span class="sb-kind" style="color:var(--fn)">F</span>attr_name</a>
+<a class="sl" href="IslandCss.html#fn-attribute_for"><span class="sb-kind" style="color:var(--fn)">F</span>attribute_for</a>
+<a class="sl" href="IslandCss.html#fn-scope_css"><span class="sb-kind" style="color:var(--fn)">F</span>scope_css</a>
+<a class="sl" href="IslandCss.html#fn-to_kebab"><span class="sb-kind" style="color:var(--fn)">F</span>to_kebab</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="IslandSocket.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="IslandSocket.html">IslandSocket</a></div><div class="sb-sub"><a class="sl" href="IslandSocket.html#type-SocketConfig"><span class="sb-kind" style="color:var(--ty)">T</span>SocketConfig</a>
+<a class="sl" href="IslandSocket.html#type-IslandHandler"><span class="sb-kind" style="color:var(--ty)">T</span>IslandHandler</a>
+<a class="sl" href="IslandSocket.html#type-Registry"><span class="sb-kind" style="color:var(--ty)">T</span>Registry</a>
+<a class="sl" href="IslandSocket.html#type-IslandEntry"><span class="sb-kind" style="color:var(--ty)">T</span>IslandEntry</a>
+<a class="sl" href="IslandSocket.html#type-IslandState"><span class="sb-kind" style="color:var(--ty)">T</span>IslandState</a>
+<a class="sl" href="IslandSocket.html#fn-config_allowed_origins"><span class="sb-kind" style="color:var(--fn)">F</span>config_allowed_origins</a>
+<a class="sl" href="IslandSocket.html#fn-config_path"><span class="sb-kind" style="color:var(--fn)">F</span>config_path</a>
+<a class="sl" href="IslandSocket.html#fn-default_config"><span class="sb-kind" style="color:var(--fn)">F</span>default_config</a>
+<a class="sl" href="IslandSocket.html#fn-empty_store"><span class="sb-kind" style="color:var(--fn)">F</span>empty_store</a>
+<a class="sl" href="IslandSocket.html#fn-find_handler"><span class="sb-kind" style="color:var(--fn)">F</span>find_handler</a>
+<a class="sl" href="IslandSocket.html#fn-handler_dataflow"><span class="sb-kind" style="color:var(--fn)">F</span>handler_dataflow</a>
+<a class="sl" href="IslandSocket.html#fn-has_event_handler"><span class="sb-kind" style="color:var(--fn)">F</span>has_event_handler</a>
+<a class="sl" href="IslandSocket.html#fn-has_island"><span class="sb-kind" style="color:var(--fn)">F</span>has_island</a>
+<a class="sl" href="IslandSocket.html#fn-make_config"><span class="sb-kind" style="color:var(--fn)">F</span>make_config</a>
+<a class="sl" href="IslandSocket.html#fn-make_config_with_origins"><span class="sb-kind" style="color:var(--fn)">F</span>make_config_with_origins</a>
+<a class="sl" href="IslandSocket.html#fn-new_registry"><span class="sb-kind" style="color:var(--fn)">F</span>new_registry</a>
+<a class="sl" href="IslandSocket.html#fn-plug"><span class="sb-kind" style="color:var(--fn)">F</span>plug</a>
+<a class="sl" href="IslandSocket.html#fn-process_msg_for_test"><span class="sb-kind" style="color:var(--fn)">F</span>process_msg_for_test</a>
+<a class="sl" href="IslandSocket.html#fn-register"><span class="sb-kind" style="color:var(--fn)">F</span>register</a>
+<a class="sl" href="IslandSocket.html#fn-register_full"><span class="sb-kind" style="color:var(--fn)">F</span>register_full</a>
+<a class="sl" href="IslandSocket.html#fn-register_with_child_handler"><span class="sb-kind" style="color:var(--fn)">F</span>register_with_child_handler</a>
+<a class="sl" href="IslandSocket.html#fn-register_with_dataflow"><span class="sb-kind" style="color:var(--fn)">F</span>register_with_dataflow</a>
+<a class="sl" href="IslandSocket.html#fn-register_with_event_handler"><span class="sb-kind" style="color:var(--fn)">F</span>register_with_event_handler</a>
+<a class="sl" href="IslandSocket.html#fn-register_with_merge"><span class="sb-kind" style="color:var(--fn)">F</span>register_with_merge</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="IslandView.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="IslandView.html">IslandView</a></div><div class="sb-sub"><a class="sl" href="IslandView.html#fn-child_island"><span class="sb-kind" style="color:var(--fn)">F</span>child_island</a>
+<a class="sl" href="IslandView.html#fn-island"><span class="sb-kind" style="color:var(--fn)">F</span>island</a>
+<a class="sl" href="IslandView.html#fn-island_child"><span class="sb-kind" style="color:var(--fn)">F</span>island_child</a>
+<a class="sl" href="IslandView.html#fn-island_child_ssr"><span class="sb-kind" style="color:var(--fn)">F</span>island_child_ssr</a>
+<a class="sl" href="IslandView.html#fn-island_server"><span class="sb-kind" style="color:var(--fn)">F</span>island_server</a>
+<a class="sl" href="IslandView.html#fn-island_server_ssr"><span class="sb-kind" style="color:var(--fn)">F</span>island_server_ssr</a>
+<a class="sl" href="IslandView.html#fn-island_ssr"><span class="sb-kind" style="color:var(--fn)">F</span>island_ssr</a>
+<a class="sl" href="IslandView.html#fn-island_ssr_with_channel"><span class="sb-kind" style="color:var(--fn)">F</span>island_ssr_with_channel</a>
+<a class="sl" href="IslandView.html#fn-island_ssr_with_dataflow"><span class="sb-kind" style="color:var(--fn)">F</span>island_ssr_with_dataflow</a>
+<a class="sl" href="IslandView.html#fn-island_ssr_with_strategy"><span class="sb-kind" style="color:var(--fn)">F</span>island_ssr_with_strategy</a>
+<a class="sl" href="IslandView.html#fn-island_with_channel"><span class="sb-kind" style="color:var(--fn)">F</span>island_with_channel</a>
+<a class="sl" href="IslandView.html#fn-island_with_dataflow"><span class="sb-kind" style="color:var(--fn)">F</span>island_with_dataflow</a>
+<a class="sl" href="IslandView.html#fn-island_with_strategy"><span class="sb-kind" style="color:var(--fn)">F</span>island_with_strategy</a>
+<a class="sl" href="IslandView.html#fn-scripts"><span class="sb-kind" style="color:var(--fn)">F</span>scripts</a>
+<a class="sl" href="IslandView.html#fn-scripts_with_base"><span class="sb-kind" style="color:var(--fn)">F</span>scripts_with_base</a>
+<a class="sl" href="IslandView.html#fn-ws_scripts"><span class="sb-kind" style="color:var(--fn)">F</span>ws_scripts</a>
+<a class="sl" href="IslandView.html#fn-ws_scripts_with_base"><span class="sb-kind" style="color:var(--fn)">F</span>ws_scripts_with_base</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Islands.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Islands.html">Islands</a></div><div class="sb-sub"><a class="sl" href="Islands.html#type-HydrateOn"><span class="sb-kind" style="color:var(--ty)">T</span>HydrateOn</a>
+<a class="sl" href="Islands.html#type-DataflowMode"><span class="sb-kind" style="color:var(--ty)">T</span>DataflowMode</a>
+<a class="sl" href="Islands.html#type-DataFlow"><span class="sb-kind" style="color:var(--ty)">T</span>DataFlow</a>
+<a class="sl" href="Islands.html#type-IslandEvent"><span class="sb-kind" style="color:var(--ty)">T</span>IslandEvent</a>
+<a class="sl" href="Islands.html#type-FormConfig"><span class="sb-kind" style="color:var(--ty)">T</span>FormConfig</a>
+<a class="sl" href="Islands.html#type-Descriptor"><span class="sb-kind" style="color:var(--ty)">T</span>Descriptor</a>
+<a class="sl" href="Islands.html#type-Registry"><span class="sb-kind" style="color:var(--ty)">T</span>Registry</a>
+<a class="sl" href="Islands.html#iface-Island"><span class="sb-kind" style="color:var(--if)">I</span>Island</a>
+<a class="sl" href="Islands.html#fn-bootstrap_script"><span class="sb-kind" style="color:var(--fn)">F</span>bootstrap_script</a>
+<a class="sl" href="Islands.html#fn-bootstrap_script_with_nonce"><span class="sb-kind" style="color:var(--fn)">F</span>bootstrap_script_with_nonce</a>
+<a class="sl" href="Islands.html#fn-client_mode"><span class="sb-kind" style="color:var(--fn)">F</span>client_mode</a>
+<a class="sl" href="Islands.html#fn-client_only"><span class="sb-kind" style="color:var(--fn)">F</span>client_only</a>
+<a class="sl" href="Islands.html#fn-dataflow_mode_str"><span class="sb-kind" style="color:var(--fn)">F</span>dataflow_mode_str</a>
+<a class="sl" href="Islands.html#fn-dataflow_str"><span class="sb-kind" style="color:var(--fn)">F</span>dataflow_str</a>
+<a class="sl" href="Islands.html#fn-descriptor_hydrate"><span class="sb-kind" style="color:var(--fn)">F</span>descriptor_hydrate</a>
+<a class="sl" href="Islands.html#fn-descriptor_name"><span class="sb-kind" style="color:var(--fn)">F</span>descriptor_name</a>
+<a class="sl" href="Islands.html#fn-descriptor_wasm_path"><span class="sb-kind" style="color:var(--fn)">F</span>descriptor_wasm_path</a>
+<a class="sl" href="Islands.html#fn-dispatch_json"><span class="sb-kind" style="color:var(--fn)">F</span>dispatch_json</a>
+<a class="sl" href="Islands.html#fn-eager"><span class="sb-kind" style="color:var(--fn)">F</span>eager</a>
+<a class="sl" href="Islands.html#fn-empty_registry"><span class="sb-kind" style="color:var(--fn)">F</span>empty_registry</a>
+<a class="sl" href="Islands.html#fn-event_name"><span class="sb-kind" style="color:var(--fn)">F</span>event_name</a>
+<a class="sl" href="Islands.html#fn-event_payload"><span class="sb-kind" style="color:var(--fn)">F</span>event_payload</a>
+<a class="sl" href="Islands.html#fn-event_to_json"><span class="sb-kind" style="color:var(--fn)">F</span>event_to_json</a>
+<a class="sl" href="Islands.html#fn-find_island"><span class="sb-kind" style="color:var(--fn)">F</span>find_island</a>
+<a class="sl" href="Islands.html#fn-form_channel"><span class="sb-kind" style="color:var(--fn)">F</span>form_channel</a>
+<a class="sl" href="Islands.html#fn-form_redirect"><span class="sb-kind" style="color:var(--fn)">F</span>form_redirect</a>
+<a class="sl" href="Islands.html#fn-hydrate_attr"><span class="sb-kind" style="color:var(--fn)">F</span>hydrate_attr</a>
+<a class="sl" href="Islands.html#fn-lazy_hydrate"><span class="sb-kind" style="color:var(--fn)">F</span>lazy_hydrate</a>
+<a class="sl" href="Islands.html#fn-new_event"><span class="sb-kind" style="color:var(--fn)">F</span>new_event</a>
+<a class="sl" href="Islands.html#fn-new_form_config"><span class="sb-kind" style="color:var(--fn)">F</span>new_form_config</a>
+<a class="sl" href="Islands.html#fn-on_idle"><span class="sb-kind" style="color:var(--fn)">F</span>on_idle</a>
+<a class="sl" href="Islands.html#fn-on_interaction"><span class="sb-kind" style="color:var(--fn)">F</span>on_interaction</a>
+<a class="sl" href="Islands.html#fn-on_visible"><span class="sb-kind" style="color:var(--fn)">F</span>on_visible</a>
+<a class="sl" href="Islands.html#fn-preload_hint"><span class="sb-kind" style="color:var(--fn)">F</span>preload_hint</a>
+<a class="sl" href="Islands.html#fn-register"><span class="sb-kind" style="color:var(--fn)">F</span>register</a>
+<a class="sl" href="Islands.html#fn-registry_descriptors"><span class="sb-kind" style="color:var(--fn)">F</span>registry_descriptors</a>
+<a class="sl" href="Islands.html#fn-registry_preload_hints"><span class="sb-kind" style="color:var(--fn)">F</span>registry_preload_hints</a>
+<a class="sl" href="Islands.html#fn-server_mode"><span class="sb-kind" style="color:var(--fn)">F</span>server_mode</a>
+<a class="sl" href="Islands.html#fn-validate_server_html"><span class="sb-kind" style="color:var(--fn)">F</span>validate_server_html</a>
+<a class="sl" href="Islands.html#fn-validate_server_island"><span class="sb-kind" style="color:var(--fn)">F</span>validate_server_island</a>
+<a class="sl" href="Islands.html#fn-wrap"><span class="sb-kind" style="color:var(--fn)">F</span>wrap</a>
+<a class="sl" href="Islands.html#fn-wrap_child"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_child</a>
+<a class="sl" href="Islands.html#fn-wrap_child_with_event"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_child_with_event</a>
+<a class="sl" href="Islands.html#fn-wrap_child_with_id"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_child_with_id</a>
+<a class="sl" href="Islands.html#fn-wrap_eager"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_eager</a>
+<a class="sl" href="Islands.html#fn-wrap_eager_with_css"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_eager_with_css</a>
+<a class="sl" href="Islands.html#fn-wrap_form"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_form</a>
+<a class="sl" href="Islands.html#fn-wrap_server"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_server</a>
+<a class="sl" href="Islands.html#fn-wrap_with_channel"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_with_channel</a>
+<a class="sl" href="Islands.html#fn-wrap_with_css"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_with_css</a>
+<a class="sl" href="Islands.html#fn-wrap_with_dataflow"><span class="sb-kind" style="color:var(--fn)">F</span>wrap_with_dataflow</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Middleware.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Middleware.html">Middleware</a></div><div class="sb-sub"><a class="sl" href="Middleware.html#fn-allow_methods"><span class="sb-kind" style="color:var(--fn)">F</span>allow_methods</a>
+<a class="sl" href="Middleware.html#fn-compose"><span class="sb-kind" style="color:var(--fn)">F</span>compose</a>
+<a class="sl" href="Middleware.html#fn-cors"><span class="sb-kind" style="color:var(--fn)">F</span>cors</a>
+<a class="sl" href="Middleware.html#fn-default_content_type"><span class="sb-kind" style="color:var(--fn)">F</span>default_content_type</a>
+<a class="sl" href="Middleware.html#fn-logger"><span class="sb-kind" style="color:var(--fn)">F</span>logger</a>
+<a class="sl" href="Middleware.html#fn-pipeline"><span class="sb-kind" style="color:var(--fn)">F</span>pipeline</a>
+<a class="sl" href="Middleware.html#fn-request_id"><span class="sb-kind" style="color:var(--fn)">F</span>request_id</a>
+<a class="sl" href="Middleware.html#fn-request_id_counter"><span class="sb-kind" style="color:var(--fn)">F</span>request_id_counter</a>
+<a class="sl" href="Middleware.html#fn-start_id_counter"><span class="sb-kind" style="color:var(--fn)">F</span>start_id_counter</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="RateLimit.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="RateLimit.html">RateLimit</a></div><div class="sb-sub"><a class="sl" href="RateLimit.html#fn-check"><span class="sb-kind" style="color:var(--fn)">F</span>check</a>
+<a class="sl" href="RateLimit.html#fn-ip_key"><span class="sb-kind" style="color:var(--fn)">F</span>ip_key</a>
+<a class="sl" href="RateLimit.html#fn-ip_key_forwarded"><span class="sb-kind" style="color:var(--fn)">F</span>ip_key_forwarded</a>
+<a class="sl" href="RateLimit.html#fn-limit"><span class="sb-kind" style="color:var(--fn)">F</span>limit</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Registry.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Registry.html">Registry</a></div><div class="sb-sub"><a class="sl" href="Registry.html#fn-register"><span class="sb-kind" style="color:var(--fn)">F</span>register</a>
+<a class="sl" href="Registry.html#fn-unregister"><span class="sb-kind" style="color:var(--fn)">F</span>unregister</a>
+<a class="sl" href="Registry.html#fn-whereis"><span class="sb-kind" style="color:var(--fn)">F</span>whereis</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Request.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Request.html">Request</a></div><div class="sb-sub"><a class="sl" href="Request.html#fn-authorization"><span class="sb-kind" style="color:var(--fn)">F</span>authorization</a>
+<a class="sl" href="Request.html#fn-body"><span class="sb-kind" style="color:var(--fn)">F</span>body</a>
+<a class="sl" href="Request.html#fn-body_params"><span class="sb-kind" style="color:var(--fn)">F</span>body_params</a>
+<a class="sl" href="Request.html#fn-content_type"><span class="sb-kind" style="color:var(--fn)">F</span>content_type</a>
+<a class="sl" href="Request.html#fn-get_assign"><span class="sb-kind" style="color:var(--fn)">F</span>get_assign</a>
+<a class="sl" href="Request.html#fn-get_header"><span class="sb-kind" style="color:var(--fn)">F</span>get_header</a>
+<a class="sl" href="Request.html#fn-get_path_param"><span class="sb-kind" style="color:var(--fn)">F</span>get_path_param</a>
+<a class="sl" href="Request.html#fn-get_query_param"><span class="sb-kind" style="color:var(--fn)">F</span>get_query_param</a>
+<a class="sl" href="Request.html#fn-json_body"><span class="sb-kind" style="color:var(--fn)">F</span>json_body</a>
+<a class="sl" href="Request.html#fn-path_param"><span class="sb-kind" style="color:var(--fn)">F</span>path_param</a>
+<a class="sl" href="Request.html#fn-query_params"><span class="sb-kind" style="color:var(--fn)">F</span>query_params</a>
+<a class="sl" href="Request.html#fn-user_agent"><span class="sb-kind" style="color:var(--fn)">F</span>user_agent</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Response.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Response.html">Response</a></div><div class="sb-sub"><a class="sl" href="Response.html#fn-bad_request"><span class="sb-kind" style="color:var(--fn)">F</span>bad_request</a>
+<a class="sl" href="Response.html#fn-created"><span class="sb-kind" style="color:var(--fn)">F</span>created</a>
+<a class="sl" href="Response.html#fn-forbidden"><span class="sb-kind" style="color:var(--fn)">F</span>forbidden</a>
+<a class="sl" href="Response.html#fn-html"><span class="sb-kind" style="color:var(--fn)">F</span>html</a>
+<a class="sl" href="Response.html#fn-internal_error"><span class="sb-kind" style="color:var(--fn)">F</span>internal_error</a>
+<a class="sl" href="Response.html#fn-internal_error_"><span class="sb-kind" style="color:var(--fn)">F</span>internal_error_</a>
+<a class="sl" href="Response.html#fn-internal_server_error_"><span class="sb-kind" style="color:var(--fn)">F</span>internal_server_error_</a>
+<a class="sl" href="Response.html#fn-json"><span class="sb-kind" style="color:var(--fn)">F</span>json</a>
+<a class="sl" href="Response.html#fn-method_not_allowed"><span class="sb-kind" style="color:var(--fn)">F</span>method_not_allowed</a>
+<a class="sl" href="Response.html#fn-no_content"><span class="sb-kind" style="color:var(--fn)">F</span>no_content</a>
+<a class="sl" href="Response.html#fn-not_found"><span class="sb-kind" style="color:var(--fn)">F</span>not_found</a>
+<a class="sl" href="Response.html#fn-not_found_"><span class="sb-kind" style="color:var(--fn)">F</span>not_found_</a>
+<a class="sl" href="Response.html#fn-ok"><span class="sb-kind" style="color:var(--fn)">F</span>ok</a>
+<a class="sl" href="Response.html#fn-raw"><span class="sb-kind" style="color:var(--fn)">F</span>raw</a>
+<a class="sl" href="Response.html#fn-redirect"><span class="sb-kind" style="color:var(--fn)">F</span>redirect</a>
+<a class="sl" href="Response.html#fn-redirect_permanent"><span class="sb-kind" style="color:var(--fn)">F</span>redirect_permanent</a>
+<a class="sl" href="Response.html#fn-service_unavailable"><span class="sb-kind" style="color:var(--fn)">F</span>service_unavailable</a>
+<a class="sl" href="Response.html#fn-text"><span class="sb-kind" style="color:var(--fn)">F</span>text</a>
+<a class="sl" href="Response.html#fn-unauthorized"><span class="sb-kind" style="color:var(--fn)">F</span>unauthorized</a>
+<a class="sl" href="Response.html#fn-unprocessable"><span class="sb-kind" style="color:var(--fn)">F</span>unprocessable</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Router.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Router.html">Router</a></div><div class="sb-sub"><a class="sl" href="Router.html#type-Route"><span class="sb-kind" style="color:var(--ty)">T</span>Route</a>
+<a class="sl" href="Router.html#type-Fallback"><span class="sb-kind" style="color:var(--ty)">T</span>Fallback</a>
+<a class="sl" href="Router.html#type-Router"><span class="sb-kind" style="color:var(--ty)">T</span>Router</a>
+<a class="sl" href="Router.html#fn-action"><span class="sb-kind" style="color:var(--fn)">F</span>action</a>
+<a class="sl" href="Router.html#fn-delete"><span class="sb-kind" style="color:var(--fn)">F</span>delete</a>
+<a class="sl" href="Router.html#fn-dispatch"><span class="sb-kind" style="color:var(--fn)">F</span>dispatch</a>
+<a class="sl" href="Router.html#fn-fallback"><span class="sb-kind" style="color:var(--fn)">F</span>fallback</a>
+<a class="sl" href="Router.html#fn-get"><span class="sb-kind" style="color:var(--fn)">F</span>get</a>
+<a class="sl" href="Router.html#fn-new"><span class="sb-kind" style="color:var(--fn)">F</span>new</a>
+<a class="sl" href="Router.html#fn-patch"><span class="sb-kind" style="color:var(--fn)">F</span>patch</a>
+<a class="sl" href="Router.html#fn-post"><span class="sb-kind" style="color:var(--fn)">F</span>post</a>
+<a class="sl" href="Router.html#fn-put"><span class="sb-kind" style="color:var(--fn)">F</span>put</a>
+<a class="sl" href="Router.html#fn-scope"><span class="sb-kind" style="color:var(--fn)">F</span>scope</a>
+<a class="sl" href="Router.html#fn-to_plug"><span class="sb-kind" style="color:var(--fn)">F</span>to_plug</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="SecurityHeaders.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="SecurityHeaders.html">SecurityHeaders</a></div><div class="sb-sub"><a class="sl" href="SecurityHeaders.html#fn-csp_base"><span class="sb-kind" style="color:var(--fn)">F</span>csp_base</a>
+<a class="sl" href="SecurityHeaders.html#fn-csp_with_ws"><span class="sb-kind" style="color:var(--fn)">F</span>csp_with_ws</a>
+<a class="sl" href="SecurityHeaders.html#fn-defaults"><span class="sb-kind" style="color:var(--fn)">F</span>defaults</a>
+<a class="sl" href="SecurityHeaders.html#fn-hsts"><span class="sb-kind" style="color:var(--fn)">F</span>hsts</a>
+<a class="sl" href="SecurityHeaders.html#fn-permissions_policy"><span class="sb-kind" style="color:var(--fn)">F</span>permissions_policy</a>
+<a class="sl" href="SecurityHeaders.html#fn-referrer_policy"><span class="sb-kind" style="color:var(--fn)">F</span>referrer_policy</a>
+<a class="sl" href="SecurityHeaders.html#fn-x_frame_options"><span class="sb-kind" style="color:var(--fn)">F</span>x_frame_options</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Static.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Static.html">Static</a></div><div class="sb-sub"><a class="sl" href="Static.html#type-StaticConfig"><span class="sb-kind" style="color:var(--ty)">T</span>StaticConfig</a>
+<a class="sl" href="Static.html#fn-config"><span class="sb-kind" style="color:var(--fn)">F</span>config</a>
+<a class="sl" href="Static.html#fn-config_with_prefix"><span class="sb-kind" style="color:var(--fn)">F</span>config_with_prefix</a>
+<a class="sl" href="Static.html#fn-css_tag"><span class="sb-kind" style="color:var(--fn)">F</span>css_tag</a>
+<a class="sl" href="Static.html#fn-js_tag"><span class="sb-kind" style="color:var(--fn)">F</span>js_tag</a>
+<a class="sl" href="Static.html#fn-looks_fingerprinted"><span class="sb-kind" style="color:var(--fn)">F</span>looks_fingerprinted</a>
+<a class="sl" href="Static.html#fn-mime_type"><span class="sb-kind" style="color:var(--fn)">F</span>mime_type</a>
+<a class="sl" href="Static.html#fn-path"><span class="sb-kind" style="color:var(--fn)">F</span>path</a>
+<a class="sl" href="Static.html#fn-serve"><span class="sb-kind" style="color:var(--fn)">F</span>serve</a>
+<a class="sl" href="Static.html#fn-serve_with_config"><span class="sb-kind" style="color:var(--fn)">F</span>serve_with_config</a>
+<a class="sl" href="Static.html#fn-serve_with_prefix"><span class="sb-kind" style="color:var(--fn)">F</span>serve_with_prefix</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="Test.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="Test.html">Test</a></div><div class="sb-sub"><a class="sl" href="Test.html#fn-assert_eq_bool"><span class="sb-kind" style="color:var(--fn)">F</span>assert_eq_bool</a>
+<a class="sl" href="Test.html#fn-assert_eq_int"><span class="sb-kind" style="color:var(--fn)">F</span>assert_eq_int</a>
+<a class="sl" href="Test.html#fn-assert_eq_str"><span class="sb-kind" style="color:var(--fn)">F</span>assert_eq_str</a>
+<a class="sl" href="Test.html#fn-assert_err"><span class="sb-kind" style="color:var(--fn)">F</span>assert_err</a>
+<a class="sl" href="Test.html#fn-assert_false"><span class="sb-kind" style="color:var(--fn)">F</span>assert_false</a>
+<a class="sl" href="Test.html#fn-assert_none"><span class="sb-kind" style="color:var(--fn)">F</span>assert_none</a>
+<a class="sl" href="Test.html#fn-assert_ok"><span class="sb-kind" style="color:var(--fn)">F</span>assert_ok</a>
+<a class="sl" href="Test.html#fn-assert_some"><span class="sb-kind" style="color:var(--fn)">F</span>assert_some</a>
+<a class="sl" href="Test.html#fn-assert_true"><span class="sb-kind" style="color:var(--fn)">F</span>assert_true</a>
+<a class="sl" href="Test.html#fn-fail"><span class="sb-kind" style="color:var(--fn)">F</span>fail</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="TestIsland.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="TestIsland.html">TestIsland</a></div><div class="sb-sub"><a class="sl" href="TestIsland.html#fn-assert_no_server_event_attrs"><span class="sb-kind" style="color:var(--fn)">F</span>assert_no_server_event_attrs</a>
+<a class="sl" href="TestIsland.html#fn-assert_renders_contains"><span class="sb-kind" style="color:var(--fn)">F</span>assert_renders_contains</a>
+<a class="sl" href="TestIsland.html#fn-cmd_type"><span class="sb-kind" style="color:var(--fn)">F</span>cmd_type</a>
+<a class="sl" href="TestIsland.html#fn-render_island"><span class="sb-kind" style="color:var(--fn)">F</span>render_island</a>
+<a class="sl" href="TestIsland.html#fn-update_island"><span class="sb-kind" style="color:var(--fn)">F</span>update_island</a></div></div>
+<div class="sb-group"><div class="sb-group-hdr" data-href="TypedMiddleware.html"><span class="sb-chevron">&#9656;</span><a class="sl" href="TypedMiddleware.html">TypedMiddleware</a></div><div class="sb-sub"><a class="sl" href="TypedMiddleware.html#fn-authenticated"><span class="sb-kind" style="color:var(--fn)">F</span>authenticated</a>
+<a class="sl" href="TypedMiddleware.html#fn-full_pipeline"><span class="sb-kind" style="color:var(--fn)">F</span>full_pipeline</a>
+<a class="sl" href="TypedMiddleware.html#fn-get_body_string"><span class="sb-kind" style="color:var(--fn)">F</span>get_body_string</a>
+<a class="sl" href="TypedMiddleware.html#fn-get_current_user"><span class="sb-kind" style="color:var(--fn)">F</span>get_current_user</a>
+<a class="sl" href="TypedMiddleware.html#fn-get_db"><span class="sb-kind" style="color:var(--fn)">F</span>get_db</a>
+<a class="sl" href="TypedMiddleware.html#fn-get_session_value"><span class="sb-kind" style="color:var(--fn)">F</span>get_session_value</a>
+<a class="sl" href="TypedMiddleware.html#fn-is_form_request"><span class="sb-kind" style="color:var(--fn)">F</span>is_form_request</a>
+<a class="sl" href="TypedMiddleware.html#fn-is_json_request"><span class="sb-kind" style="color:var(--fn)">F</span>is_json_request</a>
+<a class="sl" href="TypedMiddleware.html#fn-is_multipart_request"><span class="sb-kind" style="color:var(--fn)">F</span>is_multipart_request</a>
+<a class="sl" href="TypedMiddleware.html#fn-load_current_user"><span class="sb-kind" style="color:var(--fn)">F</span>load_current_user</a>
+<a class="sl" href="TypedMiddleware.html#fn-load_session"><span class="sb-kind" style="color:var(--fn)">F</span>load_session</a>
+<a class="sl" href="TypedMiddleware.html#fn-parse_body"><span class="sb-kind" style="color:var(--fn)">F</span>parse_body</a>
+<a class="sl" href="TypedMiddleware.html#fn-put_session_value"><span class="sb-kind" style="color:var(--fn)">F</span>put_session_value</a>
+<a class="sl" href="TypedMiddleware.html#fn-require_auth"><span class="sb-kind" style="color:var(--fn)">F</span>require_auth</a>
+<a class="sl" href="TypedMiddleware.html#fn-set_current_user_id"><span class="sb-kind" style="color:var(--fn)">F</span>set_current_user_id</a>
+<a class="sl" href="TypedMiddleware.html#fn-unwrap"><span class="sb-kind" style="color:var(--fn)">F</span>unwrap</a>
+<a class="sl" href="TypedMiddleware.html#fn-web_pipeline"><span class="sb-kind" style="color:var(--fn)">F</span>web_pipeline</a>
+<a class="sl" href="TypedMiddleware.html#fn-with_db"><span class="sb-kind" style="color:var(--fn)">F</span>with_db</a>
+<a class="sl" href="TypedMiddleware.html#fn-wrap"><span class="sb-kind" style="color:var(--fn)">F</span>wrap</a></div></div></div></nav><main id="main"><nav class="breadcrumb"><a href="index.html">March Docs</a><span class="sep">&rsaquo;</span><span>Request</span></nav><h1>Request</h1><div class="mdoc"><p>Bastion.Request — request inspection and parsing helpers.</p><p>Provides structured access to request data: query string parameters, headers, body content, and path parameters stored in assigns.</p><p>All functions are pure transformations on HttpServer.Conn values.</p></div><h2>Functions</h2><div class="item" id="fn-authorization"><div class="ih"><span class="badge bfn">fn</span><span class="name">authorization</span><span class="sig">authorization(conn : Conn) : Option(String)</span><a class="anchor-link" href="#fn-authorization" title="Link">#</a></div><div class="ib"><p>Returns the Authorization header value, if present.</p></div></div>
+<div class="item" id="fn-body"><div class="ih"><span class="badge bfn">fn</span><span class="name">body</span><span class="sig">body(conn : Conn) : String</span><a class="anchor-link" href="#fn-body" title="Link">#</a></div><div class="ib"><p>Returns the raw request body string.</p></div></div>
+<div class="item" id="fn-body_params"><div class="ih"><span class="badge bfn">fn</span><span class="name">body_params</span><span class="sig">body_params(conn : Conn) : List((String, String))</span><a class="anchor-link" href="#fn-body_params" title="Link">#</a></div><div class="ib"><p>Parse the request body as URL-encoded form data (application/x-www-form-urlencoded). Returns a list of (key, value) pairs — the same format as query_params. Keys and values are URL-decoded (&quot;+&quot; becomes space, %XX percent-decoded).</p><pre><code>Example:
+  -- POST body: &quot;title=Hello&amp;body=World&quot;
+  Request.body_params(conn)  -- =&gt; [(&quot;title&quot;,&quot;Hello&quot;), (&quot;body&quot;,&quot;World&quot;)]</code></pre></div></div>
+<div class="item" id="fn-content_type"><div class="ih"><span class="badge bfn">fn</span><span class="name">content_type</span><span class="sig">content_type(conn : Conn) : Option(String)</span><a class="anchor-link" href="#fn-content_type" title="Link">#</a></div><div class="ib"><p>Returns the Content-Type request header value, if present.</p></div></div>
+<div class="item" id="fn-get_assign"><div class="ih"><span class="badge bfn">fn</span><span class="name">get_assign</span><span class="sig">get_assign(conn : Conn, key : String) : Option(String)</span><a class="anchor-link" href="#fn-get_assign" title="Link">#</a></div><div class="ib"><p>Look up a value stored in conn assigns by key.</p></div></div>
+<div class="item" id="fn-get_header"><div class="ih"><span class="badge bfn">fn</span><span class="name">get_header</span><span class="sig">get_header(conn : Conn, name : String) : Option(String)</span><a class="anchor-link" href="#fn-get_header" title="Link">#</a></div><div class="ib"><p>Look up a request header by name (case-insensitive).</p></div></div>
+<div class="item" id="fn-get_path_param"><div class="ih"><span class="badge bfn">fn</span><span class="name">get_path_param</span><span class="sig">get_path_param(conn : Conn, name : String) : Option(String)</span><a class="anchor-link" href="#fn-get_path_param" title="Link">#</a></div><div class="ib"><p>Look up a path parameter captured by the router (e.g. &quot;:id&quot; in &quot;/users/:id&quot;).</p><pre><code>Path params are stored in conn assigns by the router.
+
+Example:
+  -- Route: &quot;/users/:id&quot;
+  Request.get_path_param(conn, &quot;id&quot;)  -- =&gt; Some(&quot;42&quot;)</code></pre></div></div>
+<div class="item" id="fn-get_query_param"><div class="ih"><span class="badge bfn">fn</span><span class="name">get_query_param</span><span class="sig">get_query_param(conn : Conn, key : String) : Option(String)</span><a class="anchor-link" href="#fn-get_query_param" title="Link">#</a></div><div class="ib"><p>Look up a single query parameter by name. Returns None if absent.</p></div></div>
+<div class="item" id="fn-json_body"><div class="ih"><span class="badge bfn">fn</span><span class="name">json_body</span><span class="sig">json_body(conn : Conn) : Result(JsonValue, String)</span><a class="anchor-link" href="#fn-json_body" title="Link">#</a></div><div class="ib"><p>Parse the request body as JSON. Returns Ok or Err.</p></div></div>
+<div class="item" id="fn-path_param"><div class="ih"><span class="badge bfn">fn</span><span class="name">path_param</span><span class="sig">path_param(conn : Conn, name : String) : Option(String)</span><a class="anchor-link" href="#fn-path_param" title="Link">#</a></div><div class="ib"><p>Alias for get_path_param. Returns the named path parameter captured by the router.</p></div></div>
+<div class="item" id="fn-query_params"><div class="ih"><span class="badge bfn">fn</span><span class="name">query_params</span><span class="sig">query_params(conn : Conn) : List((String, String))</span><a class="anchor-link" href="#fn-query_params" title="Link">#</a></div><div class="ib"><p>Parse the query string into a list of (key, value) pairs.</p><pre><code>Keys and values are URL-decoded (&quot;+&quot; becomes space, %XX sequences are
+percent-decoded).  Returns an empty list if the query string is empty.
+
+Example:
+  -- For request &quot;GET /search?q=hello&amp;page=1&quot;
+  Request.query_params(conn)
+  -- =&gt; [(&quot;q&quot;, &quot;hello&quot;), (&quot;page&quot;, &quot;1&quot;)]</code></pre></div></div>
+<div class="item" id="fn-user_agent"><div class="ih"><span class="badge bfn">fn</span><span class="name">user_agent</span><span class="sig">user_agent(conn : Conn) : Option(String)</span><a class="anchor-link" href="#fn-user_agent" title="Link">#</a></div><div class="ib"><p>Returns the User-Agent header value, if present.</p></div></div></main></div><script>
+/* Theme toggle */
+function getTheme(){var t=localStorage.getItem('march-doc-theme');
+if(t)return t;return window.matchMedia('(prefers-color-scheme:light)').matches?'light':'dark';}
+function applyTheme(t){document.documentElement.setAttribute('data-theme',t);
+var moon=document.getElementById('icon-moon'),sun=document.getElementById('icon-sun');
+if(moon&&sun){moon.style.display=t==='dark'?'block':'none';sun.style.display=t==='light'?'block':'none';}}
+function toggleTheme(){var t=getTheme()==='dark'?'light':'dark';localStorage.setItem('march-doc-theme',t);applyTheme(t);}
+applyTheme(getTheme());
+
+/* Search overlay */
+function openSearch(){document.getElementById('search-overlay').classList.add('open');
+var inp=document.getElementById('search-input');if(inp){inp.value='';inp.focus();}}
+function closeSearch(){document.getElementById('search-overlay').classList.remove('open');
+var sr=document.getElementById('sr');if(sr)sr.innerHTML='';}
+
+/* DOMContentLoaded */
+document.addEventListener('DOMContentLoaded',function(){
+
+/* Collapsible items */
+document.querySelectorAll('.ih').forEach(function(h){h.addEventListener('click',function(e){
+if(e.target.classList.contains('anchor-link'))return;
+var b=this.nextElementSibling;if(b)b.classList.toggle('open');});});
+
+/* Active sidebar link + auto-expand current module group */
+var path=window.location.pathname;
+document.querySelectorAll('.sl').forEach(function(a){var h=a.getAttribute('href');if(h&&path.endsWith(h)){a.classList.add('active');var g=a.closest('.sb-group');if(g)g.classList.add('open');}});
+
+/* Sidebar group toggle (chevron click expands/collapses) */
+document.querySelectorAll('.sb-group-hdr').forEach(function(hdr){hdr.addEventListener('click',function(e){
+if(e.target.tagName==='A')return;e.preventDefault();this.parentElement.classList.toggle('open');});});
+
+/* Copy buttons on pre blocks */
+document.querySelectorAll('.ib pre').forEach(function(pre){
+var wrap=document.createElement('div');wrap.className='pre-wrap';
+pre.parentNode.insertBefore(wrap,pre);wrap.appendChild(pre);
+var btn=document.createElement('button');btn.className='copy-btn';btn.textContent='Copy';
+btn.addEventListener('click',function(e){e.stopPropagation();
+var code=pre.querySelector('code');var text=code?code.textContent:pre.textContent;
+navigator.clipboard.writeText(text).then(function(){
+btn.textContent='Copied!';btn.classList.add('copied');
+setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied');},2000);
+}).catch(function(){btn.textContent='!';setTimeout(function(){btn.textContent='Copy';},1500);});});
+wrap.appendChild(btn);});
+
+/* Open anchor from URL hash */
+if(window.location.hash){var el=document.querySelector(window.location.hash);if(el){var ib=el.querySelector('.ib');if(ib)ib.classList.add('open');el.scrollIntoView({behavior:'smooth',block:'start'});}}
+
+/* Cmd+K search shortcut */
+document.addEventListener('keydown',function(e){
+if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();openSearch();}
+if(e.key==='Escape')closeSearch();});
+
+});
+
+/* Cross-module search: loads search-index.json, fuzzy matches, renders results */
+var SI=null;
+fetch('search-index.json').then(function(r){return r.json();}).then(function(d){SI=d;}).catch(function(){});
+
+/* Levenshtein distance */
+function ld(a,b){
+if(!a.length)return b.length;if(!b.length)return a.length;
+var m=[];for(var i=0;i<=b.length;i++)m[i]=[i];
+for(var j=0;j<=a.length;j++)m[0][j]=j;
+for(i=1;i<=b.length;i++)for(j=1;j<=a.length;j++){
+m[i][j]=b[i-1]===a[j-1]?m[i-1][j-1]:Math.min(m[i-1][j-1]+1,m[i][j-1]+1,m[i-1][j]+1);
+}return m[b.length][a.length];}
+
+/* Fuzzy scoring: returns 0 if no match */
+function fs(q,t){
+if(!t)return 0;var ql=q.toLowerCase(),tl=t.toLowerCase();
+/* Exact match */
+if(tl===ql)return 10000;
+/* Starts with */
+if(tl.indexOf(ql)===0)return 5000-tl.length;
+/* Substring */
+var idx=tl.indexOf(ql);if(idx>0)return 3000-idx;
+/* Word boundary match (camelCase, snake_case) */
+var words=tl.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/_/g,' ').split(' ');
+for(var w=0;w<words.length;w++){if(words[w].indexOf(ql)===0)return 2000-w*100;}
+/* Levenshtein for short queries */
+if(ql.length<=8&&tl.length<=40){var d=ld(ql,tl.substring(0,Math.max(ql.length+2,8)));
+if(d<=Math.ceil(ql.length*0.35))return 1000-d*100;}
+return 0;}
+
+/* Score an entry against a query */
+function scoreEntry(q,e){
+return Math.max(
+fs(q,e.n)*4, /* name match (highest weight) */
+fs(q,e.s)*2, /* signature match */
+fs(q,e.m)*2, /* module name match */
+fs(q,e.d) /* doc string match (lowest weight) */
+);}
+
+/* Render search results */
+function renderSR(results){
+var el=document.getElementById('sr');if(!el)return;
+if(!results.length){el.className='';el.innerHTML='';return;}
+el.className='open';var h='';
+for(var i=0;i<results.length;i++){
+var e=results[i].entry,k=e.k,href=e.m+'.html';
+if(k==='fn'||k==='pfn')href+='#fn-'+encodeURIComponent(e.n);
+else if(k==='type'||k==='ptype')href+='#type-'+encodeURIComponent(e.n);
+else if(k==='interface')href+='#iface-'+encodeURIComponent(e.n);
+var kc='sr-'+k;
+h+='<a class="sr-item" href="'+href+'">'+
+'<span class="sr-kind '+kc+'">'+k+'</span>'+
+'<span class="sr-name">'+esc(e.n)+'</span>'+
+'<span class="sr-mod">'+esc(e.m)+'</span></a>';
+if(e.d)h+='<div class="sr-doc">'+esc(e.d.substring(0,100))+'</div>';
+if(i<results.length-1)h+='<div class="sr-sep"></div>';
+}el.innerHTML=h;}
+
+/* HTML escape helper */
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+
+/* Search handler — uses the modal search input */
+var si=document.getElementById('search-input');
+if(si)si.addEventListener('input',function(){
+var q=this.value.trim();
+if(!q||!SI){renderSR([]);return;}
+var results=[];
+for(var i=0;i<SI.length;i++){
+var sc=scoreEntry(q,SI[i]);
+if(sc>0)results.push({entry:SI[i],score:sc});
+}
+results.sort(function(a,b){return b.score-a.score;});
+renderSR(results.slice(0,25));
+});
+</script></body></html>
