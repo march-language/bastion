@@ -36,6 +36,11 @@ fn initial() : State do
   { count: 0 }
 end
 
+doc "The island's state when mounted with no saved state: the initial count."
+fn create(_props : String) : State do
+  initial()
+end
+
 doc """
 Apply a message to the current state and return the next state.
 

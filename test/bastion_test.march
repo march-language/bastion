@@ -20,31 +20,11 @@ import IslandCss
 import IslandAssets
 import Islands
 import Test
-import Bastion.Session
+alias Bastion.Session as Session
 
 -- ── Conn construction helpers (for Router / Middleware / etc. tests) ──
 --
--- Structural mirror of HttpServer.Conn so we can build test values
--- without a live TCP socket.  All HttpServer accessors work on these
--- because March matches types structurally at runtime.
-
-ptype Upgrade = NoUpgrade | WebSocketUpgrade(a)
-
-ptype Conn = Conn(
-  Int,                    -- fd
-  Atom,                   -- request method
-  String,                 -- path (raw)
-  List(String),           -- path_info (split segments, empty filtered)
-  String,                 -- query_string
-  List(Header),           -- request headers
-  String,                 -- request body
-  Int,                    -- response status (0 = not set)
-  List(Header),           -- response headers
-  String,                 -- response body
-  Bool,                   -- halted?
-  List((String, String)), -- assigns
-  Upgrade                 -- websocket upgrade
-)
+-- Tests build HttpServer.Conn values directly, without a live TCP socket.
 
 pfn make_conn(meth, path_, qs, req_hdrs, req_body) do
   let parts = List.filter(String.split(path_, "/"), fn s -> !(String.is_empty(s)))
