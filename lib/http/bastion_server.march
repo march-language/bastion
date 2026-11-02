@@ -57,6 +57,18 @@ mod BastionServer do
   end
 
   doc """
+  Like `start_plug`, but listen on one address only: `host` is a dotted IPv4
+  address, e.g. "127.0.0.1" for a server reachable from this machine alone.
+
+  Example:
+    BastionServer.start_plug_at("127.0.0.1", pipeline, Bastion.default_opts(4000))
+  """
+  fn start_plug_at(host : String, plug : Conn -> Conn, opts : Opts) : Unit do
+    HttpServer.bind_host(host)
+    start_plug(plug, opts)
+  end
+
+  doc """
   Start the server in a subprocess that handles exactly n requests, then exits.
   Returns an integer handle that can be passed to BastionServer.wait_for/1.
   Useful for integration tests — lets the test drive request count.

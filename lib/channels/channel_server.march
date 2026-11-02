@@ -101,7 +101,7 @@ mod Bastion.ChannelServer do
 
   Requests to any other path pass through unchanged.
   """
-  fn plug(routes : ChannelRoutes(cc)) do
+  fn plug(routes : ChannelRoutes(Channel.ChannelConn)) do
     plug_at("/_bastion/channel", routes)
   end
 
@@ -110,7 +110,7 @@ mod Bastion.ChannelServer do
 
       HttpServer.plug(ChannelServer.plug_at("/socket/websocket", routes))
   """
-  fn plug_at(path : String, routes : ChannelRoutes(cc)) do
+  fn plug_at(path : String, routes : ChannelRoutes(Channel.ChannelConn)) do
     fn conn -> do
       if HttpServer.path(conn) == path do
         WebSocket.upgrade(conn, fn ws_sock ->
@@ -131,8 +131,8 @@ mod Bastion.ChannelServer do
 
   pfn channel_loop(
     ws_sock,
-    active_conns : List((String, cc)),
-    routes : ChannelRoutes(cc),
+    active_conns : List((String, Channel.ChannelConn)),
+    routes : ChannelRoutes(Channel.ChannelConn),
     conn_id : String
   ) do
     match WebSocket.recv(ws_sock) do
@@ -154,10 +154,10 @@ mod Bastion.ChannelServer do
   pfn handle_frame(
     ws_sock,
     text : String,
-    active_conns : List((String, cc)),
-    routes : ChannelRoutes(cc),
+    active_conns : List((String, Channel.ChannelConn)),
+    routes : ChannelRoutes(Channel.ChannelConn),
     conn_id : String
-  ) : List((String, cc)) do
+  ) : List((String, Channel.ChannelConn)) do
     match Json.parse(text) do
     Err(_) -> active_conns
     Ok(msg) ->
@@ -184,10 +184,10 @@ mod Bastion.ChannelServer do
     topic : String,
     params_json : String,
     ref : String,
-    active_conns : List((String, cc)),
-    routes : ChannelRoutes(cc),
+    active_conns : List((String, Channel.ChannelConn)),
+    routes : ChannelRoutes(Channel.ChannelConn),
     conn_id : String
-  ) : List((String, cc)) do
+  ) : List((String, Channel.ChannelConn)) do
     -- Already joined — idempotent OK
     match find_active(active_conns, topic) do
     Some(_) ->

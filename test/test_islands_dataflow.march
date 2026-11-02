@@ -18,7 +18,6 @@ needs IO.Mut
 
 import Islands
 import IslandView
-import IslandSocket
 import Test
 
 -- ── Helpers ───────────────────────────────────────────────────────────────

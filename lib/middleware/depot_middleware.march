@@ -29,6 +29,7 @@
 mod Depot.Middleware do
 
   needs IO.NetConnect
+  needs IO.Mut
   needs IO.Random
   needs IO.Spawn
 
