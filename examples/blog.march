@@ -17,6 +17,7 @@
 --   forge run examples/blog.march
 
 mod Blog do
+  needs IO
 
   -- ── Hardcoded post store ─────────────────────────────────────────────────
   -- Each post is a triple (id, title, body).  All strings so we can match the
@@ -42,9 +43,9 @@ mod Blog do
   pfn post_to_json(post : (String, String, String)) : String do
     match post do
     (id, title, body) -> do
-      let id_enc    = Json.encode_string(id)
-      let title_enc = Json.encode_string(title)
-      let body_enc  = Json.encode_string(body)
+      let id_enc    = Json.to_string(Json.encode_string(id))
+      let title_enc = Json.to_string(Json.encode_string(title))
+      let body_enc  = Json.to_string(Json.encode_string(body))
       "{\"id\":" ++ id_enc ++ ",\"title\":" ++ title_enc ++ ",\"body\":" ++ body_enc ++ "}"
     end
     end
@@ -79,10 +80,10 @@ mod Blog do
   -- GET /posts  — list posts; honours optional ?page= query param
   fn list_posts(conn : Conn) : Conn do
     let posts = seed_posts()
-    let page  = Request.query_param(conn, "page")
+    let page  = Request.get_query_param(conn, "page")
     let note  = match page do
                 None    -> ""
-                Some(p) -> ",\"page\":" ++ Json.encode_string(p)
+                Some(p) -> ",\"page\":" ++ Json.to_string(Json.encode_string(p))
                 end
     let body  = "{\"posts\":" ++ posts_to_json(posts) ++ note ++ "}"
     Response.json(conn, 200, body)
@@ -153,7 +154,7 @@ mod Blog do
 
   -- ── Entry point ───────────────────────────────────────────────────────────
 
-  fn main() : Unit do
+  fn main(cap : Cap(IO)) : Unit do
     let router = build_router()
 
     -- Static files are served by a standalone plug in front of the router,

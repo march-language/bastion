@@ -22,14 +22,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # BastionServer.start_plug_at needs HttpServer.bind_host, which no March
-      # release has yet: build March at the commit that adds it
-      # (march-language/march#1043). Pin a release here, and in
-      # .march-version, once one includes it.
+      # Pinned to a March release; keep it in step with .march-version.
+      # v0.7.0 is the first release with HttpServer.bind_host, which
+      # BastionServer.start_plug_at needs (march-language/march#1043).
       - name: Set up March
         uses: march-language/setup-march@main
         with:
-          march-version: 6c93ef06ce17f4ddada5c6f187eae9078455aff8
+          march-version: v0.7.0
 
       # blake3 is a dynamic dependency of the march binary.  setup-march builds
       # it during a cache miss (into /tmp/blake3) but does not persist the system
